@@ -1,0 +1,20 @@
+services:
+  retrack_db:
+    image: postgres:16
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+      - POSTGRES_DB=retrack
+    volumes:
+      - db_vol:/var/lib/postgresql/data
+    networks:
+      - net
+
+volumes:
+  db_vol:
+    driver: local
+
+networks:
+  net:
+    driver: bridge

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16" height="16" role="img" version="1.1" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+ <rect width="16" height="16" rx="3" fill="#fed047" stroke-width="6.8791"/>
+ <path d="m4 5v-0.8c0-2.32 1.79-4.2 4-4.2s4 1.88 4 4.2v0.8h1.143c0.473 0 0.857 0.448 0.857 1v9c0 0.552-0.384 1-0.857 1h-10.286c-0.473 0-0.857-0.448-0.857-1v-9c0-0.552 0.384-1 0.857-1zm-1 10h10v-9h-10zm8-10.64c0-1.856-1.343-3.36-3-3.36s-3 1.504-3 3.36v0.64h6z" display="none" fill="#642340"/>
+ <text x="1.9564967" y="11.5" fill="#fed047" font-family="'JetBrains Mono NL'" font-size="25.333px" font-weight="300" xml:space="preserve"> <tspan x="1.9564967" y="11.5" fill="#642340" font-family="'JetBrains Mono NL'" font-size="10px" font-weight="600" style="font-variant-caps:normal;font-variant-east-asian:normal;font-variant-ligatures:normal;font-variant-numeric:normal">R</tspan></text>
+</svg>

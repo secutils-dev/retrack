@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    INSERT INTO trackers_data (id, tracker_id, data, created_at)\n    VALUES ( $1, $2, $3, $4 )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e05a8b0d73d314eeeeae5d448a2b471e31c59b10281712f82a217d37ec42da4"
+}
