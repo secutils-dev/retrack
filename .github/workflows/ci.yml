@@ -12,6 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  DATABASE_URL: postgres://postgres@localhost:5432/retrack
 
 jobs:
   ci:
@@ -20,9 +21,19 @@ jobs:
     strategy:
       matrix:
         rust: [ stable ]
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v3
         name: Checkout
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
 
       # Always install nightly toolchain for `Rustfmt`.
       - name: Install toolchain ${{ matrix.rust }}
@@ -37,6 +48,13 @@ jobs:
 
       - name: Check format
         run: cargo +nightly fmt --all -- --check
+
+      - name: Check database schema
+        run: |
+          cargo install --force sqlx-cli
+          cargo sqlx database create
+          cargo sqlx migrate run
+          cargo sqlx prepare --check
 
       - name: Test (default features)
         run: cargo test
