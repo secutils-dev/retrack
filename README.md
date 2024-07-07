@@ -9,7 +9,7 @@ running,
 you [can run it locally with the following Docker Compose file:](https://docs.docker.com/language/rust/develop/)
 
 ```shell
-docker-compose -f ./dev/docker/postgres.yml up --build --force-recreate
+docker-compose -f ./dev/docker/postgres.yml --env-file ./.env up --build --force-recreate
 ```
 
 To remove everything and start from scratch, run:
