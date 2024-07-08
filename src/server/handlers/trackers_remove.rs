@@ -33,7 +33,7 @@ mod tests {
         server::{
             handlers::trackers_remove::trackers_remove, server_state::tests::mock_server_state,
         },
-        trackers::{TrackerCreateParams, TrackerSettings},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
     };
     use actix_web::{
         http::Method,
@@ -74,13 +74,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
         let trackers = server_state.api.trackers().get_trackers().await?;

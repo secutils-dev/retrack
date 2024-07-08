@@ -33,7 +33,7 @@ impl<'pool> TrackersDatabaseExt<'pool> {
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, url, job_id, job_config, data, created_at
+SELECT id, name, url, target, config, created_at, job_id, job_needed
 FROM trackers
 ORDER BY created_at
                 "#
@@ -54,7 +54,7 @@ ORDER BY created_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, job_id, job_config, data, created_at
+    SELECT id, name, url, target, config, created_at, job_id, job_needed
     FROM trackers
     WHERE id = $1
                     "#,
@@ -71,16 +71,17 @@ ORDER BY created_at
         let raw_tracker = RawTracker::try_from(tracker)?;
         let result = query!(
             r#"
-    INSERT INTO trackers (id, name, url, job_id, job_config, data, created_at)
-    VALUES ( $1, $2, $3, $4, $5, $6, $7 )
+    INSERT INTO trackers (id, name, url, target, config, created_at, job_needed, job_id)
+    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8 )
             "#,
             raw_tracker.id,
             raw_tracker.name,
             raw_tracker.url,
+            raw_tracker.target,
+            raw_tracker.config,
+            raw_tracker.created_at,
+            raw_tracker.job_needed,
             raw_tracker.job_id,
-            raw_tracker.job_config,
-            raw_tracker.data,
-            raw_tracker.created_at
         )
         .execute(self.pool)
         .await;
@@ -109,14 +110,15 @@ ORDER BY created_at
         let result = query!(
             r#"
 UPDATE trackers
-SET name = $2, url = $3, job_config = $4, data = $5, job_id = $6
+SET name = $2, url = $3, target = $4, config = $5, job_needed = $6, job_id = $7
 WHERE id = $1
         "#,
             raw_tracker.id,
             raw_tracker.name,
             raw_tracker.url,
-            raw_tracker.job_config,
-            raw_tracker.data,
+            raw_tracker.target,
+            raw_tracker.config,
+            raw_tracker.job_needed,
             raw_tracker.job_id
         )
         .execute(self.pool)
@@ -265,9 +267,9 @@ ORDER BY data.created_at
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, url, job_id, job_config, data, created_at
+SELECT id, name, url, target, config, created_at, job_needed, job_id
 FROM trackers
-WHERE job_config IS NOT NULL AND job_id IS NULL
+WHERE job_needed = TRUE AND job_id IS NULL
 ORDER BY created_at
                 "#
         )
@@ -278,7 +280,7 @@ ORDER BY created_at
         for raw_tracker in raw_trackers {
             let tracker = Tracker::try_from(raw_tracker)?;
             // Tracker without revisions shouldn't be scheduled.
-            if tracker.settings.revisions > 0 {
+            if tracker.config.revisions > 0 {
                 trackers.push(tracker);
             }
         }
@@ -298,8 +300,8 @@ ORDER BY created_at
             loop {
                  let records = query!(
 r#"
-SELECT trackers.id, trackers.name, trackers.url, trackers.job_id, trackers.job_config,
-       trackers.data, trackers.created_at, jobs.extra
+SELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config,
+       trackers.created_at, trackers.job_needed, trackers.job_id, jobs.extra
 FROM trackers
 INNER JOIN scheduler_jobs as jobs
 ON trackers.job_id = jobs.id
@@ -329,10 +331,11 @@ LIMIT $2;
                         id: record.id,
                         name: record.name,
                         url: record.url,
-                        job_id: record.job_id,
-                        job_config: record.job_config,
-                        data: record.data,
+                        target: record.target,
+                        config: record.config,
                         created_at: record.created_at,
+                        job_needed: record.job_needed,
+                        job_id: record.job_id,
                     })?;
                 }
 
@@ -348,7 +351,7 @@ LIMIT $2;
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, job_id, job_config, data, created_at
+    SELECT id, name, url, target, config, created_at, job_needed, job_id
     FROM trackers
     WHERE job_id = $1
                     "#,

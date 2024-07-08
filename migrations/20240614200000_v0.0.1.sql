@@ -4,13 +4,15 @@ CREATE COLLATION IF NOT EXISTS case_insensitive (provider = icu, locale = 'und-u
 -- Table to store trackers.
 CREATE TABLE IF NOT EXISTS trackers
 (
-    id         UUID PRIMARY KEY NOT NULL,
-    name       TEXT             NOT NULL UNIQUE COLLATE case_insensitive,
-    url        TEXT             NOT NULL COLLATE case_insensitive,
-    job_id     UUID UNIQUE,
-    job_config BYTEA,
-    data       BYTEA            NOT NULL,
-    created_at TIMESTAMPTZ      NOT NULL
+    id          UUID PRIMARY KEY NOT NULL,
+    name        TEXT             NOT NULL UNIQUE COLLATE case_insensitive,
+    url         TEXT             NOT NULL COLLATE case_insensitive,
+    target      BYTEA            NOT NULL,
+    config      BYTEA            NOT NULL,
+    created_at  TIMESTAMPTZ      NOT NULL,
+    -- Internal fields for tracking job status.
+    job_needed  BOOL             NOT NULL,
+    job_id      UUID UNIQUE
 );
 
 -- Table to store trackers captured data.

@@ -112,7 +112,8 @@ impl TrackersFetchJob {
 
                     // Check if the tracker has a retry strategy.
                     let retry_strategy = tracker
-                        .job_config
+                        .config
+                        .job
                         .as_ref()
                         .and_then(|job_config| job_config.retry_strategy);
                     let retry_state = if let Some(retry_strategy) = retry_strategy {
@@ -198,7 +199,7 @@ impl TrackersFetchJob {
             return Ok(None);
         };
 
-        if tracker.settings.revisions == 0 || tracker.job_config.is_none() {
+        if tracker.config.revisions == 0 || tracker.config.job.is_none() {
             warn!(
                 tracker.id = %tracker.id,
                 tracker.name = tracker.name,
@@ -222,7 +223,8 @@ impl TrackersFetchJob {
         ET::Error: EmailTransportError,
     {
         let enable_notifications = tracker
-            .job_config
+            .config
+            .job
             .as_ref()
             .map(|job_config| job_config.notifications)
             .unwrap_or_default();
@@ -242,7 +244,7 @@ impl TrackersFetchJob {
             error!(
                 tracker.id = %tracker.id,
                 tracker.name = tracker.name,
-                "Failed to schedule a notification for web page tracker: {err:?}."
+                "Failed to schedule a notification for tracker: {err:?}."
             );
         }
     }
@@ -261,7 +263,10 @@ mod tests {
             mock_schedule_in_secs, mock_scheduler, mock_scheduler_job, WebScraperContentRequest,
             WebScraperContentRequestScripts, WebScraperContentResponse, WebScraperErrorResponse,
         },
-        trackers::{Tracker, TrackerCreateParams, TrackerDataRevision, TrackerSettings},
+        trackers::{
+            Tracker, TrackerConfig, TrackerCreateParams, TrackerDataRevision, TrackerTarget,
+            TrackerWebPageTarget,
+        },
     };
     use cron::Schedule;
     use futures::StreamExt;
@@ -361,17 +366,17 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
                 url: "https://localhost:1234/my/app?q=2".parse()?,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 0,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()
@@ -427,21 +432,23 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            settings: TrackerSettings {
+            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_secs(2)),
+            }),
+            config: TrackerConfig {
                 revisions: 1,
-                delay: Duration::from_secs(2),
                 extractor: Some("return document.body.innerText;".to_string()),
                 headers: Some(
                     [("cookie".to_string(), "my-cookie".to_string())]
                         .into_iter()
                         .collect(),
                 ),
+                job: Some(SchedulerJobConfig {
+                    schedule: tracker_schedule,
+                    retry_strategy: None,
+                    notifications: false,
+                }),
             },
-            job_config: Some(SchedulerJobConfig {
-                schedule: tracker_schedule,
-                retry_strategy: None,
-                notifications: false,
-            }),
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -559,17 +566,19 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            settings: TrackerSettings {
+            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_secs(2)),
+            }),
+            config: TrackerConfig {
                 revisions: 2,
-                delay: Duration::from_secs(2),
                 extractor: Default::default(),
                 headers: Default::default(),
+                job: Some(SchedulerJobConfig {
+                    schedule: tracker_schedule,
+                    retry_strategy: None,
+                    notifications: true,
+                }),
             },
-            job_config: Some(SchedulerJobConfig {
-                schedule: tracker_schedule,
-                retry_strategy: None,
-                notifications: true,
-            }),
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -703,17 +712,19 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            settings: TrackerSettings {
+            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_secs(2)),
+            }),
+            config: TrackerConfig {
                 revisions: 2,
-                delay: Duration::from_secs(2),
                 extractor: Default::default(),
                 headers: Default::default(),
+                job: Some(SchedulerJobConfig {
+                    schedule: tracker_schedule,
+                    retry_strategy: None,
+                    notifications: true,
+                }),
             },
-            job_config: Some(SchedulerJobConfig {
-                schedule: tracker_schedule,
-                retry_strategy: None,
-                notifications: true,
-            }),
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -842,20 +853,23 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            settings: TrackerSettings {
+            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_secs(2)),
+            }),
+            config: TrackerConfig {
                 revisions: 2,
-                delay: Duration::from_secs(2),
                 extractor: Default::default(),
                 headers: Default::default(),
-            },
-            job_config: Some(SchedulerJobConfig {
-                schedule: tracker_schedule,
-                retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                    interval: Duration::from_secs(1),
-                    max_attempts: 1,
+                job: Some(SchedulerJobConfig {
+                    schedule: tracker_schedule,
+                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                        interval: Duration::from_secs(1),
+                        max_attempts: 1,
+                    }),
+                    notifications: true,
                 }),
-                notifications: true,
-            }),
+            },
+
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -1019,20 +1033,22 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            settings: TrackerSettings {
+            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_secs(2)),
+            }),
+            config: TrackerConfig {
                 revisions: 2,
-                delay: Duration::from_secs(2),
                 extractor: Default::default(),
                 headers: Default::default(),
-            },
-            job_config: Some(SchedulerJobConfig {
-                schedule: tracker_schedule,
-                retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                    interval: Duration::from_secs(1),
-                    max_attempts: 1,
+                job: Some(SchedulerJobConfig {
+                    schedule: tracker_schedule,
+                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                        interval: Duration::from_secs(1),
+                        max_attempts: 1,
+                    }),
+                    notifications: true,
                 }),
-                notifications: true,
-            }),
+            },
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(

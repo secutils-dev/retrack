@@ -7,7 +7,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerDataRevision {
-    /// Unique web page tracker data revision id (UUIDv7).
+    /// Unique tracker data revision id (UUIDv7).
     pub id: Uuid,
     /// ID of the tracker captured data belongs to.
     #[serde(skip_serializing)]

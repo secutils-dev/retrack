@@ -8,7 +8,7 @@ use crate::{
 };
 use serde_json::json;
 
-/// Compiles web page tracker content changes template as an email.
+/// Compiles tracker content changes template as an email.
 pub async fn compile_to_email<DR: DnsResolver, ET: EmailTransport>(
     api: &Api<DR, ET>,
     tracker_name: &str,

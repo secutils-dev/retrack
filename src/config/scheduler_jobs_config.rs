@@ -22,9 +22,9 @@ impl Default for SchedulerJobsConfig {
     fn default() -> Self {
         Self {
             trackers_schedule: Schedule::from_str("0 * * * * * *")
-                .expect("Cannot parse web page trackers schedule job schedule."),
+                .expect("Cannot parse trackers schedule job schedule."),
             trackers_fetch: Schedule::from_str("0 * * * * * *")
-                .expect("Cannot parse web page trackers fetch job schedule."),
+                .expect("Cannot parse trackers fetch job schedule."),
             notifications_send: Schedule::from_str("0/30 * * * * * *")
                 .expect("Cannot parse notifications send job schedule."),
         }

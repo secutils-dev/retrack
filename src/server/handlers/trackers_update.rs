@@ -43,7 +43,7 @@ mod tests {
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
         tests::mock_config,
-        trackers::{TrackerCreateParams, TrackerSettings},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
     };
     use actix_web::{
         body::MessageBody,
@@ -74,13 +74,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/app")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
         let trackers = server_state.api.trackers().get_trackers().await?;
@@ -93,23 +95,23 @@ mod tests {
                 .set_json(json!({
                     "name": "new_name_one".to_string(),
                     "url": "https://retrack.dev/new-app",
-                    "settings": {
+                    "config": {
                         "revisions": 5,
                         "delay": 5000,
                         "extractor": "return document.body.innerHTML;",
                         "headers": {
                             "cookie": "my-cookie"
+                        },
+                        "job": {
+                            "schedule": "@daily",
+                            "retryStrategy": {
+                                "type": "constant",
+                                "interval": 500000,
+                                "maxAttempts": 5
+                            },
+                            "notifications": true
                         }
                     },
-                    "jobConfig": {
-                        "schedule": "@daily",
-                        "retryStrategy": {
-                            "type": "constant",
-                            "interval": 500000,
-                            "maxAttempts": 5
-                        },
-                        "notifications": true
-                    }
                 }))
                 .to_request(),
         )
@@ -124,10 +126,9 @@ mod tests {
             .unwrap();
         assert_eq!(tracker.name, "new_name_one");
         assert_eq!(tracker.url, "https://retrack.dev/new-app".parse()?);
-        assert_debug_snapshot!(tracker.settings, @r###"
-        TrackerSettings {
+        assert_debug_snapshot!(tracker.config, @r###"
+        TrackerConfig {
             revisions: 5,
-            delay: 5s,
             extractor: Some(
                 "return document.body.innerHTML;",
             ),
@@ -136,21 +137,19 @@ mod tests {
                     "cookie": "my-cookie",
                 },
             ),
+            job: Some(
+                SchedulerJobConfig {
+                    schedule: "@daily",
+                    retry_strategy: Some(
+                        Constant {
+                            interval: 500s,
+                            max_attempts: 5,
+                        },
+                    ),
+                    notifications: true,
+                },
+            ),
         }
-        "###);
-        assert_debug_snapshot!(tracker.job_config, @r###"
-        Some(
-            SchedulerJobConfig {
-                schedule: "@daily",
-                retry_strategy: Some(
-                    Constant {
-                        interval: 500s,
-                        max_attempts: 5,
-                    },
-                ),
-                notifications: true,
-            },
-        )
         "###);
 
         Ok(())
@@ -166,13 +165,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
         let trackers = server_state.api.trackers().get_trackers().await?;

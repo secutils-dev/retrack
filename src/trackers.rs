@@ -2,33 +2,34 @@ mod api_ext;
 mod database_ext;
 
 mod tracker;
+mod tracker_config;
 mod tracker_data_revision;
 mod tracker_data_revisions_diff;
-mod tracker_settings;
+mod tracker_target;
 mod web_scraper;
 
 pub use self::{
     api_ext::{TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams},
     tracker::Tracker,
+    tracker_config::TrackerConfig,
     tracker_data_revision::TrackerDataRevision,
-    tracker_settings::TrackerSettings,
+    tracker_target::{TrackerJsonApiTarget, TrackerTarget, TrackerWebPageTarget},
 };
 
 #[cfg(test)]
 pub mod tests {
+    pub use crate::trackers::web_scraper::{
+        WebScraperContentRequest, WebScraperContentRequestScripts, WebScraperContentResponse,
+        WebScraperErrorResponse,
+    };
     use crate::{
         scheduler::SchedulerJobConfig,
-        trackers::{Tracker, TrackerSettings},
+        trackers::{Tracker, TrackerConfig, TrackerTarget, TrackerWebPageTarget},
     };
     use std::time::Duration;
     use time::OffsetDateTime;
     use url::Url;
     use uuid::Uuid;
-
-    pub use crate::trackers::web_scraper::{
-        WebScraperContentRequest, WebScraperContentRequestScripts, WebScraperContentResponse,
-        WebScraperErrorResponse,
-    };
 
     pub struct MockWebPageTrackerBuilder {
         tracker: Tracker,
@@ -46,13 +47,15 @@ pub mod tests {
                     id,
                     name: name.into(),
                     job_id: None,
-                    job_config: None,
                     url: Url::parse(url)?,
-                    settings: TrackerSettings {
+                    target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                        delay: Some(Duration::from_millis(2000)),
+                    }),
+                    config: TrackerConfig {
                         revisions,
-                        delay: Duration::from_millis(2000),
                         extractor: Default::default(),
                         headers: Default::default(),
+                        job: None,
                     },
                     created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 },
@@ -60,7 +63,7 @@ pub mod tests {
         }
 
         pub fn with_schedule<S: Into<String>>(mut self, schedule: S) -> Self {
-            self.tracker.job_config = Some(SchedulerJobConfig {
+            self.tracker.config.job = Some(SchedulerJobConfig {
                 schedule: schedule.into(),
                 retry_strategy: None,
                 notifications: false,
@@ -69,7 +72,7 @@ pub mod tests {
         }
 
         pub fn with_job_config(mut self, job_config: SchedulerJobConfig) -> Self {
-            self.tracker.job_config = Some(job_config);
+            self.tracker.config.job = Some(job_config);
             self
         }
 
@@ -78,13 +81,13 @@ pub mod tests {
             self
         }
 
-        pub fn with_delay_millis(mut self, millis: u64) -> Self {
-            self.tracker.settings.delay = Duration::from_millis(millis);
+        pub fn with_target(mut self, target: TrackerTarget) -> Self {
+            self.tracker.target = target;
             self
         }
 
         pub fn with_extractor(mut self, extractor: String) -> Self {
-            self.tracker.settings.extractor = Some(extractor);
+            self.tracker.config.extractor = Some(extractor);
             self
         }
 

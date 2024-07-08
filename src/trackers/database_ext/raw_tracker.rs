@@ -1,8 +1,9 @@
 use crate::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-    trackers::{Tracker, TrackerSettings},
+    trackers::{Tracker, TrackerConfig, TrackerJsonApiTarget, TrackerTarget, TrackerWebPageTarget},
 };
-use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
+use serde_with::serde_as;
 use std::{collections::HashMap, time::Duration};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -12,88 +13,100 @@ pub(super) struct RawTracker {
     pub id: Uuid,
     pub name: String,
     pub url: String,
-    pub job_id: Option<Uuid>,
-    pub job_config: Option<Vec<u8>>,
-    pub data: Vec<u8>,
+    pub config: Vec<u8>,
+    pub target: Vec<u8>,
     pub created_at: OffsetDateTime,
+    pub job_id: Option<Uuid>,
+    pub job_needed: bool,
+}
+
+#[serde_as]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+pub struct RawTrackerConfig {
+    revisions: usize,
+    extractor: Option<String>,
+    headers: Option<HashMap<String, String>>,
+    job: Option<RawSchedulerJobConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-pub(super) struct RawTrackerData {
-    pub revisions: usize,
-    pub delay: u64,
-    pub scripts: Option<String>,
-    pub headers: Option<HashMap<String, String>>,
-}
-
-#[derive(Serialize, Deserialize)]
 struct RawSchedulerJobConfig(String, Option<RawSchedulerJobRetryStrategy>, bool);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 enum RawSchedulerJobRetryStrategy {
     Constant(Duration, u32),
     Exponential(Duration, u32, Duration, u32),
     Linear(Duration, Duration, Duration, u32),
 }
 
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+enum RawTrackerTarget {
+    WebPage(TrackerWebPageTarget),
+    JsonApi(TrackerJsonApiTarget),
+}
+
 impl TryFrom<RawTracker> for Tracker {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTracker) -> Result<Self, Self::Error> {
-        let raw_data = postcard::from_bytes::<RawTrackerData>(&raw.data)?;
+        let raw_config = postcard::from_bytes::<RawTrackerConfig>(&raw.config)?;
 
-        let job_config = if let Some(job_config) = raw.job_config {
-            let RawSchedulerJobConfig(schedule, retry_strategy, notifications) =
-                postcard::from_bytes(&job_config)?;
-            Some(SchedulerJobConfig {
-                schedule,
-                retry_strategy: retry_strategy.map(|retry_strategy| match retry_strategy {
-                    RawSchedulerJobRetryStrategy::Constant(interval, max_attempts) => {
-                        SchedulerJobRetryStrategy::Constant {
-                            interval,
-                            max_attempts,
+        let job_config =
+            if let Some(RawSchedulerJobConfig(schedule, retry_strategy, notifications)) =
+                raw_config.job
+            {
+                Some(SchedulerJobConfig {
+                    schedule,
+                    retry_strategy: retry_strategy.map(|retry_strategy| match retry_strategy {
+                        RawSchedulerJobRetryStrategy::Constant(interval, max_attempts) => {
+                            SchedulerJobRetryStrategy::Constant {
+                                interval,
+                                max_attempts,
+                            }
                         }
-                    }
-                    RawSchedulerJobRetryStrategy::Exponential(
-                        initial_interval,
-                        multiplier,
-                        max_interval,
-                        max_attempts,
-                    ) => SchedulerJobRetryStrategy::Exponential {
-                        initial_interval,
-                        multiplier,
-                        max_interval,
-                        max_attempts,
-                    },
-                    RawSchedulerJobRetryStrategy::Linear(
-                        initial_interval,
-                        increment,
-                        max_interval,
-                        max_attempts,
-                    ) => SchedulerJobRetryStrategy::Linear {
-                        initial_interval,
-                        increment,
-                        max_interval,
-                        max_attempts,
-                    },
-                }),
-                notifications,
-            })
-        } else {
-            None
-        };
+                        RawSchedulerJobRetryStrategy::Exponential(
+                            initial_interval,
+                            multiplier,
+                            max_interval,
+                            max_attempts,
+                        ) => SchedulerJobRetryStrategy::Exponential {
+                            initial_interval,
+                            multiplier,
+                            max_interval,
+                            max_attempts,
+                        },
+                        RawSchedulerJobRetryStrategy::Linear(
+                            initial_interval,
+                            increment,
+                            max_interval,
+                            max_attempts,
+                        ) => SchedulerJobRetryStrategy::Linear {
+                            initial_interval,
+                            increment,
+                            max_interval,
+                            max_attempts,
+                        },
+                    }),
+                    notifications,
+                })
+            } else {
+                None
+            };
 
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
             url: raw.url.parse()?,
+            target: match postcard::from_bytes::<RawTrackerTarget>(&raw.target)? {
+                RawTrackerTarget::WebPage(target) => TrackerTarget::WebPage(target),
+                RawTrackerTarget::JsonApi(target) => TrackerTarget::JsonApi(target),
+            },
             job_id: raw.job_id,
-            job_config,
-            settings: TrackerSettings {
-                revisions: raw_data.revisions,
-                delay: Duration::from_millis(raw_data.delay),
-                extractor: raw_data.scripts,
-                headers: raw_data.headers,
+            config: TrackerConfig {
+                revisions: raw_config.revisions,
+                extractor: raw_config.extractor,
+                headers: raw_config.headers,
+                job: job_config,
             },
             created_at: raw.created_at,
         })
@@ -104,20 +117,13 @@ impl TryFrom<&Tracker> for RawTracker {
     type Error = anyhow::Error;
 
     fn try_from(item: &Tracker) -> Result<Self, Self::Error> {
-        let raw_data = RawTrackerData {
-            revisions: item.settings.revisions,
-            delay: item.settings.delay.as_millis() as u64,
-            scripts: item.settings.extractor.clone(),
-            headers: item.settings.headers.clone(),
-        };
-
         let job_config = if let Some(SchedulerJobConfig {
             schedule,
             retry_strategy,
             notifications,
-        }) = &item.job_config
+        }) = &item.config.job
         {
-            Some(postcard::to_stdvec(&RawSchedulerJobConfig(
+            Some(RawSchedulerJobConfig(
                 schedule.to_string(),
                 retry_strategy.map(|retry_strategy| match retry_strategy {
                     SchedulerJobRetryStrategy::Constant {
@@ -148,7 +154,7 @@ impl TryFrom<&Tracker> for RawTracker {
                     ),
                 }),
                 *notifications,
-            ))?)
+            ))
         } else {
             None
         };
@@ -157,10 +163,21 @@ impl TryFrom<&Tracker> for RawTracker {
             id: item.id,
             name: item.name.clone(),
             url: item.url.to_string(),
-            job_id: item.job_id,
-            job_config,
-            data: postcard::to_stdvec(&raw_data)?,
+            target: postcard::to_stdvec(
+                &(match &item.target {
+                    TrackerTarget::WebPage(target) => RawTrackerTarget::WebPage(*target),
+                    TrackerTarget::JsonApi(target) => RawTrackerTarget::JsonApi(*target),
+                }),
+            )?,
+            config: postcard::to_stdvec(&RawTrackerConfig {
+                revisions: item.config.revisions,
+                extractor: item.config.extractor.clone(),
+                headers: item.config.headers.clone(),
+                job: job_config,
+            })?,
             created_at: item.created_at,
+            job_id: item.job_id,
+            job_needed: item.config.job.is_some(),
         })
     }
 }
@@ -170,7 +187,7 @@ mod tests {
     use super::RawTracker;
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{Tracker, TrackerSettings},
+        trackers::{Tracker, TrackerConfig, TrackerTarget, TrackerWebPageTarget},
     };
     use std::time::Duration;
     use time::OffsetDateTime;
@@ -184,25 +201,26 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev".to_string(),
-                job_id: None,
-                job_config: None,
-                data: vec![1, 0, 0, 0],
+                target: vec![0, 0],
+                config: vec![1, 0, 0, 0],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: None,
+                job_needed: false,
             })?,
             Tracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                job_id: None,
-                job_config: None,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Default::default(),
                     extractor: Default::default(),
-                    headers: Default::default()
+                    headers: Default::default(),
+                    job: None,
                 },
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?
+                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: None,
             }
         );
 
@@ -211,46 +229,47 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev".to_string(),
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_config: Some(vec![
-                    9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2, 120, 0,
-                    5, 1
-                ]),
-                data: vec![
-                    1, 208, 15, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109,
-                    101, 110, 116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77,
-                    76, 59, 1, 1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111,
-                    107, 105, 101
+                target: vec![0, 1, 208, 15],
+                config: vec![
+                    1, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109, 101, 110,
+                    116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
+                    1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105,
+                    101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
+                    120, 0, 5, 1
                 ],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
+                job_needed: true,
             })?,
             Tracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * *".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
-                        initial_interval: Duration::from_millis(1234),
-                        multiplier: 2,
-                        max_interval: Duration::from_secs(120),
-                        max_attempts: 5,
-                    }),
-                    notifications: true
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
                 }),
-                settings: TrackerSettings {
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Duration::from_millis(2000),
                     extractor: Some("return document.body.innerHTML;".to_string()),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()
                             .collect()
-                    )
+                    ),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * *".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
+                            initial_interval: Duration::from_millis(1234),
+                            multiplier: 2,
+                            max_interval: Duration::from_secs(120),
+                            max_attempts: 5,
+                        }),
+                        notifications: true
+                    }),
                 },
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?
+                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
             }
         );
 
@@ -264,25 +283,26 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                job_id: None,
-                job_config: None,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?
+                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: None,
             })?,
             RawTracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev/".to_string(),
-                job_id: None,
-                job_config: None,
-                data: vec![1, 0, 0, 0],
+                target: vec![0, 0],
+                config: vec![1, 0, 0, 0],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: None,
+                job_needed: false,
             }
         );
 
@@ -291,46 +311,47 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * *".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
-                        initial_interval: Duration::from_millis(1234),
-                        multiplier: 2,
-                        max_interval: Duration::from_secs(120),
-                        max_attempts: 5,
-                    }),
-                    notifications: true
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
                 }),
-                settings: TrackerSettings {
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Duration::from_millis(2000),
                     extractor: Some("return document.body.innerHTML;".to_string()),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()
                             .collect()
                     ),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * *".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
+                            initial_interval: Duration::from_millis(1234),
+                            multiplier: 2,
+                            max_interval: Duration::from_secs(120),
+                            max_attempts: 5,
+                        }),
+                        notifications: true
+                    }),
                 },
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?
+                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
             })?,
             RawTracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev/".to_string(),
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_config: Some(vec![
-                    9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2, 120, 0,
-                    5, 1
-                ]),
-                data: vec![
-                    1, 208, 15, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109,
-                    101, 110, 116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77,
-                    76, 59, 1, 1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111,
-                    107, 105, 101
+                target: vec![0, 1, 208, 15],
+                config: vec![
+                    1, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109, 101, 110,
+                    116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
+                    1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105,
+                    101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
+                    120, 0, 5, 1
                 ],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
+                job_needed: true,
             }
         );
 

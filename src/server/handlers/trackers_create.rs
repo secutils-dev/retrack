@@ -36,6 +36,7 @@ mod tests {
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
         tests::mock_config,
+        trackers::{TrackerTarget, TrackerWebPageTarget},
     };
     use actix_web::{
         body::MessageBody,
@@ -64,9 +65,12 @@ mod tests {
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
                     "url": "https://retrack.dev/app",
-                    "settings": {
-                        "revisions": 5,
+                    "target": {
+                        "type": "web:page",
                         "delay": 5000
+                    },
+                    "config": {
+                        "revisions": 5
                     }
                 }))
                 .to_request(),
@@ -78,8 +82,13 @@ mod tests {
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
-        assert_eq!(trackers[0].settings.revisions, 5);
-        assert_eq!(trackers[0].settings.delay.as_millis(), 5000);
+        assert_eq!(trackers[0].config.revisions, 5);
+        assert_eq!(
+            trackers[0].target,
+            TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_millis(5000))
+            })
+        );
 
         assert_eq!(
             serde_json::to_string(&trackers[0])?,
@@ -106,22 +115,25 @@ mod tests {
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
                     "url": "https://retrack.dev/app",
-                    "settings": {
+                    "target": {
+                        "type": "web:page",
+                        "delay": 5000
+                    },
+                    "config": {
                         "revisions": 5,
-                        "delay": 5000,
                         "extractor": "return document.body.innerHTML;",
                         "headers": {
                             "cookie": "my-cookie"
-                        }
-                    },
-                    "jobConfig": {
-                        "schedule": "@daily",
-                        "retryStrategy": {
-                            "type": "constant",
-                            "interval": 500000,
-                            "maxAttempts": 5
                         },
-                        "notifications": true
+                        "job": {
+                            "schedule": "@daily",
+                            "retryStrategy": {
+                                "type": "constant",
+                                "interval": 500000,
+                                "maxAttempts": 5
+                            },
+                            "notifications": true
+                        }
                     }
                 }))
                 .to_request(),
@@ -137,14 +149,19 @@ mod tests {
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
-        assert_eq!(trackers[0].settings.revisions, 5);
-        assert_eq!(trackers[0].settings.delay.as_millis(), 5000);
+        assert_eq!(trackers[0].config.revisions, 5);
         assert_eq!(
-            trackers[0].settings.extractor,
+            trackers[0].target,
+            TrackerTarget::WebPage(TrackerWebPageTarget {
+                delay: Some(Duration::from_millis(5000))
+            })
+        );
+        assert_eq!(
+            trackers[0].config.extractor,
             Some("return document.body.innerHTML;".to_string())
         );
         assert_eq!(
-            trackers[0].settings.headers,
+            trackers[0].config.headers,
             Some(
                 [("cookie".to_string(), "my-cookie".to_string())]
                     .iter()
@@ -153,7 +170,7 @@ mod tests {
             )
         );
         assert_eq!(
-            trackers[0].job_config,
+            trackers[0].config.job,
             Some(SchedulerJobConfig {
                 schedule: "@daily".to_string(),
                 retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
@@ -197,7 +214,7 @@ mod tests {
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
                     "url": "https://127.0.0.1/app",
-                    "settings": {
+                    "config": {
                         "revisions": 5,
                         "delay": 5000
 

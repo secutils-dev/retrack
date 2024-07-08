@@ -10,7 +10,7 @@ pub mod trackers_update;
 use crate::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     server::Status,
-    trackers::{Tracker, TrackerCreateParams, TrackerSettings, TrackerUpdateParams},
+    trackers::{Tracker, TrackerConfig, TrackerCreateParams, TrackerUpdateParams},
 };
 use utoipa::OpenApi;
 
@@ -36,7 +36,7 @@ use utoipa::OpenApi;
     components(schemas(
         Status,
         Tracker,
-        TrackerSettings,
+        TrackerConfig,
         TrackerCreateParams,
         TrackerUpdateParams,
         SchedulerJobConfig,

@@ -76,7 +76,7 @@ impl TrackersScheduleJob {
         }
 
         for tracker in unscheduled_trackers {
-            if tracker.settings.revisions == 0 {
+            if tracker.config.revisions == 0 {
                 error!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
@@ -85,7 +85,7 @@ impl TrackersScheduleJob {
                 continue;
             }
 
-            let schedule = if let Some(job_config) = tracker.job_config {
+            let schedule = if let Some(job_config) = tracker.config.job {
                 job_config.schedule
             } else {
                 error!(
@@ -115,7 +115,7 @@ mod tests {
     use crate::{
         scheduler::{scheduler_job::SchedulerJob, SchedulerJobConfig, SchedulerJobMetadata},
         tests::{mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job},
-        trackers::{TrackerCreateParams, TrackerSettings},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
     };
     use cron::Schedule;
     use futures::StreamExt;
@@ -225,17 +225,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "1 2 3 4 5 6 2030".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "1 2 3 4 5 6 2030".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -243,17 +245,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-two".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "1 2 3 4 5 6 2035".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "1 2 3 4 5 6 2035".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -261,17 +265,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-three".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=3")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "1 2 3 4 5 6 2040".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "1 2 3 4 5 6 2040".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -342,13 +348,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Default::default(),
                 },
-                job_config: None,
             })
             .await?;
 
@@ -394,17 +402,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 0,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "1 2 3 4 5 6 2030".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "1 2 3 4 5 6 2030".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 

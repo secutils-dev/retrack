@@ -1,4 +1,4 @@
-use crate::{scheduler::SchedulerJobConfig, trackers::TrackerSettings};
+use crate::trackers::{TrackerConfig, TrackerTarget};
 use serde::Serialize;
 use time::OffsetDateTime;
 use url::Url;
@@ -9,22 +9,20 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Tracker {
-    /// Unique web page tracker id (UUIDv7).
+    /// Unique tracker id (UUIDv7).
     pub id: Uuid,
-    /// Arbitrary name of the web page tracker.
+    /// Arbitrary name of the tracker.
     pub name: String,
-    /// URL of the web page to track.
+    /// URL of the resource (e.g., web page, API, or file) to track.
     pub url: Url,
-    /// ID of the optional job that triggers web page checking. If `None` when `job_config` is set,
-    /// then the job is not scheduled it.
+    /// Target of the tracker (web page, API, file).
+    pub target: TrackerTarget,
+    /// ID of the optional job that triggers tracker. If not set,then the job is not scheduled yet.
     #[serde(skip_serializing)]
     pub job_id: Option<Uuid>,
-    /// Configuration of the job that triggers web page checking, if configured.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub job_config: Option<SchedulerJobConfig>,
-    /// Settings of the web page tracker.
-    pub settings: TrackerSettings,
-    /// Date and time when the web page tracker was created.
+    /// Tracker config.
+    pub config: TrackerConfig,
+    /// Date and time when the tracker was created.
     #[serde(with = "time::serde::timestamp")]
     pub created_at: OffsetDateTime,
 }
@@ -34,6 +32,7 @@ mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         tests::MockWebPageTrackerBuilder,
+        trackers::{TrackerTarget, TrackerWebPageTarget},
     };
     use insta::assert_json_snapshot;
     use std::time::Duration;
@@ -47,16 +46,21 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_delay_millis(2500)
+        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(Duration::from_millis(2500)),
+        }))
         .build();
         assert_json_snapshot!(tracker, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
           "url": "http://localhost:1234/my/app?q=2",
-          "settings": {
-            "revisions": 3,
+          "target": {
+            "type": "web:page",
             "delay": 2500
+          },
+          "config": {
+            "revisions": 3
           },
           "createdAt": 946720800
         }
@@ -68,7 +72,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_delay_millis(2500)
+        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(Duration::from_millis(2500)),
+        }))
         .with_schedule("0 0 * * *")
         .build();
         assert_json_snapshot!(tracker, @r###"
@@ -76,13 +82,16 @@ mod tests {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
           "url": "http://localhost:1234/my/app?q=2",
-          "jobConfig": {
-            "schedule": "0 0 * * *",
-            "notifications": false
-          },
-          "settings": {
-            "revisions": 3,
+          "target": {
+            "type": "web:page",
             "delay": 2500
+          },
+          "config": {
+            "revisions": 3,
+            "job": {
+              "schedule": "0 0 * * *",
+              "notifications": false
+            }
           },
           "createdAt": 946720800
         }
@@ -94,7 +103,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_delay_millis(2500)
+        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(Duration::from_millis(2500)),
+        }))
         .with_schedule("0 0 * * *")
         .with_extractor("return document.body.innerHTML;".to_string())
         .build();
@@ -103,14 +114,17 @@ mod tests {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
           "url": "http://localhost:1234/my/app?q=2",
-          "jobConfig": {
-            "schedule": "0 0 * * *",
-            "notifications": false
+          "target": {
+            "type": "web:page",
+            "delay": 2500
           },
-          "settings": {
+          "config": {
             "revisions": 3,
-            "delay": 2500,
-            "extractor": "return document.body.innerHTML;"
+            "extractor": "return document.body.innerHTML;",
+            "job": {
+              "schedule": "0 0 * * *",
+              "notifications": false
+            }
           },
           "createdAt": 946720800
         }
@@ -122,7 +136,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_delay_millis(2500)
+        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(Duration::from_millis(2500)),
+        }))
         .with_schedule("0 0 * * *")
         .with_extractor(Default::default())
         .build();
@@ -131,14 +147,17 @@ mod tests {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
           "url": "http://localhost:1234/my/app?q=2",
-          "jobConfig": {
-            "schedule": "0 0 * * *",
-            "notifications": false
+          "target": {
+            "type": "web:page",
+            "delay": 2500
           },
-          "settings": {
+          "config": {
             "revisions": 3,
-            "delay": 2500,
-            "extractor": ""
+            "extractor": "",
+            "job": {
+              "schedule": "0 0 * * *",
+              "notifications": false
+            }
           },
           "createdAt": 946720800
         }
@@ -150,7 +169,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_delay_millis(2500)
+        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(Duration::from_millis(2500)),
+        }))
         .with_schedule("0 0 * * *")
         .with_extractor(Default::default())
         .with_job_config(SchedulerJobConfig {
@@ -167,19 +188,22 @@ mod tests {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
           "url": "http://localhost:1234/my/app?q=2",
-          "jobConfig": {
-            "schedule": "0 0 * * *",
-            "retryStrategy": {
-              "type": "constant",
-              "interval": 1000000,
-              "maxAttempts": 10
-            },
-            "notifications": false
+          "target": {
+            "type": "web:page",
+            "delay": 2500
           },
-          "settings": {
+          "config": {
             "revisions": 3,
-            "delay": 2500,
-            "extractor": ""
+            "extractor": "",
+            "job": {
+              "schedule": "0 0 * * *",
+              "retryStrategy": {
+                "type": "constant",
+                "interval": 1000000,
+                "maxAttempts": 10
+              },
+              "notifications": false
+            }
           },
           "createdAt": 946720800
         }

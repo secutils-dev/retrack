@@ -22,10 +22,10 @@ impl TrackersTriggerJob {
     ) -> anyhow::Result<Option<Job>> {
         // First, check if the tracker job exists.
         let trackers = api.trackers();
-        let Some((tracker_id, tracker_settings, tracker_job_config)) = trackers
+        let Some((tracker_id, tracker_config)) = trackers
             .get_tracker_by_job_id(existing_job_data.id)
             .await?
-            .map(|tracker| (tracker.id, tracker.settings, tracker.job_config))
+            .map(|tracker| (tracker.id, tracker.config))
         else {
             warn!(
                 job.id = %existing_job_data.id,
@@ -35,7 +35,7 @@ impl TrackersTriggerJob {
         };
 
         // Then, check if the tracker can support revisions.
-        if tracker_settings.revisions == 0 {
+        if tracker_config.revisions == 0 {
             warn!(
                 tracker.id = %tracker_id,
                 job.id = %existing_job_data.id,
@@ -46,7 +46,7 @@ impl TrackersTriggerJob {
         };
 
         // Then, check if the tracker still has a schedule.
-        let Some(job_config) = tracker_job_config else {
+        let Some(job_config) = tracker_config.job else {
             warn!(
                 tracker.id = %tracker_id,
                 job.id = %existing_job_data.id,
@@ -103,7 +103,7 @@ mod tests {
     use crate::{
         scheduler::{scheduler_job::SchedulerJob, SchedulerJobConfig},
         tests::{mock_api, mock_get_scheduler_job, mock_scheduler, mock_scheduler_job},
-        trackers::{Tracker, TrackerCreateParams, TrackerSettings},
+        trackers::{Tracker, TrackerConfig, TrackerCreateParams},
     };
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
@@ -157,17 +157,17 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
                 url: "https://localhost:1234/my/app?q=2".parse()?,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 4,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()
@@ -228,17 +228,17 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
                 url: "https://localhost:1234/my/app?q=2".parse()?,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 4,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "1 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "1 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()
@@ -282,13 +282,13 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
                 url: "https://localhost:1234/my/app?q=2".parse()?,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 4,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
         api.trackers()
@@ -328,17 +328,17 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
                 url: "https://localhost:1234/my/app?q=2".parse()?,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 0,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()

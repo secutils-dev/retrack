@@ -19,7 +19,7 @@ use crate::{
             WebScraperContentRequest, WebScraperContentRequestScripts, WebScraperContentResponse,
             WebScraperErrorResponse,
         },
-        Tracker, TrackerDataRevision,
+        Tracker, TrackerDataRevision, TrackerTarget, TrackerWebPageTarget,
     },
 };
 use anyhow::{anyhow, bail};
@@ -78,9 +78,9 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             id: Uuid::now_v7(),
             name: params.name,
             url: params.url,
-            settings: params.settings,
+            target: params.target,
+            config: params.config,
             job_id: None,
-            job_config: params.job_config,
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
                 OffsetDateTime::now_utc().unix_timestamp(),
@@ -102,11 +102,11 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
     ) -> anyhow::Result<Tracker> {
         if params.name.is_none()
             && params.url.is_none()
-            && params.settings.is_none()
-            && params.job_config.is_none()
+            && params.target.is_none()
+            && params.config.is_none()
         {
             bail!(RetrackError::client(format!(
-                "Either new name, url, settings, or job config should be provided ({id})."
+                "Either new name, url, target, or config should be provided ({id})."
             )));
         }
 
@@ -123,23 +123,21 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             .unwrap_or_default();
 
         let disabled_revisions = params
-            .settings
+            .config
             .as_ref()
-            .map(|settings| settings.revisions == 0)
+            .map(|config| config.revisions == 0)
             .unwrap_or_default();
 
-        let changed_schedule = params
-            .job_config
-            .as_ref()
-            .map(
-                |job_config| match (&existing_tracker.job_config, job_config) {
-                    (Some(existing_job_config), Some(job_config)) => {
-                        job_config.schedule != existing_job_config.schedule
-                    }
-                    _ => true,
-                },
-            )
-            .unwrap_or_default();
+        let changed_schedule = if let Some(config) = params.config.as_ref() {
+            match (&existing_tracker.config.job, config.job.as_ref()) {
+                (Some(existing_job_config), Some(job_config)) => {
+                    job_config.schedule != existing_job_config.schedule
+                }
+                _ => true,
+            }
+        } else {
+            false
+        };
 
         let job_id = if disabled_revisions || changed_schedule {
             None
@@ -150,9 +148,9 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         let tracker = Tracker {
             name: params.name.unwrap_or(existing_tracker.name),
             url: params.url.unwrap_or(existing_tracker.url),
-            settings: params.settings.unwrap_or(existing_tracker.settings),
+            target: params.target.unwrap_or(existing_tracker.target),
+            config: params.config.unwrap_or(existing_tracker.config),
             job_id,
-            job_config: params.job_config.unwrap_or(existing_tracker.job_config),
             ..existing_tracker
         };
 
@@ -186,7 +184,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
         // Enforce revisions limit and displace old ones.
         let max_revisions = std::cmp::min(
-            tracker.settings.revisions,
+            tracker.config.revisions,
             self.api.config.trackers.max_revisions,
         );
         if max_revisions == 0 {
@@ -194,98 +192,31 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         }
 
         let revisions = self.trackers.get_tracker_data(tracker.id).await?;
-
-        let scraper_request = WebScraperContentRequest::with_default_parameters(&tracker.url)
-            .set_delay(tracker.settings.delay);
-        let scraper_request = if let Some(revision) = revisions.last() {
-            scraper_request.set_previous_content(&revision.data)
-        } else {
-            scraper_request
-        };
-
-        let extract_content_script = tracker.settings.extractor.as_ref();
-        let scraper_request = if let Some(extract_content) = extract_content_script {
-            scraper_request.set_scripts(WebScraperContentRequestScripts {
-                extract_content: Some(extract_content),
-            })
-        } else {
-            scraper_request
-        };
-
-        let scraper_request = if let Some(headers) = tracker.settings.headers.as_ref() {
-            scraper_request.set_headers(headers)
-        } else {
-            scraper_request
-        };
-
-        let scraper_response = reqwest::Client::new()
-            .post(format!(
-                "{}api/web_page/content",
-                self.api.config.as_ref().components.web_scraper_url.as_str()
-            ))
-            .json(&scraper_request)
-            .send()
-            .await
-            .map_err(|err| {
-                anyhow!(
-                    "Could not connect to the web scraper service to extract content for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?;
-
-        if !scraper_response.status().is_success() {
-            let is_client_error = scraper_response.status().is_client_error();
-            let scraper_error_response = scraper_response
-                .json::<WebScraperErrorResponse>()
-                .await
-                .map_err(|err| {
-                anyhow!(
-                    "Could not deserialize scraper error response for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?;
-            if is_client_error {
-                bail!(RetrackError::client(scraper_error_response.message));
-            } else {
-                bail!(
-                    "Unexpected scraper error for the web tracker ('{}'): {:?}",
-                    tracker.id,
-                    scraper_error_response.message
-                );
+        let new_revision = match tracker.target {
+            TrackerTarget::WebPage(_) => {
+                self.fetch_tracker_web_page_data_revision(&tracker, &revisions)
+                    .await?
             }
-        }
-
-        let scraper_response = scraper_response
-            .json::<WebScraperContentResponse>()
-            .await
-            .map_err(|err| {
-                anyhow!(
-                    "Could not deserialize scraper response for the web tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?;
+            TrackerTarget::JsonApi(_) => {
+                self.fetch_tracker_json_api_data_revision(&tracker, &revisions)
+                    .await?
+            }
+        };
 
         // Check if there is a revision with the same timestamp. If so, drop newly fetched revision.
         if revisions
             .iter()
-            .any(|revision| revision.created_at == scraper_response.timestamp)
+            .any(|revision| revision.created_at == new_revision.created_at)
         {
             return Ok(None);
         }
 
         // Check if content has changed.
         if let Some(revision) = revisions.last() {
-            if revision.data == scraper_response.content {
+            if revision.data == new_revision.data {
                 return Ok(None);
             }
         }
-
-        let new_revision = TrackerDataRevision {
-            id: Uuid::now_v7(),
-            tracker_id: tracker.id,
-            data: scraper_response.content,
-            created_at: scraper_response.timestamp,
-        };
 
         // Insert new revision.
         self.trackers
@@ -347,7 +278,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         self.trackers.get_tracker_by_job_id(job_id).await
     }
 
-    /// Update tracker job ID reference (link or unlink).
+    /// Updates tracker job ID reference (link or unlink).
     pub async fn update_tracker_job(&self, id: Uuid, job_id: Option<Uuid>) -> anyhow::Result<()> {
         self.trackers.update_tracker_job(id, job_id).await
     }
@@ -364,21 +295,26 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         }
 
         let config = &self.api.config.trackers;
-        if tracker.settings.revisions > config.max_revisions {
+        if tracker.config.revisions > config.max_revisions {
             bail!(RetrackError::client(format!(
                 "Tracker revisions count cannot be greater than {}.",
                 config.max_revisions
             )));
         }
 
-        if tracker.settings.delay > MAX_TRACKER_WEB_PAGE_WAIT_DELAY {
-            bail!(RetrackError::client(format!(
-                "Tracker delay cannot be greater than {}ms.",
-                MAX_TRACKER_WEB_PAGE_WAIT_DELAY.as_millis()
-            )));
+        if let TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(ref delay),
+        }) = tracker.target
+        {
+            if delay > &MAX_TRACKER_WEB_PAGE_WAIT_DELAY {
+                bail!(RetrackError::client(format!(
+                    "Tracker delay cannot be greater than {}ms.",
+                    MAX_TRACKER_WEB_PAGE_WAIT_DELAY.as_millis()
+                )));
+            }
         }
 
-        if let Some(ref script) = tracker.settings.extractor {
+        if let Some(ref script) = tracker.config.extractor {
             if script.is_empty() {
                 bail!(RetrackError::client(
                     "Tracker extractor script cannot be empty."
@@ -386,7 +322,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             }
         }
 
-        if let Some(job_config) = &tracker.job_config {
+        if let Some(job_config) = &tracker.config.job {
             // Validate that the schedule is a valid cron expression.
             let schedule = match Schedule::try_from(job_config.schedule.as_str()) {
                 Ok(schedule) => schedule,
@@ -468,6 +404,118 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
         Ok(())
     }
+
+    /// Fetches data revision for a tracker with `WebPage` target
+    async fn fetch_tracker_web_page_data_revision(
+        &self,
+        tracker: &Tracker,
+        revisions: &[TrackerDataRevision],
+    ) -> anyhow::Result<TrackerDataRevision> {
+        let TrackerTarget::WebPage(ref target) = tracker.target else {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{}') target is not a web page.",
+                tracker.id
+            )));
+        };
+
+        let scraper_request = WebScraperContentRequest::with_default_parameters(&tracker.url);
+        let scraper_request = if let Some(delay) = target.delay {
+            scraper_request.set_delay(delay)
+        } else {
+            scraper_request
+        };
+
+        let scraper_request = if let Some(revision) = revisions.last() {
+            scraper_request.set_previous_content(&revision.data)
+        } else {
+            scraper_request
+        };
+
+        let extract_content_script = tracker.config.extractor.as_ref();
+        let scraper_request = if let Some(extract_content) = extract_content_script {
+            scraper_request.set_scripts(WebScraperContentRequestScripts {
+                extract_content: Some(extract_content),
+            })
+        } else {
+            scraper_request
+        };
+
+        let scraper_request = if let Some(headers) = tracker.config.headers.as_ref() {
+            scraper_request.set_headers(headers)
+        } else {
+            scraper_request
+        };
+
+        let scraper_response = reqwest::Client::new()
+            .post(format!(
+                "{}api/web_page/content",
+                self.api.config.as_ref().components.web_scraper_url.as_str()
+            ))
+            .json(&scraper_request)
+            .send()
+            .await
+            .map_err(|err| {
+                anyhow!(
+                    "Could not connect to the web scraper service to extract content for the tracker ('{}'): {err:?}",
+                    tracker.id
+                )
+            })?;
+
+        if !scraper_response.status().is_success() {
+            let is_client_error = scraper_response.status().is_client_error();
+            let scraper_error_response = scraper_response
+                .json::<WebScraperErrorResponse>()
+                .await
+                .map_err(|err| {
+                anyhow!(
+                    "Could not deserialize scraper error response for the tracker ('{}'): {err:?}",
+                    tracker.id
+                )
+            })?;
+            if is_client_error {
+                bail!(RetrackError::client(scraper_error_response.message));
+            } else {
+                bail!(
+                    "Unexpected scraper error for the web tracker ('{}'): {:?}",
+                    tracker.id,
+                    scraper_error_response.message
+                );
+            }
+        }
+
+        let scraper_response = scraper_response
+            .json::<WebScraperContentResponse>()
+            .await
+            .map_err(|err| {
+                anyhow!(
+                    "Could not deserialize scraper response for the web tracker ('{}'): {err:?}",
+                    tracker.id
+                )
+            })?;
+
+        Ok(TrackerDataRevision {
+            id: Uuid::now_v7(),
+            tracker_id: tracker.id,
+            data: scraper_response.content,
+            created_at: scraper_response.timestamp,
+        })
+    }
+
+    /// Fetches data revision for a tracker with `JsonApi` target
+    async fn fetch_tracker_json_api_data_revision(
+        &self,
+        tracker: &Tracker,
+        _revisions: &[TrackerDataRevision],
+    ) -> anyhow::Result<TrackerDataRevision> {
+        let TrackerTarget::JsonApi(_) = tracker.target else {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{}') target is not a web page.",
+                tracker.id
+            )));
+        };
+
+        unimplemented!("JsonApi target is not implemented yet.");
+    }
 }
 
 impl<'a, DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
@@ -490,8 +538,8 @@ mod tests {
             WebScraperErrorResponse,
         },
         trackers::{
-            Tracker, TrackerCreateParams, TrackerListRevisionsParams, TrackerSettings,
-            TrackerUpdateParams,
+            Tracker, TrackerConfig, TrackerCreateParams, TrackerListRevisionsParams, TrackerTarget,
+            TrackerUpdateParams, TrackerWebPageTarget,
         },
     };
     use actix_web::ResponseError;
@@ -524,20 +572,22 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
-                },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@hourly".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(120),
-                        max_attempts: 5,
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@hourly".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(120),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                },
             })
             .await?;
 
@@ -562,11 +612,14 @@ mod tests {
 
         let api = api.trackers();
 
-        let settings = TrackerSettings {
+        let target = TrackerTarget::WebPage(TrackerWebPageTarget {
+            delay: Some(Duration::from_millis(2000)),
+        });
+        let config = TrackerConfig {
             revisions: 3,
-            delay: Duration::from_millis(2000),
             extractor: Default::default(),
             headers: Default::default(),
+            job: None,
         };
         let url = Url::parse("https://retrack.dev")?;
 
@@ -579,8 +632,8 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: None
+                target,
+                config: config.clone(),
             }).await),
             @r###""Tracker name cannot be empty.""###
         );
@@ -590,8 +643,8 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "a".repeat(101),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: None
+                target,
+                config: config.clone()
             }).await),
             @r###""Tracker name cannot be longer than 100 characters.""###
         );
@@ -601,11 +654,11 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: TrackerSettings {
+                target,
+                config: TrackerConfig {
                     revisions: 31,
-                    ..settings.clone()
-                },
-                job_config: None
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker revisions count cannot be greater than 30.""###
         );
@@ -615,11 +668,10 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: TrackerSettings {
-                    delay: Duration::from_secs(61),
-                    ..settings.clone()
-                },
-                job_config: None
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_secs(61)),
+                }),
+                config: config.clone()
             }).await),
             @r###""Tracker delay cannot be greater than 60000ms.""###
         );
@@ -629,11 +681,11 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: TrackerSettings {
+                target,
+                config: TrackerConfig {
                     extractor: Some("".to_string()),
-                    ..settings.clone()
-                },
-                job_config: None
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker extractor script cannot be empty.""###
         );
@@ -643,12 +695,15 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "-".to_string(),
-                    retry_strategy: None,
-                    notifications: false,
-                }),
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "-".to_string(),
+                        retry_strategy: None,
+                        notifications: false,
+                    }),
+                    ..config.clone()
+                }
             }).await),
             @r###"
         Error {
@@ -663,12 +718,15 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0/5 * * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: false,
-                }),
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0/5 * * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: false,
+                    }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker schedule must have at least 10s between occurrences, but detected 5s.""###
         );
@@ -678,15 +736,18 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(120),
-                        max_attempts: 0,
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                       schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(120),
+                            max_attempts: 0,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker max retry attempts cannot be zero or greater than 10, but received 0.""###
         );
@@ -696,15 +757,18 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(120),
-                        max_attempts: 11,
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(120),
+                            max_attempts: 11,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker max retry attempts cannot be zero or greater than 10, but received 11.""###
         );
@@ -714,15 +778,18 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(30),
-                        max_attempts: 5,
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(30),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker min retry interval cannot be less than 1m, but received 30s.""###
         );
@@ -732,17 +799,20 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                        initial_interval: Duration::from_secs(120),
-                        increment: Duration::from_secs(10),
-                        max_interval: Duration::from_secs(30),
-                        max_attempts: 5,
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
+                            initial_interval: Duration::from_secs(120),
+                            increment: Duration::from_secs(10),
+                            max_interval: Duration::from_secs(30),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker retry strategy max interval cannot be less than 1m, but received 30s.""###
         );
@@ -752,17 +822,20 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@monthly".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                        initial_interval: Duration::from_secs(120),
-                        increment: Duration::from_secs(10),
-                        max_interval: Duration::from_secs(13 * 3600),
-                        max_attempts: 5,
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@monthly".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
+                            initial_interval: Duration::from_secs(120),
+                            increment: Duration::from_secs(10),
+                            max_interval: Duration::from_secs(13 * 3600),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 12h, but received 13h.""###
         );
@@ -771,17 +844,20 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                settings: settings.clone(),
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@hourly".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                        initial_interval: Duration::from_secs(120),
-                        increment: Duration::from_secs(10),
-                        max_interval: Duration::from_secs(2 * 3600),
-                        max_attempts: 5,
+                target,
+                config: TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@hourly".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
+                            initial_interval: Duration::from_secs(120),
+                            increment: Duration::from_secs(10),
+                            max_interval: Duration::from_secs(2 * 3600),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                    ..config.clone()
+                }
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
@@ -791,8 +867,8 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: Url::parse("ftp://retrack.dev")?,
-                settings: settings.clone(),
-                job_config: None
+                target,
+                config: config.clone()
             }).await),
             @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
         );
@@ -816,8 +892,8 @@ mod tests {
             create_and_fail(api_with_local_network.trackers().create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: Url::parse("https://127.0.0.1")?,
-                settings: settings.clone(),
-                job_config: None
+                target,
+                config: config.clone()
             }).await),
             @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
@@ -834,13 +910,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
 
@@ -885,14 +963,14 @@ mod tests {
             api.get_tracker(tracker.id).await?.unwrap()
         );
 
-        // Update settings.
+        // Update config.
         let updated_tracker = api
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    settings: Some(TrackerSettings {
+                    config: Some(TrackerConfig {
                         revisions: 4,
-                        ..tracker.settings.clone()
+                        ..tracker.config.clone()
                     }),
                     ..Default::default()
                 },
@@ -901,9 +979,9 @@ mod tests {
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
             url: "http://localhost:1234/my/app?q=3".parse()?,
-            settings: TrackerSettings {
+            config: TrackerConfig {
                 revisions: 4,
-                ..tracker.settings.clone()
+                ..tracker.config.clone()
             },
             ..tracker.clone()
         };
@@ -918,14 +996,18 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    job_config: Some(Some(SchedulerJobConfig {
-                        schedule: "@hourly".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                            interval: Duration::from_secs(120),
-                            max_attempts: 5,
+                    config: Some(TrackerConfig {
+                        revisions: 4,
+                        job: Some(SchedulerJobConfig {
+                            schedule: "@hourly".to_string(),
+                            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                                interval: Duration::from_secs(120),
+                                max_attempts: 5,
+                            }),
+                            notifications: false,
                         }),
-                        notifications: false,
-                    })),
+                        ..tracker.config.clone()
+                    }),
                     ..Default::default()
                 },
             )
@@ -933,18 +1015,18 @@ mod tests {
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
             url: "http://localhost:1234/my/app?q=3".parse()?,
-            settings: TrackerSettings {
+            config: TrackerConfig {
                 revisions: 4,
-                ..tracker.settings.clone()
-            },
-            job_config: Some(SchedulerJobConfig {
-                schedule: "@hourly".to_string(),
-                retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                    interval: Duration::from_secs(120),
-                    max_attempts: 5,
+                job: Some(SchedulerJobConfig {
+                    schedule: "@hourly".to_string(),
+                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                        interval: Duration::from_secs(120),
+                        max_attempts: 5,
+                    }),
+                    notifications: false,
                 }),
-                notifications: false,
-            }),
+                ..tracker.config.clone()
+            },
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -958,7 +1040,11 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    job_config: Some(None),
+                    config: Some(TrackerConfig {
+                        revisions: 4,
+                        job: None,
+                        ..tracker.config.clone()
+                    }),
                     ..Default::default()
                 },
             )
@@ -966,11 +1052,11 @@ mod tests {
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
             url: "http://localhost:1234/my/app?q=3".parse()?,
-            settings: TrackerSettings {
+            config: TrackerConfig {
                 revisions: 4,
-                ..tracker.settings.clone()
+                job: None,
+                ..tracker.config.clone()
             },
-            job_config: None,
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -1001,20 +1087,22 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
-                },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "@hourly".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(120),
-                        max_attempts: 5,
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@hourly".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(120),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                }),
+                },
             })
             .await?;
 
@@ -1031,7 +1119,7 @@ mod tests {
         assert_eq!(
             update_result.to_string(),
             format!(
-                "Either new name, url, settings, or job config should be provided ({}).",
+                "Either new name, url, target, or config should be provided ({}).",
                 tracker.id
             )
         );
@@ -1074,9 +1162,9 @@ mod tests {
         // Too many revisions.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                settings: Some(TrackerSettings {
+                config: Some(TrackerConfig {
                     revisions: 31,
-                    ..tracker.settings.clone()
+                    ..tracker.config.clone()
                 }),
                 ..Default::default()
             }).await),
@@ -1086,10 +1174,9 @@ mod tests {
         // Too long delay.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                settings: Some(TrackerSettings {
-                    delay: Duration::from_secs(61),
-                    ..tracker.settings.clone()
-                }),
+                target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_secs(61)),
+                })),
                 ..Default::default()
             }).await),
             @r###""Tracker delay cannot be greater than 60000ms.""###
@@ -1098,9 +1185,9 @@ mod tests {
         // Empty extractor script
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                settings: Some(TrackerSettings {
+                config: Some(TrackerConfig {
                     extractor: Some("".to_string()),
-                   ..tracker.settings.clone()
+                   ..tracker.config.clone()
                 }),
                 ..Default::default()
             }).await),
@@ -1110,11 +1197,14 @@ mod tests {
         // Invalid schedule.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "-".to_string(),
-                    retry_strategy: None,
-                    notifications: false,
-                })),
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "-".to_string(),
+                        retry_strategy: None,
+                        notifications: false,
+                    }),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###"
@@ -1128,11 +1218,14 @@ mod tests {
         // Invalid schedule interval.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "0/5 * * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: false,
-                })),
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0/5 * * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: false,
+                    }),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###""Tracker schedule must have at least 10s between occurrences, but detected 5s.""###
@@ -1141,14 +1234,17 @@ mod tests {
         // Too few retry attempts.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(120),
-                        max_attempts: 0,
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(120),
+                            max_attempts: 0,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                })),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###""Tracker max retry attempts cannot be zero or greater than 10, but received 0.""###
@@ -1157,14 +1253,17 @@ mod tests {
         // Too many retry attempts.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(120),
-                        max_attempts: 11,
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(120),
+                            max_attempts: 11,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                })),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###""Tracker max retry attempts cannot be zero or greater than 10, but received 11.""###
@@ -1173,14 +1272,17 @@ mod tests {
         // Too low retry interval.
         assert_debug_snapshot!(
            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                        interval: Duration::from_secs(30),
-                        max_attempts: 5,
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                            interval: Duration::from_secs(30),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                })),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###""Tracker min retry interval cannot be less than 1m, but received 30s.""###
@@ -1189,16 +1291,19 @@ mod tests {
         // Too low max retry interval.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "@daily".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                        initial_interval: Duration::from_secs(120),
-                        increment: Duration::from_secs(10),
-                        max_interval: Duration::from_secs(30),
-                        max_attempts: 5,
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@daily".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
+                            initial_interval: Duration::from_secs(120),
+                            increment: Duration::from_secs(10),
+                            max_interval: Duration::from_secs(30),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                })),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###""Tracker retry strategy max interval cannot be less than 1m, but received 30s.""###
@@ -1207,16 +1312,19 @@ mod tests {
         // Too high max retry interval.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "@monthly".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                        initial_interval: Duration::from_secs(120),
-                        increment: Duration::from_secs(10),
-                        max_interval: Duration::from_secs(13 * 3600),
-                        max_attempts: 5,
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@monthly".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
+                            initial_interval: Duration::from_secs(120),
+                            increment: Duration::from_secs(10),
+                            max_interval: Duration::from_secs(13 * 3600),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                })),
+                    ..tracker.config.clone()
+                }),
                 ..Default::default()
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 12h, but received 13h.""###
@@ -1224,16 +1332,19 @@ mod tests {
 
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                job_config: Some(Some(SchedulerJobConfig {
-                    schedule: "@hourly".to_string(),
-                    retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                        initial_interval: Duration::from_secs(120),
-                        increment: Duration::from_secs(10),
-                        max_interval: Duration::from_secs(2 * 3600),
-                        max_attempts: 5,
+                config: Some(TrackerConfig {
+                    job: Some(SchedulerJobConfig {
+                        schedule: "@hourly".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
+                            initial_interval: Duration::from_secs(120),
+                            increment: Duration::from_secs(10),
+                            max_interval: Duration::from_secs(2 * 3600),
+                            max_attempts: 5,
+                        }),
+                        notifications: false,
                     }),
-                    notifications: false,
-                })),
+                    ..tracker.config.clone()
+                }),
                ..Default::default()
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
@@ -1284,17 +1395,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -1335,11 +1448,14 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    job_config: Some(Some(SchedulerJobConfig {
-                        schedule: "0 1 * * * *".to_string(),
-                        retry_strategy: None,
-                        notifications: true,
-                    })),
+                    config: Some(TrackerConfig {
+                        job: Some(SchedulerJobConfig {
+                            schedule: "0 1 * * * *".to_string(),
+                            retry_strategy: None,
+                            notifications: true,
+                        }),
+                        ..tracker.config.clone()
+                    }),
                     ..Default::default()
                 },
             )
@@ -1347,11 +1463,14 @@ mod tests {
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
             job_id: None,
-            job_config: Some(SchedulerJobConfig {
-                schedule: "0 1 * * * *".to_string(),
-                retry_strategy: None,
-                notifications: true,
-            }),
+            config: TrackerConfig {
+                job: Some(SchedulerJobConfig {
+                    schedule: "0 1 * * * *".to_string(),
+                    retry_strategy: None,
+                    notifications: true,
+                }),
+                ..tracker.config.clone()
+            },
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -1372,25 +1491,27 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: tracker_one.settings.clone(),
-                job_config: tracker_one.job_config.clone(),
+                target: tracker_one.target,
+                config: tracker_one.config.clone(),
             })
             .await?;
 
@@ -1424,17 +1545,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         assert_eq!(
@@ -1446,8 +1569,8 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: tracker_one.settings.clone(),
-                job_config: tracker_one.job_config.clone(),
+                target: tracker_one.target,
+                config: tracker_one.config.clone(),
             })
             .await?;
 
@@ -1470,17 +1593,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         assert_eq!(trackers.get_trackers().await?, vec![tracker_one.clone()],);
@@ -1488,8 +1613,8 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: tracker_one.settings.clone(),
-                job_config: tracker_one.job_config.clone(),
+                target: tracker_one.target,
+                config: tracker_one.config.clone(),
             })
             .await?;
 
@@ -1514,25 +1639,27 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev/two")?,
-                settings: tracker_one.settings.clone(),
-                job_config: tracker_one.job_config.clone(),
+                target: tracker_one.target,
+                config: tracker_one.config.clone(),
             })
             .await?;
 
@@ -1709,17 +1836,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -1780,17 +1909,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -1861,17 +1992,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -1943,17 +2076,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -2011,17 +2146,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -2077,17 +2214,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -2166,17 +2305,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()
@@ -2197,20 +2338,22 @@ mod tests {
                 TrackerUpdateParams {
                     name: Some("name_one_new".to_string()),
                     url: Some(Url::parse("https://retrack.dev/two")?),
-                    settings: Some(TrackerSettings {
-                        revisions: 4,
-                        delay: Duration::from_millis(3000),
-                        extractor: Some("some".to_string()),
-                        ..tracker.settings.clone()
-                    }),
-                    job_config: Some(Some(SchedulerJobConfig {
-                        schedule: "0 0 * * * *".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                            interval: Duration::from_secs(120),
-                            max_attempts: 5,
-                        }),
-                        notifications: false,
+                    target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                        delay: Some(Duration::from_millis(3000)),
                     })),
+                    config: Some(TrackerConfig {
+                        revisions: 4,
+                        extractor: Some("some".to_string()),
+                        job: Some(SchedulerJobConfig {
+                            schedule: "0 0 * * * *".to_string(),
+                            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                                interval: Duration::from_secs(120),
+                                max_attempts: 5,
+                            }),
+                            notifications: false,
+                        }),
+                        ..tracker.config.clone()
+                    }),
                 },
             )
             .await?;
@@ -2225,14 +2368,17 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    job_config: Some(Some(SchedulerJobConfig {
-                        schedule: "0 1 * * * *".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                            interval: Duration::from_secs(120),
-                            max_attempts: 5,
+                    config: Some(TrackerConfig {
+                        job: Some(SchedulerJobConfig {
+                            schedule: "0 1 * * * *".to_string(),
+                            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                                interval: Duration::from_secs(120),
+                                max_attempts: 5,
+                            }),
+                            notifications: false,
                         }),
-                        notifications: false,
-                    })),
+                        ..tracker.config.clone()
+                    }),
                     ..Default::default()
                 },
             )
@@ -2257,17 +2403,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()
@@ -2288,20 +2436,22 @@ mod tests {
                 TrackerUpdateParams {
                     name: Some("name_one_new".to_string()),
                     url: Some(Url::parse("https://retrack.dev/two")?),
-                    settings: Some(TrackerSettings {
-                        revisions: 4,
-                        delay: Duration::from_millis(3000),
-                        extractor: Some("some".to_string()),
-                        ..tracker.settings.clone()
-                    }),
-                    job_config: Some(Some(SchedulerJobConfig {
-                        schedule: "0 0 * * * *".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                            interval: Duration::from_secs(120),
-                            max_attempts: 5,
-                        }),
-                        notifications: false,
+                    target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                        delay: Some(Duration::from_millis(3000)),
                     })),
+                    config: Some(TrackerConfig {
+                        revisions: 4,
+                        extractor: Some("some".to_string()),
+                        job: Some(SchedulerJobConfig {
+                            schedule: "0 0 * * * *".to_string(),
+                            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                                interval: Duration::from_secs(120),
+                                max_attempts: 5,
+                            }),
+                            notifications: false,
+                        }),
+                        ..tracker.config.clone()
+                    }),
                 },
             )
             .await?;
@@ -2316,9 +2466,9 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    settings: Some(TrackerSettings {
+                    config: Some(TrackerConfig {
                         revisions: 0,
-                        ..tracker.settings.clone()
+                        ..tracker.config.clone()
                     }),
                     ..Default::default()
                 },
@@ -2348,17 +2498,19 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * * *".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "0 0 * * * *".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
 
@@ -2392,7 +2544,10 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    job_config: Some(None),
+                    config: Some(TrackerConfig {
+                        job: None,
+                        ..tracker.config.clone()
+                    }),
                     ..Default::default()
                 },
             )
@@ -2453,17 +2608,19 @@ mod tests {
                 .create_tracker(TrackerCreateParams {
                     name: format!("name_{}", n),
                     url: Url::parse("https://retrack.dev")?,
-                    settings: TrackerSettings {
+                    target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                        delay: Some(Duration::from_millis(2000)),
+                    }),
+                    config: TrackerConfig {
                         revisions: 3,
-                        delay: Duration::from_millis(2000),
                         extractor: Default::default(),
                         headers: Default::default(),
+                        job: Some(SchedulerJobConfig {
+                            schedule: "0 0 * * * *".to_string(),
+                            retry_strategy: None,
+                            notifications: true,
+                        }),
                     },
-                    job_config: Some(SchedulerJobConfig {
-                        schedule: "0 0 * * * *".to_string(),
-                        retry_strategy: None,
-                        notifications: true,
-                    }),
                 })
                 .await?;
         }

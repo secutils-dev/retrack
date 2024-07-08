@@ -24,7 +24,7 @@ pub async fn trackers_list(state: web::Data<ServerState>) -> Result<HttpResponse
 mod tests {
     use crate::{
         server::{handlers::trackers_list::trackers_list, server_state::tests::mock_server_state},
-        trackers::{TrackerCreateParams, TrackerSettings},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
     };
     use actix_web::{
         body::MessageBody,
@@ -63,13 +63,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
 
@@ -91,13 +93,15 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                settings: TrackerSettings {
+                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                }),
+                config: TrackerConfig {
                     revisions: 3,
-                    delay: Duration::from_millis(2000),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: None,
                 },
-                job_config: None,
             })
             .await?;
 

@@ -205,7 +205,7 @@ pub mod tests {
             scheduler_job::SchedulerJob, Scheduler, SchedulerJobConfig, SchedulerJobMetadata,
         },
         tests::{mock_api_with_config, mock_config},
-        trackers::{TrackerCreateParams, TrackerSettings},
+        trackers::{TrackerConfig, TrackerCreateParams},
     };
     use anyhow::anyhow;
     use futures::StreamExt;
@@ -316,17 +316,17 @@ pub mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: "https://localhost:1234/my/app?q=2".parse()?,
-                settings: TrackerSettings {
+                target: Default::default(),
+                config: TrackerConfig {
                     revisions: 1,
-                    delay: Default::default(),
                     extractor: Default::default(),
                     headers: Default::default(),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "1 2 3 4 5 6 2030".to_string(),
+                        retry_strategy: None,
+                        notifications: true,
+                    }),
                 },
-                job_config: Some(SchedulerJobConfig {
-                    schedule: "1 2 3 4 5 6 2030".to_string(),
-                    retry_strategy: None,
-                    notifications: true,
-                }),
             })
             .await?;
         api.trackers()
