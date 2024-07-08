@@ -89,7 +89,7 @@ mod tests {
             .api
             .trackers()
             .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
+                name: "name_two".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 settings: TrackerSettings {
                     revisions: 3,

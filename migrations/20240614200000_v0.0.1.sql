@@ -5,7 +5,7 @@ CREATE COLLATION IF NOT EXISTS case_insensitive (provider = icu, locale = 'und-u
 CREATE TABLE IF NOT EXISTS trackers
 (
     id         UUID PRIMARY KEY NOT NULL,
-    name       TEXT             NOT NULL COLLATE case_insensitive,
+    name       TEXT             NOT NULL UNIQUE COLLATE case_insensitive,
     url        TEXT             NOT NULL COLLATE case_insensitive,
     job_id     UUID UNIQUE,
     job_config BYTEA,

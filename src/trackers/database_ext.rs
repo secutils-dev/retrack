@@ -86,19 +86,17 @@ ORDER BY created_at
         .await;
 
         if let Err(err) = result {
-            let is_conflict_error = err
-                .as_database_error()
-                .map(|db_error| matches!(db_error.kind(), SqlxErrorKind::UniqueViolation))
-                .unwrap_or_default();
-            bail!(if is_conflict_error {
-                RetrackError::client_with_root_cause(
-                    anyhow!(err).context(format!("Tracker ('{}') already exists.", tracker.id)),
-                )
-            } else {
-                RetrackError::from(anyhow!(err).context(format!(
+            bail!(match err.as_database_error() {
+                Some(database_error) if database_error.is_unique_violation() => {
+                    RetrackError::client_with_root_cause(anyhow!(err).context(format!(
+                        "Tracker with such name ('{}') or id ('{}') already exists.",
+                        tracker.name, tracker.id
+                    )))
+                }
+                _ => RetrackError::from(anyhow!(err).context(format!(
                     "Couldn't create tracker ('{}') due to unknown reason.",
                     tracker.name
-                )))
+                ))),
             });
         }
 
@@ -498,19 +496,43 @@ mod tests {
             .unwrap();
         assert_debug_snapshot!(
             insert_error.root_cause.to_string(),
-            @r###""Tracker ('00000000-0000-0000-0000-000000000001') already exists.""###
+            @r###""Tracker with such name ('some-other-name') or id ('00000000-0000-0000-0000-000000000001') already exists.""###
         );
         assert_debug_snapshot!(
             to_database_error(insert_error.root_cause)?.message(),
             @r###""duplicate key value violates unique constraint \"trackers_pkey\"""###
         );
 
-        // Tracker with the same name, but different ID should be allowed.
-        let insert_result = trackers
+        // Tracker with the same name, but different ID should not be allowed.
+        let insert_error = trackers
             .insert_tracker(
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-name",
+                    "https://retrack.dev",
+                    3,
+                )?
+                .build(),
+            )
+            .await
+            .unwrap_err()
+            .downcast::<RetrackError>()
+            .unwrap();
+        assert_debug_snapshot!(
+            insert_error.root_cause.to_string(),
+            @r###""Tracker with such name ('some-name') or id ('00000000-0000-0000-0000-000000000002') already exists.""###
+        );
+        assert_debug_snapshot!(
+            to_database_error(insert_error.root_cause)?.message(),
+            @r###""duplicate key value violates unique constraint \"trackers_name_key\"""###
+        );
+
+        // Tracker with different name should be allowed.
+        let insert_result = trackers
+            .insert_tracker(
+                &MockWebPageTrackerBuilder::create(
+                    uuid!("00000000-0000-0000-0000-000000000003"),
+                    "some-other-name",
                     "https://retrack.dev",
                     3,
                 )?
@@ -542,7 +564,7 @@ mod tests {
             .insert_tracker(
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
-                    "some-name",
+                    "some-other-name",
                     "https://retrack.dev",
                     3,
                 )?
@@ -565,7 +587,7 @@ mod tests {
             .update_tracker(
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
-                    "some-name-2",
+                    "some-other-name-2",
                     "https://retrack.dev",
                     5,
                 )?
@@ -596,7 +618,7 @@ mod tests {
             tracker,
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
-                "some-name-2",
+                "some-other-name-2",
                 "https://retrack.dev",
                 5,
             )?
