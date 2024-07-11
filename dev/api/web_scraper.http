@@ -1,0 +1,4 @@
+### Get status
+GET {{web-scraper}}/api/status
+Accept: application/json
+Content-Type: application/json

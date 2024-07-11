@@ -3,4 +3,5 @@ node_modules/
 tools
 .parcel-cache
 target
+dist
 .env

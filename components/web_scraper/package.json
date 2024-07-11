@@ -1,0 +1,36 @@
+{
+  "name": "retrack-web-scraper",
+  "private": true,
+  "author": {
+    "name": "Aleh Zasypkin",
+    "email": "dev@retrack.dev"
+  },
+  "version": "0.0.1",
+  "engines": {
+    "node": "20.x"
+  },
+  "type": "module",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "prebuild": "eslint . && rm -rf dist",
+    "build": "tsc --project ./",
+    "watch": "RETRACK_WEB_SCRAPER_ENV_PATH=./.env NODE_OPTIONS=--loader=ts-node/esm nodemon src/index.ts",
+    "test": "NODE_NO_WARNINGS=1 node --loader=ts-node/esm --test ./src/tests.ts",
+    "test:watch": "NODE_NO_WARNINGS=1 NODE_OPTIONS= node --loader=ts-node/esm --test --watch ./src/tests.ts"
+  },
+  "dependencies": {
+    "@fastify/compress": "^7.0.3",
+    "dotenv": "^16.4.5",
+    "fast-json-stable-stringify": "^2.1.0",
+    "fastify": "^4.28.1",
+    "js-beautify": "^1.15.1",
+    "node-cache": "^5.1.2",
+    "playwright": "1.45.1"
+  },
+  "devDependencies": {
+    "@types/js-beautify": "^1.14.3",
+    "nodemon": "^3.1.4",
+    "pino-pretty": "^11.2.1",
+    "ts-node": "^10.9.2"
+  }
+}
