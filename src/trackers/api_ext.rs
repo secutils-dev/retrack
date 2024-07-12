@@ -476,7 +476,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
                 bail!(RetrackError::client(scraper_error_response.message));
             } else {
                 bail!(
-                    "Unexpected scraper error for the web tracker ('{}'): {:?}",
+                    "Unexpected scraper error for the tracker ('{}'): {:?}",
                     tracker.id,
                     scraper_error_response.message
                 );
@@ -488,7 +488,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             .await
             .map_err(|err| {
                 anyhow!(
-                    "Could not deserialize scraper response for the web tracker ('{}'): {err:?}",
+                    "Could not deserialize scraper response for the tracker ('{}'): {err:?}",
                     tracker.id
                 )
             })?;

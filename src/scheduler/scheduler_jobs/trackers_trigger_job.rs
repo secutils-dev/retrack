@@ -22,10 +22,10 @@ impl TrackersTriggerJob {
     ) -> anyhow::Result<Option<Job>> {
         // First, check if the tracker job exists.
         let trackers = api.trackers();
-        let Some((tracker_id, tracker_config)) = trackers
+        let Some((tracker_id, tracker_name, tracker_config)) = trackers
             .get_tracker_by_job_id(existing_job_data.id)
             .await?
-            .map(|tracker| (tracker.id, tracker.config))
+            .map(|tracker| (tracker.id, tracker.name, tracker.config))
         else {
             warn!(
                 job.id = %existing_job_data.id,
@@ -59,9 +59,21 @@ impl TrackersTriggerJob {
         // If we changed the job parameters, we need to remove the old job and create a new one.
         let mut new_job = Self::create(api.clone(), job_config.schedule).await?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
+            debug!(
+                tracker.id = %tracker_id,
+                tracker.name = tracker_name,
+                job.id = %existing_job_data.id,
+                "Successfully resumed tracker job."
+            );
             new_job.set_raw_job_data(existing_job_data)?;
             Some(new_job)
         } else {
+            debug!(
+                tracker.id = %tracker_id,
+                tracker.name = tracker_name,
+                job.id = %existing_job_data.id,
+                "Tracker job will be removed and a new job will re-scheduled."
+            );
             trackers.update_tracker_job(tracker_id, None).await?;
             None
         })

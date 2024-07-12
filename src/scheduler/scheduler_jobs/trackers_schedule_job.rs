@@ -103,6 +103,12 @@ impl TrackersScheduleJob {
             api.trackers()
                 .update_tracker_job(tracker.id, Some(job_id))
                 .await?;
+            debug!(
+                tracker.id = %tracker.id,
+                tracker.name = tracker.name,
+                job.id = %job_id,
+                "Successfully scheduled tracker."
+            );
         }
 
         Ok(())

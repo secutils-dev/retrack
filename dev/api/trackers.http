@@ -1,0 +1,38 @@
+### Get trackers
+GET {{host}}/api/trackers
+Accept: application/json
+
+### Get tracker
+GET {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04
+Accept: application/json
+
+### Get tracker revisions
+GET {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04/revisions
+Accept: application/json
+
+### Create tracker
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "Retrack",
+  "url": "https://retrack.dev"
+}
+
+### Update tracker
+PUT {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04
+Content-Type: application/json
+Accept: application/json
+
+{
+  "config": {
+    "revisions": 3,
+    "job": {
+      "schedule": "0 30,40,50 * * * * *"
+    }
+  }
+}
+
+### Delete tracker
+DELETE {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04
