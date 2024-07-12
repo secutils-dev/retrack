@@ -81,10 +81,10 @@ jobs:
         run: npm ci
 
       - name: Test
-        run: npm test
+        run: npm test -w components/web_scraper
 
       - name: Build
-        run: npm run build --ws
+        run: npm run build -w components/web_scraper
 
 #  ci-control-center:
 #    name: Build (Linux)
