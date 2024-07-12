@@ -165,7 +165,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -236,7 +236,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "1 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -336,7 +336,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })

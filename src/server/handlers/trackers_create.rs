@@ -177,7 +177,7 @@ mod tests {
                     interval: Duration::from_secs(500),
                     max_attempts: 5
                 }),
-                notifications: true,
+                notifications: Some(true),
             })
         );
         assert_eq!(serde_json::to_string(&trackers[0])?, from_utf8(&body)?);

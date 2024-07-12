@@ -66,7 +66,7 @@ pub mod tests {
             self.tracker.config.job = Some(SchedulerJobConfig {
                 schedule: schedule.into(),
                 retry_strategy: None,
-                notifications: false,
+                notifications: None,
             });
             self
         }

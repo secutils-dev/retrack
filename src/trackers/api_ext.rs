@@ -585,7 +585,7 @@ mod tests {
                             interval: Duration::from_secs(120),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                 },
             })
@@ -700,7 +700,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "-".to_string(),
                         retry_strategy: None,
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -723,7 +723,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0/5 * * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -744,7 +744,7 @@ mod tests {
                             interval: Duration::from_secs(120),
                             max_attempts: 0,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -765,7 +765,7 @@ mod tests {
                             interval: Duration::from_secs(120),
                             max_attempts: 11,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -786,7 +786,7 @@ mod tests {
                             interval: Duration::from_secs(30),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -809,7 +809,7 @@ mod tests {
                             max_interval: Duration::from_secs(30),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -832,7 +832,7 @@ mod tests {
                             max_interval: Duration::from_secs(13 * 3600),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -854,7 +854,7 @@ mod tests {
                             max_interval: Duration::from_secs(2 * 3600),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..config.clone()
                 }
@@ -1004,7 +1004,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             }),
-                            notifications: false,
+                            notifications: None,
                         }),
                         ..tracker.config.clone()
                     }),
@@ -1023,7 +1023,7 @@ mod tests {
                         interval: Duration::from_secs(120),
                         max_attempts: 5,
                     }),
-                    notifications: false,
+                    notifications: None,
                 }),
                 ..tracker.config.clone()
             },
@@ -1100,7 +1100,7 @@ mod tests {
                             interval: Duration::from_secs(120),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                 },
             })
@@ -1201,7 +1201,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "-".to_string(),
                         retry_strategy: None,
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1222,7 +1222,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0/5 * * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1241,7 +1241,7 @@ mod tests {
                             interval: Duration::from_secs(120),
                             max_attempts: 0,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1260,7 +1260,7 @@ mod tests {
                             interval: Duration::from_secs(120),
                             max_attempts: 11,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1279,7 +1279,7 @@ mod tests {
                             interval: Duration::from_secs(30),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1300,7 +1300,7 @@ mod tests {
                             max_interval: Duration::from_secs(30),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1321,7 +1321,7 @@ mod tests {
                             max_interval: Duration::from_secs(13 * 3600),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1341,7 +1341,7 @@ mod tests {
                             max_interval: Duration::from_secs(2 * 3600),
                             max_attempts: 5,
                         }),
-                        notifications: false,
+                        notifications: None,
                     }),
                     ..tracker.config.clone()
                 }),
@@ -1405,7 +1405,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -1452,7 +1452,7 @@ mod tests {
                         job: Some(SchedulerJobConfig {
                             schedule: "0 1 * * * *".to_string(),
                             retry_strategy: None,
-                            notifications: true,
+                            notifications: Some(true),
                         }),
                         ..tracker.config.clone()
                     }),
@@ -1467,7 +1467,7 @@ mod tests {
                 job: Some(SchedulerJobConfig {
                     schedule: "0 1 * * * *".to_string(),
                     retry_strategy: None,
-                    notifications: true,
+                    notifications: Some(true),
                 }),
                 ..tracker.config.clone()
             },
@@ -1501,7 +1501,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -1555,7 +1555,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -1603,7 +1603,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -1649,7 +1649,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -1846,7 +1846,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -1919,7 +1919,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2002,7 +2002,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2086,7 +2086,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2156,7 +2156,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2224,7 +2224,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2315,7 +2315,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2350,7 +2350,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             }),
-                            notifications: false,
+                            notifications: None,
                         }),
                         ..tracker.config.clone()
                     }),
@@ -2375,7 +2375,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             }),
-                            notifications: false,
+                            notifications: None,
                         }),
                         ..tracker.config.clone()
                     }),
@@ -2413,7 +2413,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2448,7 +2448,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             }),
-                            notifications: false,
+                            notifications: None,
                         }),
                         ..tracker.config.clone()
                     }),
@@ -2508,7 +2508,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -2618,7 +2618,7 @@ mod tests {
                         job: Some(SchedulerJobConfig {
                             schedule: "0 0 * * * *".to_string(),
                             retry_strategy: None,
-                            notifications: true,
+                            notifications: Some(true),
                         }),
                     },
                 })

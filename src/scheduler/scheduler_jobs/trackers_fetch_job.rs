@@ -226,7 +226,7 @@ impl TrackersFetchJob {
             .config
             .job
             .as_ref()
-            .map(|job_config| job_config.notifications)
+            .and_then(|job_config| job_config.notifications)
             .unwrap_or_default();
         if !enable_notifications {
             return;
@@ -374,7 +374,7 @@ mod tests {
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
                         retry_strategy: None,
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 },
             })
@@ -446,7 +446,7 @@ mod tests {
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: None,
-                    notifications: false,
+                    notifications: None,
                 }),
             },
             job_id: Some(trigger_job_id),
@@ -576,7 +576,7 @@ mod tests {
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: None,
-                    notifications: true,
+                    notifications: Some(true),
                 }),
             },
             job_id: Some(trigger_job_id),
@@ -722,7 +722,7 @@ mod tests {
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: None,
-                    notifications: true,
+                    notifications: Some(true),
                 }),
             },
             job_id: Some(trigger_job_id),
@@ -866,7 +866,7 @@ mod tests {
                         interval: Duration::from_secs(1),
                         max_attempts: 1,
                     }),
-                    notifications: true,
+                    notifications: Some(true),
                 }),
             },
 
@@ -1046,7 +1046,7 @@ mod tests {
                         interval: Duration::from_secs(1),
                         max_attempts: 1,
                     }),
-                    notifications: true,
+                    notifications: Some(true),
                 }),
             },
             job_id: Some(trigger_job_id),

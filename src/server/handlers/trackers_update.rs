@@ -146,7 +146,9 @@ mod tests {
                             max_attempts: 5,
                         },
                     ),
-                    notifications: true,
+                    notifications: Some(
+                        true,
+                    ),
                 },
             ),
         }

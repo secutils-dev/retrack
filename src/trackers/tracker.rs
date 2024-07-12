@@ -89,8 +89,7 @@ mod tests {
           "config": {
             "revisions": 3,
             "job": {
-              "schedule": "0 0 * * *",
-              "notifications": false
+              "schedule": "0 0 * * *"
             }
           },
           "createdAt": 946720800
@@ -122,8 +121,7 @@ mod tests {
             "revisions": 3,
             "extractor": "return document.body.innerHTML;",
             "job": {
-              "schedule": "0 0 * * *",
-              "notifications": false
+              "schedule": "0 0 * * *"
             }
           },
           "createdAt": 946720800
@@ -155,8 +153,7 @@ mod tests {
             "revisions": 3,
             "extractor": "",
             "job": {
-              "schedule": "0 0 * * *",
-              "notifications": false
+              "schedule": "0 0 * * *"
             }
           },
           "createdAt": 946720800
@@ -176,7 +173,7 @@ mod tests {
         .with_extractor(Default::default())
         .with_job_config(SchedulerJobConfig {
             schedule: "0 0 * * *".to_string(),
-            notifications: false,
+            notifications: None,
             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
                 interval: Duration::from_secs(1000),
                 max_attempts: 10,
@@ -201,8 +198,7 @@ mod tests {
                 "type": "constant",
                 "interval": 1000000,
                 "maxAttempts": 10
-              },
-              "notifications": false
+              }
             }
           },
           "createdAt": 946720800

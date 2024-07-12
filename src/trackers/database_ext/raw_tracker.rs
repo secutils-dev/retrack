@@ -30,7 +30,7 @@ pub struct RawTrackerConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-struct RawSchedulerJobConfig(String, Option<RawSchedulerJobRetryStrategy>, bool);
+struct RawSchedulerJobConfig(String, Option<RawSchedulerJobRetryStrategy>, Option<bool>);
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 enum RawSchedulerJobRetryStrategy {
@@ -235,7 +235,7 @@ mod tests {
                     116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
                     1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105,
                     101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
-                    120, 0, 5, 1
+                    120, 0, 5, 1, 1
                 ],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -265,7 +265,7 @@ mod tests {
                             max_interval: Duration::from_secs(120),
                             max_attempts: 5,
                         }),
-                        notifications: true
+                        notifications: Some(true)
                     }),
                 },
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -330,7 +330,7 @@ mod tests {
                             max_interval: Duration::from_secs(120),
                             max_attempts: 5,
                         }),
-                        notifications: true
+                        notifications: Some(true)
                     }),
                 },
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -346,7 +346,7 @@ mod tests {
                     116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
                     1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105,
                     101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
-                    120, 0, 5, 1
+                    120, 0, 5, 1, 1
                 ],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,

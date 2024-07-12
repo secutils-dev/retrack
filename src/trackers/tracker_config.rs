@@ -56,7 +56,7 @@ mod tests {
             job: Some(SchedulerJobConfig {
                 schedule: "1 2 3 4 5 6 2035".to_string(),
                 retry_strategy: None,
-                notifications: true,
+                notifications: Some(true),
             }),
         };
         assert_json_snapshot!(config, @r###"
@@ -102,7 +102,7 @@ mod tests {
             job: Some(SchedulerJobConfig {
                 schedule: "1 2 3 4 5 6 2035".to_string(),
                 retry_strategy: None,
-                notifications: true,
+                notifications: Some(true),
             }),
         };
         assert_eq!(

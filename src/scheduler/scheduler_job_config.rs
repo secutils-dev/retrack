@@ -13,5 +13,6 @@ pub struct SchedulerJobConfig {
     pub retry_strategy: Option<SchedulerJobRetryStrategy>,
     /// Indicates whether the job result should result into a notification. If retry strategy is
     /// defined, the error notification will be sent only if the job fails after all the retries.
-    pub notifications: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<bool>,
 }

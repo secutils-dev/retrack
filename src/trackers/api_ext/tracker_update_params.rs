@@ -149,7 +149,7 @@ mod tests {
                             max_interval: Duration::from_secs(120),
                             max_attempts: 5,
                         }),
-                        notifications: true,
+                        notifications: Some(true),
                     }),
                 }),
             }
