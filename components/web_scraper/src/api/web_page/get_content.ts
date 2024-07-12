@@ -6,15 +6,15 @@ import type { FastifyBaseLogger } from 'fastify';
 import jsBeautify from 'js-beautify';
 import type { Browser, JSHandle, Page, Response } from 'playwright';
 
+import { DEFAULT_TIMEOUT_MS } from './constants.js';
+import { FetchInterceptor } from './fetch_interceptor.js';
+import type { RetrackWindow } from './index.js';
 import type { WebPageContext } from './web_page_context.js';
-import type { Config } from '../../../config.js';
-import { createObjectHash } from '../../../utilities/index.js';
-import type { ApiResult } from '../../api_result.js';
-import type { ApiRouteParams } from '../../api_route_params.js';
-import { Diagnostics } from '../../diagnostics.js';
-import { DEFAULT_DELAY_MS, DEFAULT_TIMEOUT_MS } from '../constants.js';
-import { FetchInterceptor } from '../fetch_interceptor.js';
-import type { RetrackWindow } from '../index.js';
+import type { Config } from '../../config.js';
+import { createObjectHash } from '../../utilities/index.js';
+import type { ApiResult } from '../api_result.js';
+import type { ApiRouteParams } from '../api_route_params.js';
+import { Diagnostics } from '../diagnostics.js';
 
 // Maximum size of the content in bytes (200KB).
 const MAX_CONTENT_SIZE_BYTES = 1024 * 200;
@@ -68,7 +68,7 @@ interface OutputBodyType {
   content: string;
 }
 
-export function registerWebPageContentGetRoutes({ server, cache, acquireBrowser, config }: ApiRouteParams) {
+export function registerGetContentRoutes({ server, cache, acquireBrowser, config }: ApiRouteParams) {
   return server.post<{ Body: InputBodyParamsType }>(
     '/api/web_page/content',
     {
@@ -129,7 +129,7 @@ async function getContent(
     url,
     waitSelector,
     timeout = DEFAULT_TIMEOUT_MS,
-    delay = DEFAULT_DELAY_MS,
+    delay,
     extractContent: contentExtractor,
     previousContent,
     headers,
@@ -203,8 +203,10 @@ async function getContent(
     }
   }
 
-  log.debug(`Delaying content extraction for ${delay}ms.`);
-  await setTimeoutAsync(delay);
+  if (delay) {
+    log.debug(`Delaying content extraction for ${delay}ms.`);
+    await setTimeoutAsync(delay);
+  }
 
   const timestamp = Math.floor(Date.now() / 1000);
   let extractedContent: string;

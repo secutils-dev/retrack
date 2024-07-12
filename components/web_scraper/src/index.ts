@@ -13,8 +13,20 @@ import { configure } from './config.js';
 
 const config = configure();
 
+export interface BrowserInfo {
+  running: boolean;
+  name?: string;
+  version?: string;
+  contexts: BrowserContext[];
+}
+
+export interface BrowserContext {
+  pages: string[];
+}
+
 let browser: Browser | undefined;
 let browserShutdownTimer: NodeJS.Timeout | undefined;
+let browserInfo: BrowserInfo = { running: false, contexts: [] };
 
 const cache = new NodeCache({ stdTTL: config.cacheTTLSec });
 const server = fastify({
@@ -32,15 +44,26 @@ const server = fastify({
 async function runBrowser(serverInstance: FastifyInstance) {
   const headless = true;
   const chromiumSandbox = !(process.env.RETRACK_WEB_SCRAPER_BROWSER_NO_SANDBOX === 'true');
-  serverInstance.log.info(`Running browser (headless: ${headless}, sandbox: ${chromiumSandbox})...`);
+  const executablePath = process.env.RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH || undefined;
+  serverInstance.log.info(
+    `Running browser (executable: ${executablePath}, headless: ${headless}, sandbox: ${chromiumSandbox})...`,
+  );
   try {
     const browserToRun = await chromium.launch({
-      executablePath: process.env.RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH || undefined,
+      executablePath,
       headless,
       chromiumSandbox,
       args: ['--disable-web-security'],
     });
     serverInstance.log.info(`Successfully run browser (headless: ${headless}, sandbox: ${chromiumSandbox}).`);
+
+    browserInfo = {
+      running: true,
+      name: browserToRun.browserType().name(),
+      version: browserToRun.version(),
+      contexts: [],
+    };
+
     return browserToRun;
   } catch (err) {
     serverInstance.log.error(
@@ -59,6 +82,7 @@ async function stopBrowser(serverInstance: FastifyInstance) {
     serverInstance.log.info('Stopping browser...');
     await browser.close();
     browser = undefined;
+    browserInfo.running = false;
     serverInstance.log.info('Successfully stopped browser.');
   } catch (err) {
     serverInstance.log.error(`Failed to stop browser: ${Diagnostics.errorMessage(err)}`);
@@ -70,6 +94,14 @@ registerRoutes({
   server,
   cache,
   config,
+  browserInfo: () => {
+    return {
+      ...browserInfo,
+      contexts: browser
+        ? browser.contexts().map((context) => ({ pages: context.pages().map((page) => page.url()) }))
+        : [],
+    };
+  },
   acquireBrowser: async () => {
     if (browserIsLaunching) {
       server.log.info('Requested browser while it is still launching, waiting...');

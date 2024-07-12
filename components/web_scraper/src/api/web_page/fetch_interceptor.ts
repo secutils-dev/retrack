@@ -14,6 +14,10 @@ interface FetchInterceptorOptions {
   pageUrl: string;
   session: CDPSession;
 }
+
+/**
+ * Intercept and collects all fetch request made by the page.
+ */
 export class FetchInterceptor {
   private readonly interceptedResources: FetchedResource[] = [];
   constructor(private readonly options: FetchInterceptorOptions) {}

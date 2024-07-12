@@ -1,5 +1,5 @@
-import { registerWebPageContentGetRoutes } from './content/index.js';
-import type { WebPageContext } from './content/index.js';
+import { registerGetContentRoutes } from './get_content.js';
+import type { WebPageContext } from './web_page_context.js';
 import type { ApiRouteParams } from '../api_route_params.js';
 
 export interface RetrackWindow extends Window {
@@ -9,5 +9,5 @@ export interface RetrackWindow extends Window {
 }
 
 export function registerRoutes(params: ApiRouteParams) {
-  registerWebPageContentGetRoutes(params);
+  registerGetContentRoutes(params);
 }

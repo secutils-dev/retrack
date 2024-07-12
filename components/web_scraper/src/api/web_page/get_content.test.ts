@@ -3,20 +3,20 @@ import { mock, test } from 'node:test';
 
 import type { Browser } from 'playwright';
 
-import { registerWebPageContentGetRoutes } from './get.js';
+import { registerGetContentRoutes } from './get_content.js';
 import type { WebPageContext } from './web_page_context.js';
-import { configure } from '../../../config.js';
+import { configure } from '../../config.js';
 import {
   createBrowserContextMock,
   createBrowserMock,
   createCDPSessionMock,
   createPageMock,
   createWindowMock,
-} from '../../../mocks.js';
-import { createMock } from '../../api_route_params.mocks.js';
+} from '../../mocks.js';
+import { createMock } from '../api_route_params.mocks.js';
 
 await test('[/api/web_page/content] can successfully create route', () => {
-  assert.doesNotThrow(() => registerWebPageContentGetRoutes(createMock()));
+  assert.doesNotThrow(() => registerGetContentRoutes(createMock()));
 });
 
 await test('[/api/web_page/content] can extract content', async (t) => {
@@ -31,7 +31,7 @@ await test('[/api/web_page/content] can extract content', async (t) => {
   const cdpSessionMock = createCDPSessionMock();
   const browserContextMock = createBrowserContextMock(pageMock, cdpSessionMock);
 
-  const response = await registerWebPageContentGetRoutes(
+  const response = await registerGetContentRoutes(
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
@@ -86,7 +86,7 @@ await test('[/api/web_page/content] can proxy requests', async () => {
   });
   const browserContextMock = createBrowserContextMock(pageMock);
 
-  const response = await registerWebPageContentGetRoutes(
+  const response = await registerGetContentRoutes(
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
@@ -128,14 +128,11 @@ await test('[/api/web_page/content] can inject content extractor', async (t) => 
   });
 
   const windowMock = createWindowMock({ __retrack: { extractContent: extractContentMock } });
-  const pageMock = createPageMock({
-    window: windowMock,
-    responses: [],
-  });
+  const pageMock = createPageMock({ window: windowMock, responses: [] });
   const browserContextMock = createBrowserContextMock(pageMock);
 
   const browserMock = createBrowserMock(browserContextMock);
-  const response = await registerWebPageContentGetRoutes(
+  const response = await registerGetContentRoutes(
     createMock({
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       browser: browserMock as unknown as Browser,
@@ -155,13 +152,7 @@ await test('[/api/web_page/content] can inject content extractor', async (t) => 
 
   assert.strictEqual(response.statusCode, 200);
 
-  assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      timestamp: 123,
-      content: '{"message":"HELLO"}',
-    }),
-  );
+  assert.strictEqual(response.body, JSON.stringify({ timestamp: 123, content: '{"message":"HELLO"}' }));
 
   // Make sure we loaded correct page.
   assert.strictEqual(pageMock.goto.mock.callCount(), 1);
@@ -169,11 +160,7 @@ await test('[/api/web_page/content] can inject content extractor', async (t) => 
 
   assert.strictEqual(browserMock.newContext.mock.callCount(), 1);
   assert.deepEqual(browserMock.newContext.mock.calls[0].arguments, [
-    {
-      extraHTTPHeaders: { Cookie: 'my-cookie' },
-      bypassCSP: false,
-      userAgent: 'retrack/1.0.0',
-    },
+    { extraHTTPHeaders: { Cookie: 'my-cookie' }, bypassCSP: false, userAgent: 'retrack/1.0.0' },
   ]);
   assert.strictEqual(browserContextMock.newPage.mock.callCount(), 1);
 
@@ -195,13 +182,10 @@ await test('[/api/web_page/content] reports errors in content extractor', async 
   });
 
   const windowMock = createWindowMock({ __retrack: { extractContent: extractContentMapMock } });
-  const pageMock = createPageMock({
-    window: windowMock,
-    responses: [],
-  });
+  const pageMock = createPageMock({ window: windowMock, responses: [] });
   const browserContextMock = createBrowserContextMock(pageMock);
 
-  const response = await registerWebPageContentGetRoutes(
+  const response = await registerGetContentRoutes(
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
