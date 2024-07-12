@@ -14,9 +14,9 @@
   "scripts": {
     "prebuild": "eslint . && rm -rf dist",
     "build": "tsc --project ./",
-    "watch": "RETRACK_WEB_SCRAPER_ENV_PATH=./.env NODE_OPTIONS=--loader=ts-node/esm nodemon src/index.ts",
-    "test": "NODE_NO_WARNINGS=1 node --loader=ts-node/esm --test ./src/tests.ts",
-    "test:watch": "NODE_NO_WARNINGS=1 NODE_OPTIONS= node --loader=ts-node/esm --test --watch ./src/tests.ts"
+    "watch": "NODE_OPTIONS=--import=./register.js RETRACK_WEB_SCRAPER_ENV_PATH=../../.env nodemon src/index.ts",
+    "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --test ./src/tests.ts",
+    "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --test --watch ./src/tests.ts"
   },
   "dependencies": {
     "@fastify/compress": "^7.0.3",
