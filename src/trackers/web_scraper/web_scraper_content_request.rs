@@ -1,78 +1,42 @@
+use crate::trackers::{Tracker, TrackerTarget, WebPageWaitFor};
+use anyhow::bail;
 use serde::Serialize;
+use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
 use std::{collections::HashMap, time::Duration};
 use url::Url;
 
-/// Scripts to inject into the web page before extracting content to track.
-#[derive(Serialize, Debug, PartialEq, Eq, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct WebScraperContentRequestScripts<'a> {
-    /// Optional script used to extract web page content that needs to be tracked.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub extract_content: Option<&'a str>,
-}
-
-impl<'a> WebScraperContentRequestScripts<'a> {
-    /// Returns `true` if none of the scripts are set.
-    pub fn is_empty(&self) -> bool {
-        self.extract_content.is_none()
-    }
-}
-
 /// Represents request to scrap web page content.
+#[serde_as]
+#[skip_serializing_none]
 #[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebScraperContentRequest<'a> {
     /// URL of the web page to scrap content for.
     pub url: &'a Url,
 
-    /// Number of milliseconds to wait until page enters "idle" state.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<usize>,
+    /// Optional script used to extract web page content that needs to be tracked.
+    pub extractor: Option<&'a str>,
+
+    /// Optional content of the web page that has been extracted previously.
+    pub headers: Option<&'a HashMap<String, String>>,
 
     /// Number of milliseconds to wait after page enters "idle" state.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delay: Option<u128>,
+    #[serde_as(as = "Option<DurationMilliSeconds<u64>>")]
+    pub delay: Option<Duration>,
 
-    /// Optional CSS selector to wait for before extracting content.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wait_selector: Option<&'a str>,
+    /// Number of milliseconds to wait until page enters "idle" state.
+    #[serde_as(as = "Option<DurationMilliSeconds<u64>>")]
+    pub timeout: Option<Duration>,
+
+    /// Instructs web scraper to wait for a specified element to reach specified state before
+    /// extracting content.
+    pub wait_for: Option<&'a WebPageWaitFor>,
 
     /// Optional content of the web page that has been extracted previously.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_content: Option<&'a str>,
-
-    /// Optional scripts to inject into the web page before extracting content.
-    #[serde(skip_serializing_if = "WebScraperContentRequestScripts::is_empty")]
-    pub scripts: WebScraperContentRequestScripts<'a>,
-
-    /// Optional content of the web page that has been extracted previously.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<&'a HashMap<String, String>>,
 }
 
 impl<'a> WebScraperContentRequest<'a> {
-    /// Creates request with only the URL of the web page to scrap content for, the rest of the
-    /// parameters are omitted.
-    pub fn with_default_parameters(url: &'a Url) -> Self {
-        Self {
-            url,
-            timeout: None,
-            delay: None,
-            wait_selector: None,
-            previous_content: None,
-            scripts: Default::default(),
-            headers: None,
-        }
-    }
-
-    /// Sets the delay to wait after web page enters "idle" state to start tracking content.
-    pub fn set_delay(self, delay: Duration) -> Self {
-        Self {
-            delay: Some(delay.as_millis()),
-            ..self
-        }
-    }
-
     /// Sets the content that has been extracted from the page previously.
     pub fn set_previous_content(self, previous_content: &'a str) -> Self {
         Self {
@@ -80,38 +44,61 @@ impl<'a> WebScraperContentRequest<'a> {
             ..self
         }
     }
+}
 
-    /// Sets scripts to inject into the web page before extracting content to track.
-    pub fn set_scripts(self, scripts: WebScraperContentRequestScripts<'a>) -> Self {
-        Self { scripts, ..self }
-    }
+impl<'t> TryFrom<&'t Tracker> for WebScraperContentRequest<'t> {
+    type Error = anyhow::Error;
 
-    /// Sets headers to attach to every request to the tracked web page.
-    pub fn set_headers(self, headers: &'a HashMap<String, String>) -> Self {
-        Self {
-            headers: Some(headers),
-            ..self
-        }
+    fn try_from(tracker: &'t Tracker) -> Result<Self, Self::Error> {
+        let TrackerTarget::WebPage(ref target) = tracker.target else {
+            bail!(
+                "Tracker ('{}') target is not web page, instead got: {:?}",
+                tracker.id,
+                tracker.target
+            );
+        };
+
+        Ok(Self {
+            // Top-level properties.
+            url: &tracker.url,
+            // Config properties.
+            extractor: tracker.config.extractor.as_deref(),
+            headers: tracker.config.headers.as_ref(),
+            // Target properties.
+            delay: target.delay,
+            wait_for: target.wait_for.as_ref(),
+            // Non-tracker properties.
+            timeout: None,
+            previous_content: None,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WebScraperContentRequest, WebScraperContentRequestScripts};
+    use super::WebScraperContentRequest;
+    use crate::{
+        tests::MockWebPageTrackerBuilder,
+        trackers::{TrackerTarget, WebPageTarget, WebPageWaitFor, WebPageWaitForState},
+    };
     use insta::assert_json_snapshot;
+    use std::time::Duration;
     use url::Url;
+    use uuid::uuid;
 
     #[test]
     fn serialization() -> anyhow::Result<()> {
         assert_json_snapshot!(WebScraperContentRequest {
             url: &Url::parse("http://localhost:1234/my/app?q=2")?,
-            timeout: Some(100),
-            delay: Some(200),
-            wait_selector: Some("body"),
+            timeout: Some(Duration::from_millis(100)),
+            delay: Some(Duration::from_millis(200)),
+            wait_for: Some(&WebPageWaitFor {
+                selector: "div".to_string(),
+                state: Some(WebPageWaitForState::Attached),
+                timeout: Some(Duration::from_millis(3000))
+            }),
             previous_content: Some("some content"),
-            scripts: WebScraperContentRequestScripts {
-                extract_content: Some("return resource;")
-            },
+            extractor: Some("return resource;"),
             headers: Some(
                 &[("cookie".to_string(), "my-cookie".to_string())]
                     .into_iter()
@@ -120,16 +107,18 @@ mod tests {
         }, @r###"
         {
           "url": "http://localhost:1234/my/app?q=2",
-          "timeout": 100,
-          "delay": 200,
-          "waitSelector": "body",
-          "previousContent": "some content",
-          "scripts": {
-            "extractContent": "return resource;"
-          },
+          "extractor": "return resource;",
           "headers": {
             "cookie": "my-cookie"
-          }
+          },
+          "delay": 200,
+          "timeout": 100,
+          "waitFor": {
+            "selector": "div",
+            "state": "attached",
+            "timeout": 3000
+          },
+          "previousContent": "some content"
         }
         "###);
 
@@ -137,49 +126,41 @@ mod tests {
     }
 
     #[test]
-    fn serialization_with_default_parameters() -> anyhow::Result<()> {
-        assert_json_snapshot!(WebScraperContentRequest::with_default_parameters(&Url::parse("http://localhost:1234/my/app?q=2")?), @r###"
-        {
-          "url": "http://localhost:1234/my/app?q=2"
-        }
-        "###);
+    fn from_tracker() -> anyhow::Result<()> {
+        let target = WebPageTarget {
+            delay: Some(Duration::from_millis(2500)),
+            wait_for: Some(WebPageWaitFor {
+                selector: "div".to_string(),
+                state: Some(WebPageWaitForState::Attached),
+                timeout: Some(Duration::from_millis(5000)),
+            }),
+        };
+        let tracker = MockWebPageTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "some-name",
+            "http://localhost:1234/my/app?q=2",
+            3,
+        )?
+        .with_target(TrackerTarget::WebPage(target.clone()))
+        .with_extractor("return resource;".to_string())
+        .build();
 
-        assert_json_snapshot!(WebScraperContentRequest::with_default_parameters(&Url::parse("http://localhost:1234/my/app?q=2")?).set_scripts(Default::default()), @r###"
-        {
-          "url": "http://localhost:1234/my/app?q=2"
-        }
-        "###);
+        let request = WebScraperContentRequest::try_from(&tracker)?;
 
-        Ok(())
-    }
+        // Top-level properties.
+        assert_eq!(request.url, &tracker.url);
+        assert_eq!(request.extractor, tracker.config.extractor.as_deref());
 
-    #[test]
-    fn with_default_parameters() -> anyhow::Result<()> {
-        let url = Url::parse("http://localhost:1234/my/app?q=2")?;
-        let request = WebScraperContentRequest::with_default_parameters(&url);
+        // Config properties.
+        assert_eq!(request.headers, tracker.config.headers.as_ref());
+        assert_eq!(request.delay, Some(Duration::from_millis(2500)));
 
-        assert_eq!(request.url, &url);
-        assert!(request.wait_selector.is_none());
-        assert!(request.previous_content.is_none());
-        assert!(request.delay.is_none());
+        // Target properties.
+        assert_eq!(request.delay, target.delay);
+        assert_eq!(request.wait_for, target.wait_for.as_ref());
+
         assert!(request.timeout.is_none());
-        assert!(request.scripts.is_empty());
-        assert!(request.headers.is_none());
-
-        Ok(())
-    }
-
-    #[test]
-    fn scripts_is_empty() -> anyhow::Result<()> {
-        let scripts = WebScraperContentRequestScripts {
-            extract_content: None,
-        };
-        assert!(scripts.is_empty());
-
-        let scripts = WebScraperContentRequestScripts {
-            extract_content: Some("return document.body.innerHTML;"),
-        };
-        assert!(!scripts.is_empty());
+        assert!(request.previous_content.is_none());
 
         Ok(())
     }

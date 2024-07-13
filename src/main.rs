@@ -10,6 +10,7 @@ mod scheduler;
 mod server;
 mod templates;
 mod trackers;
+mod utils;
 
 use crate::config::{Config, RawConfig};
 use anyhow::anyhow;

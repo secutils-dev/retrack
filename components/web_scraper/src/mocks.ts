@@ -67,6 +67,12 @@ interface PageMockOptions {
   content?: string;
 }
 
+export function createLocatorMock() {
+  return {
+    waitFor: mock.fn(),
+  };
+}
+
 export function createPageMock({ window = createWindowMock(), responses = [], content = '' }: PageMockOptions = {}) {
   return {
     on: mock.fn((eventName: string, handler: (response: ResponseMock) => void) => {
@@ -80,8 +86,8 @@ export function createPageMock({ window = createWindowMock(), responses = [], co
     goto: mock.fn(() => Promise.resolve(createResponseMock({ url: 'https://retrack.dev', type: 'document' }))),
     content: mock.fn(() => Promise.resolve(content)),
     addInitScript: mock.fn(),
-    waitForSelector: mock.fn(),
     route: mock.fn(),
+    locator: mock.fn(() => createLocatorMock()),
     evaluateHandle: mock.fn(() => window),
     evaluate: mock.fn((fn: (args: unknown) => Promise<unknown>, args: unknown) => fn(args)),
   };

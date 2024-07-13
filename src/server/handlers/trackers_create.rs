@@ -36,7 +36,7 @@ mod tests {
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
         tests::mock_config,
-        trackers::{TrackerTarget, TrackerWebPageTarget},
+        trackers::{TrackerTarget, WebPageTarget},
     };
     use actix_web::{
         body::MessageBody,
@@ -62,17 +62,7 @@ mod tests {
             &app,
             TestRequest::with_uri("https://retrack.dev/api/trackers")
                 .method(Method::POST)
-                .set_json(json!({
-                    "name": "my-minimal-tracker".to_string(),
-                    "url": "https://retrack.dev/app",
-                    "target": {
-                        "type": "web:page",
-                        "delay": 5000
-                    },
-                    "config": {
-                        "revisions": 5
-                    }
-                }))
+                .set_json(json!({ "name": "my-minimal-tracker".to_string(), "url": "https://retrack.dev/app"}))
                 .to_request(),
         )
         .await;
@@ -82,12 +72,10 @@ mod tests {
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
-        assert_eq!(trackers[0].config.revisions, 5);
+        assert_eq!(trackers[0].config.revisions, 3);
         assert_eq!(
             trackers[0].target,
-            TrackerTarget::WebPage(TrackerWebPageTarget {
-                delay: Some(Duration::from_millis(5000))
-            })
+            TrackerTarget::WebPage(Default::default())
         );
 
         assert_eq!(
@@ -117,7 +105,8 @@ mod tests {
                     "url": "https://retrack.dev/app",
                     "target": {
                         "type": "web:page",
-                        "delay": 5000
+                        "delay": 5000,
+                        "waitFor": "div"
                     },
                     "config": {
                         "revisions": 5,
@@ -152,8 +141,9 @@ mod tests {
         assert_eq!(trackers[0].config.revisions, 5);
         assert_eq!(
             trackers[0].target,
-            TrackerTarget::WebPage(TrackerWebPageTarget {
-                delay: Some(Duration::from_millis(5000))
+            TrackerTarget::WebPage(WebPageTarget {
+                delay: Some(Duration::from_millis(5000)),
+                wait_for: Some("div".parse()?),
             })
         );
         assert_eq!(

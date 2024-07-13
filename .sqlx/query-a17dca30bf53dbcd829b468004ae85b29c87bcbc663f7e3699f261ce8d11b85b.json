@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT trackers.id, trackers.name, trackers.url, trackers.job_id, trackers.job_config,\n       trackers.data, trackers.created_at, jobs.extra\nFROM trackers\nINNER JOIN scheduler_jobs as jobs\nON trackers.job_id = jobs.id\nWHERE jobs.stopped = true AND trackers.created_at > $1\nORDER BY trackers.created_at\nLIMIT $2;\n",
+  "query": "\nSELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config,\n       trackers.created_at, trackers.job_needed, trackers.job_id, jobs.extra\nFROM trackers\nINNER JOIN scheduler_jobs as jobs\nON trackers.job_id = jobs.id\nWHERE jobs.stopped = true AND trackers.created_at > $1\nORDER BY trackers.created_at\nLIMIT $2;\n",
   "describe": {
     "columns": [
       {
@@ -20,26 +20,31 @@
       },
       {
         "ordinal": 3,
-        "name": "job_id",
-        "type_info": "Uuid"
+        "name": "target",
+        "type_info": "Bytea"
       },
       {
         "ordinal": 4,
-        "name": "job_config",
+        "name": "config",
         "type_info": "Bytea"
       },
       {
         "ordinal": 5,
-        "name": "data",
-        "type_info": "Bytea"
-      },
-      {
-        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
+        "ordinal": 6,
+        "name": "job_needed",
+        "type_info": "Bool"
+      },
+      {
         "ordinal": 7,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
         "name": "extra",
         "type_info": "Bytea"
       }
@@ -54,12 +59,13 @@
       false,
       false,
       false,
-      true,
-      true,
       false,
       false,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "2a85f1fe2f780e887203d542fef00de8474e910a5903cf17e2e83e6915273fe5"
+  "hash": "a17dca30bf53dbcd829b468004ae85b29c87bcbc663f7e3699f261ce8d11b85b"
 }

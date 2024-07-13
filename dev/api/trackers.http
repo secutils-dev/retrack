@@ -3,11 +3,11 @@ GET {{host}}/api/trackers
 Accept: application/json
 
 ### Get tracker
-GET {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04
+GET {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4
 Accept: application/json
 
 ### Get tracker revisions
-GET {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04/revisions
+GET {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4/revisions
 Accept: application/json
 
 ### Create tracker
@@ -16,23 +16,37 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "name": "Retrack",
-  "url": "https://retrack.dev"
+  "name": "GitHub Icon",
+  "url": "https://github.com",
+  "target": {
+    "type": "web:page",
+    "waitFor": {
+      "selector": ".octicon-mark-github"
+    }
+  },
+  "config": {
+    "revisions": 3,
+    "extractor": "return document.querySelector('.octicon-mark-github')?.textContent;",
+    "job": {
+      "schedule": "0 */2 * * * * *"
+    }
+  }
 }
 
 ### Update tracker
-PUT {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04
+PUT {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4
 Content-Type: application/json
 Accept: application/json
 
 {
   "config": {
-    "revisions": 3,
+    "revisions": 10,
+    "extractor": "return document.querySelector('.octicon-mark-github')?.innerHTML;",
     "job": {
-      "schedule": "0 30,40,50 * * * * *"
+      "schedule": "0 */2 * * * * *"
     }
   }
 }
 
 ### Delete tracker
-DELETE {{host}}/api/trackers/0190a740-c89f-78e0-af1d-8d4076a89f04
+DELETE {{host}}/api/trackers/0190acdd-6b11-71c0-be14-bfa8c7c4cce3

@@ -121,7 +121,7 @@ mod tests {
     use crate::{
         scheduler::{scheduler_job::SchedulerJob, SchedulerJobConfig, SchedulerJobMetadata},
         tests::{mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
     };
     use cron::Schedule;
     use futures::StreamExt;
@@ -231,8 +231,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 1,
@@ -251,8 +252,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-two".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 1,
@@ -271,8 +273,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-three".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=3")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 1,
@@ -354,8 +357,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 1,
@@ -408,8 +412,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 0,

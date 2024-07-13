@@ -261,11 +261,11 @@ mod tests {
         tests::{
             mock_api_with_config, mock_config, mock_get_scheduler_job, mock_schedule_in_sec,
             mock_schedule_in_secs, mock_scheduler, mock_scheduler_job, WebScraperContentRequest,
-            WebScraperContentRequestScripts, WebScraperContentResponse, WebScraperErrorResponse,
+            WebScraperContentResponse, WebScraperErrorResponse,
         },
         trackers::{
             Tracker, TrackerConfig, TrackerCreateParams, TrackerDataRevision, TrackerTarget,
-            TrackerWebPageTarget,
+            WebPageTarget,
         },
     };
     use cron::Schedule;
@@ -432,8 +432,9 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+            target: TrackerTarget::WebPage(WebPageTarget {
                 delay: Some(Duration::from_secs(2)),
+                wait_for: Some("div".parse()?),
             }),
             config: TrackerConfig {
                 revisions: 1,
@@ -474,19 +475,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_scripts(WebScraperContentRequestScripts {
-                                extract_content: Some("return document.body.innerText;"),
-                            })
-                            .set_headers(
-                                &[("cookie".to_string(), "my-cookie".to_string())]
-                                    .into_iter()
-                                    .collect(),
-                            )
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -566,8 +556,9 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+            target: TrackerTarget::WebPage(WebPageTarget {
                 delay: Some(Duration::from_secs(2)),
+                wait_for: Some("div".parse()?),
             }),
             config: TrackerConfig {
                 revisions: 2,
@@ -613,8 +604,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("some-content"),
                     )
                     .unwrap(),
@@ -712,8 +703,9 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+            target: TrackerTarget::WebPage(WebPageTarget {
                 delay: Some(Duration::from_secs(2)),
+                wait_for: Some("div".parse()?),
             }),
             config: TrackerConfig {
                 revisions: 2,
@@ -754,8 +746,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("some-content"),
                     )
                     .unwrap(),
@@ -853,8 +845,9 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+            target: TrackerTarget::WebPage(WebPageTarget {
                 delay: Some(Duration::from_secs(2)),
+                wait_for: Some("div".parse()?),
             }),
             config: TrackerConfig {
                 revisions: 2,
@@ -899,8 +892,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("some-content"),
                     )
                     .unwrap(),
@@ -1033,8 +1026,9 @@ mod tests {
             id: Uuid::now_v7(),
             name: "tracker-one".to_string(),
             url: "https://localhost:1234/my/app?q=2".parse()?,
-            target: TrackerTarget::WebPage(TrackerWebPageTarget {
+            target: TrackerTarget::WebPage(WebPageTarget {
                 delay: Some(Duration::from_secs(2)),
+                wait_for: Some("div".parse()?),
             }),
             config: TrackerConfig {
                 revisions: 2,
@@ -1078,8 +1072,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("some-content"),
                     )
                     .unwrap(),
@@ -1140,8 +1134,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("some-content"),
                     )
                     .unwrap(),

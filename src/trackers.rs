@@ -13,18 +13,19 @@ pub use self::{
     tracker::Tracker,
     tracker_config::TrackerConfig,
     tracker_data_revision::TrackerDataRevision,
-    tracker_target::{TrackerJsonApiTarget, TrackerTarget, TrackerWebPageTarget},
+    tracker_target::{
+        JsonApiTarget, TrackerTarget, WebPageTarget, WebPageWaitFor, WebPageWaitForState,
+    },
 };
 
 #[cfg(test)]
 pub mod tests {
     pub use crate::trackers::web_scraper::{
-        WebScraperContentRequest, WebScraperContentRequestScripts, WebScraperContentResponse,
-        WebScraperErrorResponse,
+        WebScraperContentRequest, WebScraperContentResponse, WebScraperErrorResponse,
     };
     use crate::{
         scheduler::SchedulerJobConfig,
-        trackers::{Tracker, TrackerConfig, TrackerTarget, TrackerWebPageTarget},
+        trackers::{Tracker, TrackerConfig, TrackerTarget, WebPageTarget},
     };
     use std::time::Duration;
     use time::OffsetDateTime;
@@ -48,8 +49,9 @@ pub mod tests {
                     name: name.into(),
                     job_id: None,
                     url: Url::parse(url)?,
-                    target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    target: TrackerTarget::WebPage(WebPageTarget {
                         delay: Some(Duration::from_millis(2000)),
+                        wait_for: Some("div".parse()?),
                     }),
                     config: TrackerConfig {
                         revisions,

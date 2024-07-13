@@ -32,7 +32,7 @@ mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         tests::MockWebPageTrackerBuilder,
-        trackers::{TrackerTarget, TrackerWebPageTarget},
+        trackers::{TrackerTarget, WebPageTarget},
     };
     use insta::assert_json_snapshot;
     use std::time::Duration;
@@ -46,8 +46,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+        .with_target(TrackerTarget::WebPage(WebPageTarget {
             delay: Some(Duration::from_millis(2500)),
+            wait_for: Some("div".parse()?),
         }))
         .build();
         assert_json_snapshot!(tracker, @r###"
@@ -57,7 +58,10 @@ mod tests {
           "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500
+            "delay": 2500,
+            "waitFor": {
+              "selector": "div"
+            }
           },
           "config": {
             "revisions": 3
@@ -72,8 +76,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+        .with_target(TrackerTarget::WebPage(WebPageTarget {
             delay: Some(Duration::from_millis(2500)),
+            wait_for: Some("div".parse()?),
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -84,7 +89,10 @@ mod tests {
           "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500
+            "delay": 2500,
+            "waitFor": {
+              "selector": "div"
+            }
           },
           "config": {
             "revisions": 3,
@@ -102,8 +110,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+        .with_target(TrackerTarget::WebPage(WebPageTarget {
             delay: Some(Duration::from_millis(2500)),
+            wait_for: Some("div".parse()?),
         }))
         .with_schedule("0 0 * * *")
         .with_extractor("return document.body.innerHTML;".to_string())
@@ -115,7 +124,10 @@ mod tests {
           "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500
+            "delay": 2500,
+            "waitFor": {
+              "selector": "div"
+            }
           },
           "config": {
             "revisions": 3,
@@ -134,8 +146,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+        .with_target(TrackerTarget::WebPage(WebPageTarget {
             delay: Some(Duration::from_millis(2500)),
+            wait_for: Some("div".parse()?),
         }))
         .with_schedule("0 0 * * *")
         .with_extractor(Default::default())
@@ -147,7 +160,10 @@ mod tests {
           "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500
+            "delay": 2500,
+            "waitFor": {
+              "selector": "div"
+            }
           },
           "config": {
             "revisions": 3,
@@ -166,8 +182,9 @@ mod tests {
             "http://localhost:1234/my/app?q=2",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(TrackerWebPageTarget {
+        .with_target(TrackerTarget::WebPage(WebPageTarget {
             delay: Some(Duration::from_millis(2500)),
+            wait_for: Some("div".parse()?),
         }))
         .with_schedule("0 0 * * *")
         .with_extractor(Default::default())
@@ -187,7 +204,10 @@ mod tests {
           "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500
+            "delay": 2500,
+            "waitFor": {
+              "selector": "div"
+            }
           },
           "config": {
             "revisions": 3,

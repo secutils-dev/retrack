@@ -10,6 +10,7 @@ import {
   createBrowserContextMock,
   createBrowserMock,
   createCDPSessionMock,
+  createLocatorMock,
   createPageMock,
   createWindowMock,
 } from '../../mocks.js';
@@ -74,7 +75,52 @@ await test('[/api/web_page/content] can extract content', async (t) => {
   assert.deepEqual(pageMock.goto.mock.calls[0].arguments, ['https://retrack.dev', { timeout: 10000 }]);
 
   // Make sure we didn't wait for a selector since it wasn't specified.
-  assert.strictEqual(pageMock.waitForSelector.mock.callCount(), 0);
+  assert.strictEqual(pageMock.locator.mock.callCount(), 0);
+});
+
+await test('[/api/web_page/content] can wait for element', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const windowMock = createWindowMock();
+  const pageMock = createPageMock({
+    window: windowMock,
+    responses: [],
+    content: '<body><div>Hello Retrack and world!</div><div>Hello World</div></body>',
+  });
+  const locatorMock = createLocatorMock();
+  pageMock.locator.mock.mockImplementation(() => locatorMock);
+
+  const cdpSessionMock = createCDPSessionMock();
+  const browserContextMock = createBrowserContextMock(pageMock, cdpSessionMock);
+
+  const response = await registerGetContentRoutes(
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
+  ).inject({
+    method: 'POST',
+    url: '/api/web_page/content',
+    payload: { url: 'https://retrack.dev', delay: 0, waitFor: { selector: 'div', state: 'attached', timeout: 10000 } },
+  });
+
+  assert.strictEqual(response.statusCode, 200);
+
+  assert.strictEqual(
+    response.body,
+    JSON.stringify({
+      timestamp: 123,
+      content: '"<body>\\n    <div>Hello Retrack and world!</div>\\n    <div>Hello World</div>\\n</body>"',
+    }),
+  );
+
+  // Make sure we loaded correct page.
+  assert.strictEqual(pageMock.goto.mock.callCount(), 1);
+  assert.deepEqual(pageMock.goto.mock.calls[0].arguments, ['https://retrack.dev', { timeout: 10000 }]);
+
+  // Make sure we waited for a selector.
+  assert.strictEqual(pageMock.locator.mock.callCount(), 1);
+  assert.deepEqual(pageMock.locator.mock.calls[0].arguments, ['div']);
+  assert.strictEqual(locatorMock.waitFor.mock.callCount(), 1);
+  assert.deepEqual(locatorMock.waitFor.mock.calls[0].arguments, [{ state: 'attached', timeout: 10000 }]);
 });
 
 await test('[/api/web_page/content] can proxy requests', async () => {
@@ -146,7 +192,7 @@ await test('[/api/web_page/content] can inject content extractor', async (t) => 
       delay: 0,
       previousContent: '{ "message": "hello" }',
       headers: { Cookie: 'my-cookie' },
-      extractContent: 'script',
+      extractor: 'script',
     },
   });
 
@@ -165,7 +211,7 @@ await test('[/api/web_page/content] can inject content extractor', async (t) => 
   assert.strictEqual(browserContextMock.newPage.mock.callCount(), 1);
 
   // Make sure we didn't wait for a selector since it wasn't specified.
-  assert.strictEqual(pageMock.waitForSelector.mock.callCount(), 0);
+  assert.strictEqual(pageMock.locator.mock.callCount(), 0);
 
   // Make sure we called includeResource.
   assert.strictEqual(extractContentMock.mock.callCount(), 1);
@@ -195,7 +241,7 @@ await test('[/api/web_page/content] reports errors in content extractor', async 
       url: 'https://retrack.dev',
       delay: 0,
       previousContent: '"previous"',
-      extractContent: 'script',
+      extractor: 'script',
     },
   });
 

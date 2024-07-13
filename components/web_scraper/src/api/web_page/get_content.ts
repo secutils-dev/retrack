@@ -22,16 +22,22 @@ const MAX_CONTENT_SIZE_BYTES = 1024 * 200;
 /**
  * Defines type of the input parameters.
  */
-interface InputBodyParamsType {
+interface RequestBodyType {
   /**
    * URL to load web page content from.
    */
   url: string;
 
   /**
-   * Number of milliseconds to wait until page enters "idle" state. Default is 10000ms.
+   * A content for a function that accepts a previously saved web page "content", if available and returns a new one.
+   * The function is supposed to return any JSON-serializable value that will be used as a new web page "content".
    */
-  timeout?: number;
+  extractor?: string;
+
+  /**
+   * Optional list of HTTP headers that should be sent with the tracker requests.
+   */
+  headers?: Record<string, string>;
 
   /**
    * Number of milliseconds to wait after page enters "idle" state. Default is 2000ms.
@@ -39,47 +45,50 @@ interface InputBodyParamsType {
   delay?: number;
 
   /**
+   * Number of milliseconds to wait until page enters "idle" state. Default is 10000ms.
+   */
+  timeout?: number;
+
+  /**
    * Optional CSS selector to wait for before extracting content.
    */
-  waitSelector?: string;
+  waitFor?: { selector: string; state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number };
 
   /**
    * Optional web page content that has been extracted previously.
    */
   previousContent?: string;
-
-  /**
-   * A content for a function that accepts a previously saved web page "content", if available and returns a new one.
-   * The function is supposed to return any JSON-serializable value that will be used as a new web page "content".
-   */
-  extractContent?: string;
-
-  /**
-   * Optional list of HTTP headers that should be sent with the tracker requests.
-   */
-  headers?: Record<string, string>;
 }
 
 /**
  * Extracted web page content.
  */
-interface OutputBodyType {
+interface ResponseBodyType {
   timestamp: number;
   content: string;
 }
 
 export function registerGetContentRoutes({ server, cache, acquireBrowser, config }: ApiRouteParams) {
-  return server.post<{ Body: InputBodyParamsType }>(
+  return server.post<{ Body: RequestBodyType }>(
     '/api/web_page/content',
     {
       schema: {
         body: {
           url: { type: 'string' },
-          waitSelector: { type: 'string' },
-          previousContent: { type: 'string' },
-          delay: { type: 'number' },
-          extractContent: { type: 'string' },
-          headers: { type: 'object' },
+          extractor: { type: 'string', nullable: true },
+          headers: { type: 'object', nullable: true },
+          delay: { type: 'number', nullable: true },
+          timeout: { type: 'number', nullable: true },
+          waitFor: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              selector: { type: 'string' },
+              state: { type: 'string', enum: ['attached', 'detached', 'visible', 'hidden'], nullable: true },
+              timeout: { type: 'number', nullable: true },
+            },
+          },
+          previousContent: { type: 'string', nullable: true },
         },
         response: {
           200: { type: 'object', properties: { timestamp: { type: 'number' }, content: { type: 'string' } } },
@@ -90,7 +99,7 @@ export function registerGetContentRoutes({ server, cache, acquireBrowser, config
       const cacheKey = createObjectHash({
         url: request.body.url,
         headers: request.body.headers,
-        extractContent: request.body.extractContent,
+        extractContent: request.body.extractor,
       });
 
       if (cache.has(cacheKey)) {
@@ -125,16 +134,8 @@ async function getContent(
   config: Config,
   browser: Browser,
   log: FastifyBaseLogger,
-  {
-    url,
-    waitSelector,
-    timeout = DEFAULT_TIMEOUT_MS,
-    delay,
-    extractContent: contentExtractor,
-    previousContent,
-    headers,
-  }: InputBodyParamsType,
-): Promise<ApiResult<OutputBodyType>> {
+  { url, extractor, headers, delay, timeout = DEFAULT_TIMEOUT_MS, waitFor, previousContent }: RequestBodyType,
+): Promise<ApiResult<ResponseBodyType>> {
   const context = await browser.newContext({
     extraHTTPHeaders: headers,
     bypassCSP: false,
@@ -159,10 +160,10 @@ async function getContent(
   });
 
   // Inject custom extractor, if provided.
-  if (contentExtractor) {
-    log.debug(`[${url}] Adding "extractContent" function: ${contentExtractor}.`);
+  if (extractor) {
+    log.debug(`[${url}] Adding "extractContent" function: ${extractor}.`);
     await page.addInitScript({
-      content: `self.__retrack = { async extractContent(context) { ${contentExtractor} } };`,
+      content: `self.__retrack = { async extractContent(context) { ${extractor} } };`,
     });
   }
 
@@ -189,13 +190,16 @@ async function getContent(
     return { type: 'client-error', error: errorMessage };
   }
 
-  if (waitSelector) {
+  if (waitFor) {
+    const state = waitFor.state ?? 'visible';
     try {
-      log.debug(`Waiting for selector "${waitSelector} (timeout: ${timeout}ms)".`);
-      await page.waitForSelector(waitSelector, { timeout });
-      log.debug(`Retrieved selector "${waitSelector}".`);
+      log.debug(
+        `Waiting for "${waitFor.selector}" to get into "${state}" state (timeout: ${waitFor.timeout ?? 0}ms)".`,
+      );
+      await page.locator(waitFor.selector).waitFor(waitFor.timeout ? { state, timeout: waitFor.timeout } : { state });
+      log.debug(`Successfully waited for "${waitFor.selector}" to get into "${state}" state.`);
     } catch (err) {
-      const errorMessage = `Failed to retrieve selector "${waitSelector}" for page "${url}": ${Diagnostics.errorMessage(
+      const errorMessage = `Failed to waited for "${waitFor.selector}" to get into "${state}" state for page "${url}": ${Diagnostics.errorMessage(
         err,
       )}`;
       log.error(errorMessage);
@@ -213,7 +217,7 @@ async function getContent(
   try {
     const externalResources = await fetchInterceptor.stop();
     extractedContent = jsonStableStringify(
-      contentExtractor
+      extractor
         ? await extractContent(page, {
             previous: previousContent,
             externalResources,

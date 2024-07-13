@@ -4,4 +4,4 @@ use utoipa::ToSchema;
 /// Tracker's target for JSON API.
 #[derive(Serialize, Deserialize, Default, Debug, Copy, Clone, Hash, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TrackerJsonApiTarget;
+pub struct JsonApiTarget;

@@ -22,7 +22,10 @@ pub struct TrackerUpdateParams {
 mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{TrackerConfig, TrackerTarget, TrackerUpdateParams, TrackerWebPageTarget},
+        trackers::{
+            TrackerConfig, TrackerTarget, TrackerUpdateParams, WebPageTarget, WebPageWaitFor,
+            WebPageWaitForState,
+        },
     };
     use std::time::Duration;
     use url::Url;
@@ -51,7 +54,8 @@ mod tests {
     {
         "target": {
             "type": "web:page",
-            "delay": 3000
+            "delay": 3000,
+            "waitFor": "div"
         }
     }
               "#
@@ -59,8 +63,9 @@ mod tests {
             TrackerUpdateParams {
                 name: None,
                 url: None,
-                target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(3000)),
+                    wait_for: Some("div".parse()?),
                 })),
                 config: None
             }
@@ -104,7 +109,12 @@ mod tests {
         "url": "https://retrack.dev",
         "target": {
             "type": "web:page",
-            "delay": 2000
+            "delay": 2000,
+            "waitFor": {
+                "selector": "div",
+                "state": "attached",
+                "timeout": 5000
+            }
         },
         "config": {
             "revisions": 3,
@@ -130,8 +140,13 @@ mod tests {
             TrackerUpdateParams {
                 name: Some("tck".to_string()),
                 url: Some(Url::parse("https://retrack.dev")?),
-                target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some(WebPageWaitFor {
+                        selector: "div".to_string(),
+                        state: Some(WebPageWaitForState::Attached),
+                        timeout: Some(Duration::from_millis(5000)),
+                    }),
                 })),
                 config: Some(TrackerConfig {
                     revisions: 3,

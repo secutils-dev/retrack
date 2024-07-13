@@ -33,7 +33,7 @@ pub async fn trackers_get(
 mod tests {
     use crate::{
         server::{handlers::trackers_get::trackers_get, server_state::tests::mock_server_state},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
     };
     use actix_web::{
         body::MessageBody,
@@ -56,8 +56,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -102,8 +103,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,

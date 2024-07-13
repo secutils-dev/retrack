@@ -1,13 +1,19 @@
 use crate::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-    trackers::{Tracker, TrackerConfig, TrackerJsonApiTarget, TrackerTarget, TrackerWebPageTarget},
+    trackers::{
+        JsonApiTarget, Tracker, TrackerConfig, TrackerTarget, WebPageTarget, WebPageWaitFor,
+        WebPageWaitForState,
+    },
 };
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
-use std::{collections::HashMap, time::Duration};
+use std::{borrow::Cow, collections::HashMap, time::Duration};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// The type used to serialize and deserialize tracker database representation. There are a number
+/// of helper structs here to help with the conversion from original types that are tailored for
+/// JSON serialization to the types that are tailored for Postcard/database serialization.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub(super) struct RawTracker {
     pub id: Uuid,
@@ -22,17 +28,21 @@ pub(super) struct RawTracker {
 
 #[serde_as]
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-pub struct RawTrackerConfig {
+pub struct RawTrackerConfig<'s> {
     revisions: usize,
-    extractor: Option<String>,
-    headers: Option<HashMap<String, String>>,
-    job: Option<RawSchedulerJobConfig>,
+    extractor: Option<Cow<'s, str>>,
+    headers: Option<Cow<'s, HashMap<String, String>>>,
+    job: Option<RawSchedulerJobConfig<'s>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-struct RawSchedulerJobConfig(String, Option<RawSchedulerJobRetryStrategy>, Option<bool>);
+struct RawSchedulerJobConfig<'s>(
+    Cow<'s, str>,
+    Option<RawSchedulerJobRetryStrategy>,
+    Option<bool>,
+);
 
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, Eq, PartialEq)]
 enum RawSchedulerJobRetryStrategy {
     Constant(Duration, u32),
     Exponential(Duration, u32, Duration, u32),
@@ -40,9 +50,15 @@ enum RawSchedulerJobRetryStrategy {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-enum RawTrackerTarget {
-    WebPage(TrackerWebPageTarget),
-    JsonApi(TrackerJsonApiTarget),
+enum RawTrackerTarget<'s> {
+    WebPage(RawWebPageTarget<'s>),
+    JsonApi(JsonApiTarget),
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+struct RawWebPageTarget<'s> {
+    delay: Option<Duration>,
+    wait_for: Option<(Cow<'s, str>, Option<WebPageWaitForState>, Option<Duration>)>,
 }
 
 impl TryFrom<RawTracker> for Tracker {
@@ -56,7 +72,7 @@ impl TryFrom<RawTracker> for Tracker {
                 raw_config.job
             {
                 Some(SchedulerJobConfig {
-                    schedule,
+                    schedule: schedule.into_owned(),
                     retry_strategy: retry_strategy.map(|retry_strategy| match retry_strategy {
                         RawSchedulerJobRetryStrategy::Constant(interval, max_attempts) => {
                             SchedulerJobRetryStrategy::Constant {
@@ -98,14 +114,23 @@ impl TryFrom<RawTracker> for Tracker {
             name: raw.name,
             url: raw.url.parse()?,
             target: match postcard::from_bytes::<RawTrackerTarget>(&raw.target)? {
-                RawTrackerTarget::WebPage(target) => TrackerTarget::WebPage(target),
+                RawTrackerTarget::WebPage(target) => TrackerTarget::WebPage(WebPageTarget {
+                    delay: target.delay,
+                    wait_for: target
+                        .wait_for
+                        .map(|(selector, state, timeout)| WebPageWaitFor {
+                            selector: selector.into_owned(),
+                            state,
+                            timeout,
+                        }),
+                }),
                 RawTrackerTarget::JsonApi(target) => TrackerTarget::JsonApi(target),
             },
             job_id: raw.job_id,
             config: TrackerConfig {
                 revisions: raw_config.revisions,
-                extractor: raw_config.extractor,
-                headers: raw_config.headers,
+                extractor: raw_config.extractor.map(Cow::into_owned),
+                headers: raw_config.headers.map(Cow::into_owned),
                 job: job_config,
             },
             created_at: raw.created_at,
@@ -124,7 +149,7 @@ impl TryFrom<&Tracker> for RawTracker {
         }) = &item.config.job
         {
             Some(RawSchedulerJobConfig(
-                schedule.to_string(),
+                Cow::Borrowed(schedule.as_ref()),
                 retry_strategy.map(|retry_strategy| match retry_strategy {
                     SchedulerJobRetryStrategy::Constant {
                         interval,
@@ -165,14 +190,27 @@ impl TryFrom<&Tracker> for RawTracker {
             url: item.url.to_string(),
             target: postcard::to_stdvec(
                 &(match &item.target {
-                    TrackerTarget::WebPage(target) => RawTrackerTarget::WebPage(*target),
+                    TrackerTarget::WebPage(target) => RawTrackerTarget::WebPage(RawWebPageTarget {
+                        delay: target.delay,
+                        wait_for: target.wait_for.as_ref().map(|wait_for| {
+                            (
+                                Cow::Borrowed(wait_for.selector.as_str()),
+                                wait_for.state,
+                                wait_for.timeout,
+                            )
+                        }),
+                    }),
                     TrackerTarget::JsonApi(target) => RawTrackerTarget::JsonApi(*target),
                 }),
             )?,
             config: postcard::to_stdvec(&RawTrackerConfig {
                 revisions: item.config.revisions,
-                extractor: item.config.extractor.clone(),
-                headers: item.config.headers.clone(),
+                extractor: item
+                    .config
+                    .extractor
+                    .as_ref()
+                    .map(|extractor| Cow::Borrowed(extractor.as_ref())),
+                headers: item.config.headers.as_ref().map(Cow::Borrowed),
                 job: job_config,
             })?,
             created_at: item.created_at,
@@ -187,7 +225,10 @@ mod tests {
     use super::RawTracker;
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{Tracker, TrackerConfig, TrackerTarget, TrackerWebPageTarget},
+        trackers::{
+            Tracker, TrackerConfig, TrackerTarget, WebPageTarget, WebPageWaitFor,
+            WebPageWaitForState,
+        },
     };
     use std::time::Duration;
     use time::OffsetDateTime;
@@ -201,7 +242,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev".to_string(),
-                target: vec![0, 0],
+                target: vec![0, 0, 0],
                 config: vec![1, 0, 0, 0],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -229,7 +270,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev".to_string(),
-                target: vec![0, 1, 208, 15],
+                target: vec![0, 1, 2, 0, 1, 3, 100, 105, 118, 1, 0, 1, 5, 0],
                 config: vec![
                     1, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109, 101, 110,
                     116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
@@ -246,8 +287,13 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some(WebPageWaitFor {
+                        selector: "div".to_string(),
+                        state: Some(WebPageWaitForState::Attached),
+                        timeout: Some(Duration::from_secs(5)),
+                    }),
                 }),
                 config: TrackerConfig {
                     revisions: 1,
@@ -297,7 +343,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev/".to_string(),
-                target: vec![0, 0],
+                target: vec![0, 0, 0],
                 config: vec![1, 0, 0, 0],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -311,8 +357,13 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some(WebPageWaitFor {
+                        selector: "div".to_string(),
+                        state: Some(WebPageWaitForState::Attached),
+                        timeout: Some(Duration::from_secs(5)),
+                    }),
                 }),
                 config: TrackerConfig {
                     revisions: 1,
@@ -340,7 +391,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
                 url: "https://retrack.dev/".to_string(),
-                target: vec![0, 1, 208, 15],
+                target: vec![0, 1, 2, 0, 1, 3, 100, 105, 118, 1, 0, 1, 5, 0],
                 config: vec![
                     1, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109, 101, 110,
                     116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,

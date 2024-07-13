@@ -16,10 +16,9 @@ use crate::{
         database_ext::TrackersDatabaseExt,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{
-            WebScraperContentRequest, WebScraperContentRequestScripts, WebScraperContentResponse,
-            WebScraperErrorResponse,
+            WebScraperContentRequest, WebScraperContentResponse, WebScraperErrorResponse,
         },
-        Tracker, TrackerDataRevision, TrackerTarget, TrackerWebPageTarget,
+        Tracker, TrackerDataRevision, TrackerTarget, WebPageTarget,
     },
 };
 use anyhow::{anyhow, bail};
@@ -35,6 +34,12 @@ const MAX_JOBS_PAGE_SIZE: usize = 1000;
 
 /// We currently wait up to 60 seconds before starting to track web page.
 const MAX_TRACKER_WEB_PAGE_WAIT_DELAY: Duration = Duration::from_secs(60);
+
+/// Defines the maximum length of the wait-for selector.
+const MAX_TRACKER_WEB_PAGE_WAIT_FOR_SELECTOR_LENGTH: usize = 100;
+
+/// We currently wait up to 60 seconds for selected element to get into specified state.
+const MAX_TRACKER_WEB_PAGE_WAIT_FOR_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// We currently support up to 10 retry attempts for the tracker.
 const MAX_TRACKER_RETRY_ATTEMPTS: u32 = 10;
@@ -283,6 +288,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         self.trackers.update_tracker_job(id, job_id).await
     }
 
+    /// Validates tracker parameters.
     async fn validate_tracker(&self, tracker: &Tracker) -> anyhow::Result<()> {
         if tracker.name.is_empty() {
             bail!(RetrackError::client("Tracker name cannot be empty.",));
@@ -302,16 +308,8 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             )));
         }
 
-        if let TrackerTarget::WebPage(TrackerWebPageTarget {
-            delay: Some(ref delay),
-        }) = tracker.target
-        {
-            if delay > &MAX_TRACKER_WEB_PAGE_WAIT_DELAY {
-                bail!(RetrackError::client(format!(
-                    "Tracker delay cannot be greater than {}ms.",
-                    MAX_TRACKER_WEB_PAGE_WAIT_DELAY.as_millis()
-                )));
-            }
+        if let TrackerTarget::WebPage(ref web_page_target) = tracker.target {
+            self.validate_web_page_target(web_page_target)?;
         }
 
         if let Some(ref script) = tracker.config.extractor {
@@ -405,43 +403,52 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         Ok(())
     }
 
+    /// Validates tracker's web page target parameters.
+    fn validate_web_page_target(&self, target: &WebPageTarget) -> anyhow::Result<()> {
+        if let Some(ref delay) = target.delay {
+            if delay > &MAX_TRACKER_WEB_PAGE_WAIT_DELAY {
+                bail!(RetrackError::client(format!(
+                    "Tracker web page delay cannot be greater than {}ms.",
+                    MAX_TRACKER_WEB_PAGE_WAIT_DELAY.as_millis()
+                )));
+            }
+        }
+
+        if let Some(ref wait_for) = target.wait_for {
+            if wait_for.selector.is_empty() {
+                bail!(RetrackError::client(
+                    "Tracker web page wait-for selector cannot be empty.",
+                ));
+            }
+
+            if wait_for.selector.len() > MAX_TRACKER_WEB_PAGE_WAIT_FOR_SELECTOR_LENGTH {
+                bail!(RetrackError::client(format!(
+                    "Tracker web page wait-for selector cannot be longer than {MAX_TRACKER_WEB_PAGE_WAIT_FOR_SELECTOR_LENGTH} characters."
+                )));
+            }
+
+            if let Some(ref timeout) = wait_for.timeout {
+                if timeout > &MAX_TRACKER_WEB_PAGE_WAIT_FOR_TIMEOUT {
+                    bail!(RetrackError::client(format!(
+                        "Tracker web page wait-for timeout cannot be greater than {}ms.",
+                        MAX_TRACKER_WEB_PAGE_WAIT_FOR_TIMEOUT.as_millis()
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Fetches data revision for a tracker with `WebPage` target
     async fn fetch_tracker_web_page_data_revision(
         &self,
         tracker: &Tracker,
         revisions: &[TrackerDataRevision],
     ) -> anyhow::Result<TrackerDataRevision> {
-        let TrackerTarget::WebPage(ref target) = tracker.target else {
-            bail!(RetrackError::client(format!(
-                "Tracker ('{}') target is not a web page.",
-                tracker.id
-            )));
-        };
-
-        let scraper_request = WebScraperContentRequest::with_default_parameters(&tracker.url);
-        let scraper_request = if let Some(delay) = target.delay {
-            scraper_request.set_delay(delay)
-        } else {
-            scraper_request
-        };
-
+        let scraper_request = WebScraperContentRequest::try_from(tracker)?;
         let scraper_request = if let Some(revision) = revisions.last() {
             scraper_request.set_previous_content(&revision.data)
-        } else {
-            scraper_request
-        };
-
-        let extract_content_script = tracker.config.extractor.as_ref();
-        let scraper_request = if let Some(extract_content) = extract_content_script {
-            scraper_request.set_scripts(WebScraperContentRequestScripts {
-                extract_content: Some(extract_content),
-            })
-        } else {
-            scraper_request
-        };
-
-        let scraper_request = if let Some(headers) = tracker.config.headers.as_ref() {
-            scraper_request.set_headers(headers)
         } else {
             scraper_request
         };
@@ -539,7 +546,7 @@ mod tests {
         },
         trackers::{
             Tracker, TrackerConfig, TrackerCreateParams, TrackerListRevisionsParams, TrackerTarget,
-            TrackerUpdateParams, TrackerWebPageTarget,
+            TrackerUpdateParams, WebPageTarget, WebPageWaitFor, WebPageWaitForState,
         },
     };
     use actix_web::ResponseError;
@@ -572,8 +579,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -612,8 +620,9 @@ mod tests {
 
         let api = api.trackers();
 
-        let target = TrackerTarget::WebPage(TrackerWebPageTarget {
+        let target = TrackerTarget::WebPage(WebPageTarget {
             delay: Some(Duration::from_millis(2000)),
+            wait_for: Some("div".parse()?),
         });
         let config = TrackerConfig {
             revisions: 3,
@@ -632,7 +641,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: config.clone(),
             }).await),
             @r###""Tracker name cannot be empty.""###
@@ -643,7 +652,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "a".repeat(101),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: config.clone()
             }).await),
             @r###""Tracker name cannot be longer than 100 characters.""###
@@ -654,7 +663,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     revisions: 31,
                     ..config.clone()
@@ -663,17 +672,64 @@ mod tests {
             @r###""Tracker revisions count cannot be greater than 30.""###
         );
 
-        // Too long delay.
+        // Too long web page target delay.
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_secs(61)),
+                    ..Default::default()
                 }),
                 config: config.clone()
             }).await),
-            @r###""Tracker delay cannot be greater than 60000ms.""###
+            @r###""Tracker web page delay cannot be greater than 60000ms.""###
+        );
+
+        // Empty web page target wait-for selector.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                url: url.clone(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    wait_for: Some("".parse()?),
+                    ..Default::default()
+                }),
+                config: config.clone()
+            }).await),
+            @r###""Tracker web page wait-for selector cannot be empty.""###
+        );
+
+        // Very long web page target wait-for selector.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                url: url.clone(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    wait_for: Some("a".repeat(101).parse()?),
+                    ..Default::default()
+                }),
+                config: config.clone()
+            }).await),
+            @r###""Tracker web page wait-for selector cannot be longer than 100 characters.""###
+        );
+
+        // Too long web page target wait-for timeout.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                url: url.clone(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    wait_for: Some(WebPageWaitFor {
+                        selector: "div".to_string(),
+                        state: Some(WebPageWaitForState::Attached),
+                        timeout: Some(Duration::from_secs(61)),
+                    }),
+                    ..Default::default()
+                }),
+                config: config.clone()
+            }).await),
+            @r###""Tracker web page wait-for timeout cannot be greater than 60000ms.""###
         );
 
         // Empty extractor script.
@@ -681,7 +737,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     extractor: Some("".to_string()),
                     ..config.clone()
@@ -695,7 +751,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "-".to_string(),
@@ -718,7 +774,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "0/5 * * * * *".to_string(),
@@ -736,7 +792,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                        schedule: "@daily".to_string(),
@@ -757,7 +813,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "@daily".to_string(),
@@ -778,7 +834,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "@daily".to_string(),
@@ -799,7 +855,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "@daily".to_string(),
@@ -822,7 +878,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "@monthly".to_string(),
@@ -844,7 +900,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: url.clone(),
-                target,
+                target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
                         schedule: "@hourly".to_string(),
@@ -867,7 +923,7 @@ mod tests {
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: Url::parse("ftp://retrack.dev")?,
-                target,
+                target: target.clone(),
                 config: config.clone()
             }).await),
             @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
@@ -892,7 +948,7 @@ mod tests {
             create_and_fail(api_with_local_network.trackers().create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 url: Url::parse("https://127.0.0.1")?,
-                target,
+                target: target.clone(),
                 config: config.clone()
             }).await),
             @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
@@ -910,8 +966,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("http://localhost:1234/my/app?q=2")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1087,8 +1144,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1171,15 +1229,56 @@ mod tests {
             @r###""Tracker revisions count cannot be greater than 30.""###
         );
 
-        // Too long delay.
+        // Too long web page target delay.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_secs(61)),
+                    wait_for: Some("div".parse()?),
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker delay cannot be greater than 60000ms.""###
+            @r###""Tracker web page delay cannot be greater than 60000ms.""###
+        );
+
+        // Empty web page target wait-for selector.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    wait_for: Some("".parse()?),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page wait-for selector cannot be empty.""###
+        );
+
+        // Very long web page target wait-for selector.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    wait_for: Some("a".repeat(101).parse()?),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page wait-for selector cannot be longer than 100 characters.""###
+        );
+
+        // Too long web page target wait-for timeout.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    wait_for: Some(WebPageWaitFor {
+                        selector: "div".to_string(),
+                        state: Some(WebPageWaitForState::Attached),
+                        timeout: Some(Duration::from_secs(61)),
+                    }),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page wait-for timeout cannot be greater than 60000ms.""###
         );
 
         // Empty extractor script
@@ -1395,8 +1494,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1491,8 +1591,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1510,7 +1611,7 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: tracker_one.target,
+                target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
             })
             .await?;
@@ -1545,8 +1646,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1593,8 +1695,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1613,7 +1716,7 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: tracker_one.target,
+                target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
             })
             .await?;
@@ -1639,8 +1742,13 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some(WebPageWaitFor {
+                        selector: "div".to_string(),
+                        state: Some(WebPageWaitForState::Attached),
+                        timeout: Some(Duration::from_millis(3000)),
+                    }),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1658,7 +1766,7 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev/two")?,
-                target: tracker_one.target,
+                target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
             })
             .await?;
@@ -1677,11 +1785,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker_one.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker_one).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -1714,8 +1819,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker_one.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker_one)
+                            .unwrap()
                             .set_previous_content("\"rev_1\""),
                     )
                     .unwrap(),
@@ -1750,11 +1855,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker_two.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker_two).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -1836,8 +1938,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1856,11 +1959,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(400)
                 .header("Content-Type", "application/json")
@@ -1909,8 +2009,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -1935,11 +2036,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -1956,8 +2054,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("\"rev_1\""),
                     )
                     .unwrap(),
@@ -1992,8 +2090,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2018,11 +2117,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -2040,8 +2136,8 @@ mod tests {
                 .path("/api/web_page/content")
                 .json_body(
                     serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000))
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
                             .set_previous_content("\"rev_1\""),
                     )
                     .unwrap(),
@@ -2076,8 +2172,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2102,11 +2199,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -2146,8 +2240,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2172,11 +2267,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -2214,8 +2306,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2240,11 +2333,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/content")
                 .json_body(
-                    serde_json::to_value(
-                        WebScraperContentRequest::with_default_parameters(&tracker.url)
-                            .set_delay(Duration::from_millis(2000)),
-                    )
-                    .unwrap(),
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
@@ -2305,8 +2395,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2338,8 +2429,9 @@ mod tests {
                 TrackerUpdateParams {
                     name: Some("name_one_new".to_string()),
                     url: Some(Url::parse("https://retrack.dev/two")?),
-                    target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                    target: Some(TrackerTarget::WebPage(WebPageTarget {
                         delay: Some(Duration::from_millis(3000)),
+                        wait_for: Some("div".parse()?),
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
@@ -2403,8 +2495,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2436,8 +2529,9 @@ mod tests {
                 TrackerUpdateParams {
                     name: Some("name_one_new".to_string()),
                     url: Some(Url::parse("https://retrack.dev/two")?),
-                    target: Some(TrackerTarget::WebPage(TrackerWebPageTarget {
+                    target: Some(TrackerTarget::WebPage(WebPageTarget {
                         delay: Some(Duration::from_millis(3000)),
+                        wait_for: Some("div".parse()?),
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
@@ -2498,8 +2592,9 @@ mod tests {
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2608,8 +2703,9 @@ mod tests {
                 .create_tracker(TrackerCreateParams {
                     name: format!("name_{}", n),
                     url: Url::parse("https://retrack.dev")?,
-                    target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                    target: TrackerTarget::WebPage(WebPageTarget {
                         delay: Some(Duration::from_millis(2000)),
+                        wait_for: Some("div".parse()?),
                     }),
                     config: TrackerConfig {
                         revisions: 3,

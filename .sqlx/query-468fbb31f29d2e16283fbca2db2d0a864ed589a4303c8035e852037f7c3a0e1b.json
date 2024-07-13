@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT id, name, url, job_id, job_config, data, created_at\n    FROM trackers\n    WHERE job_id = $1\n                    ",
+  "query": "\nSELECT id, name, url, target, config, created_at, job_needed, job_id\nFROM trackers\nWHERE job_needed = TRUE AND job_id IS NULL\nORDER BY created_at\n                ",
   "describe": {
     "columns": [
       {
@@ -20,39 +20,43 @@
       },
       {
         "ordinal": 3,
-        "name": "job_id",
-        "type_info": "Uuid"
+        "name": "target",
+        "type_info": "Bytea"
       },
       {
         "ordinal": 4,
-        "name": "job_config",
+        "name": "config",
         "type_info": "Bytea"
       },
       {
         "ordinal": 5,
-        "name": "data",
-        "type_info": "Bytea"
+        "name": "created_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 6,
-        "name": "created_at",
-        "type_info": "Timestamptz"
+        "name": "job_needed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "job_id",
+        "type_info": "Uuid"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
       false,
       false,
-      true,
-      true,
       false,
-      false
+      false,
+      false,
+      false,
+      true
     ]
   },
-  "hash": "1907fa62f39e878d0b5e869b5df24c3663aae845eaea10f9bccfd477d8a4ced8"
+  "hash": "468fbb31f29d2e16283fbca2db2d0a864ed589a4303c8035e852037f7c3a0e1b"
 }

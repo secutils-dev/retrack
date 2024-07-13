@@ -23,7 +23,7 @@ pub struct TrackerCreateParams {
 mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, TrackerWebPageTarget},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
     };
     use std::time::Duration;
     use url::Url;
@@ -97,7 +97,8 @@ mod tests {
         "url": "https://retrack.dev",
         "target": {
             "type": "web:page",
-            "delay": 2000
+            "delay": 2000,
+            "waitFor": "div"
         },
         "config": {
             "revisions": 3,
@@ -123,8 +124,9 @@ mod tests {
             TrackerCreateParams {
                 name: "tck".to_string(),
                 url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(TrackerWebPageTarget {
+                target: TrackerTarget::WebPage(WebPageTarget {
                     delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
                 }),
                 config: TrackerConfig {
                     revisions: 3,

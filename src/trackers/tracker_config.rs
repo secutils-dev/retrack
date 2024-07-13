@@ -1,21 +1,20 @@
 use crate::scheduler::SchedulerJobConfig;
 use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 use utoipa::ToSchema;
 
+#[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerConfig {
     /// A number of revisions of the web page content to track.
     pub revisions: usize,
     /// Optional custom script to extract data from a page, file, or API response.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub extractor: Option<String>,
     /// Optional list of HTTP headers that should be sent with the tracker requests.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
     /// Configuration of the job that triggers tracker, if configured.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub job: Option<SchedulerJobConfig>,
 }
 

@@ -9,6 +9,7 @@ on:
       - '*.md'
       - 'retrack.toml'
       - '.husky/**'
+      - 'dev/**'
 
 env:
   CARGO_TERM_COLOR: always
