@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+FROM --platform=$BUILDPLATFORM node:20-alpine3.20 AS builder
+WORKDIR /app
+
+# Copy workspace root `package.json` and `package-lock.json` files,
+# and `package.json` file from the component, to just install dependencies.
+COPY ["./*.json", "./"]
+COPY ["./components/web_scraper/package.json", "./components/web_scraper/"]
+RUN set -x && npm ci --ws
+
+# Now copy the rest of the component files, test and build it.
+COPY ["./components/web_scraper", "./components/web_scraper"]
+RUN set -x && npm test --ws
+RUN set -x && npm run build --ws
+
+FROM node:20-alpine3.20
+ENV NODE_ENV=production \
+    RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium-browser"
+WORKDIR /app
+RUN set -x && apk update --no-cache && \
+    apk upgrade --no-cache && \
+    apk add --no-cache dumb-init nss freetype harfbuzz ca-certificates ttf-freefont chromium
+COPY --from=builder ["/app/components/web_scraper/dist/", "./"]
+COPY --from=builder ["/app/components/web_scraper/package.json", "/app/package-lock.json", "./"]
+RUN set -x && npm ci && npm cache clean --force
+USER node
+CMD [ "node", "src/index.js" ]
