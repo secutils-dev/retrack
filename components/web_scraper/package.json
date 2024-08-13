@@ -14,6 +14,8 @@
   "scripts": {
     "prebuild": "eslint . && rm -rf dist",
     "build": "tsc --project ./",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "watch": "NODE_OPTIONS=--import=./register.js RETRACK_WEB_SCRAPER_ENV_PATH=../../.env nodemon src/index.ts",
     "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --test ./src/tests.ts",
     "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --test --watch ./src/tests.ts"
@@ -29,19 +31,20 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
+    "@eslint/js": "^9.9.0",
     "@types/js-beautify": "^1.14.3",
-    "@types/node": "^20.14.10",
-    "@typescript-eslint/eslint-plugin": "^7.16.0",
-    "@typescript-eslint/parser": "^7.16.0",
-    "eslint": "^8.57.0",
+    "@types/node": "^22.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.1.0",
+    "@typescript-eslint/parser": "^8.1.0",
+    "eslint": "^9.9.0",
     "eslint-config-prettier": "^9.1.0",
-    "eslint-import-resolver-typescript": "^3.6.1",
-    "eslint-plugin-import": "^2.29.1",
-    "eslint-plugin-prettier": "^5.1.3",
+    "eslint-plugin-prettier": "^5.2.1",
+    "globals": "^15.9.0",
     "nodemon": "^3.1.4",
-    "pino-pretty": "^11.2.1",
-    "prettier": "^3.3.2",
+    "pino-pretty": "^11.2.2",
+    "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.1.0"
   }
 }

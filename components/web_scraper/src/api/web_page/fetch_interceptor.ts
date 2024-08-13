@@ -23,7 +23,6 @@ export class FetchInterceptor {
   constructor(private readonly options: FetchInterceptorOptions) {}
 
   public async start() {
-    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.options.session.on('Fetch.requestPaused', async (event) => {
       if (event.responseStatusCode && event.responseStatusCode > 199 && event.responseStatusCode < 300) {
         try {

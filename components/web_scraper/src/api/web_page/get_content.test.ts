@@ -33,7 +33,6 @@ await test('[/api/web_page/content] can extract content', async (t) => {
   const browserContextMock = createBrowserContextMock(pageMock, cdpSessionMock);
 
   const response = await registerGetContentRoutes(
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
     method: 'POST',
@@ -94,7 +93,6 @@ await test('[/api/web_page/content] can wait for element', async (t) => {
   const browserContextMock = createBrowserContextMock(pageMock, cdpSessionMock);
 
   const response = await registerGetContentRoutes(
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
     method: 'POST',
@@ -133,7 +131,6 @@ await test('[/api/web_page/content] can proxy requests', async () => {
   const browserContextMock = createBrowserContextMock(pageMock);
 
   const response = await registerGetContentRoutes(
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
     method: 'POST',
@@ -180,7 +177,6 @@ await test('[/api/web_page/content] can inject content extractor', async (t) => 
   const browserMock = createBrowserMock(browserContextMock);
   const response = await registerGetContentRoutes(
     createMock({
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       browser: browserMock as unknown as Browser,
       config: { ...configure(), userAgent: 'retrack/1.0.0' },
     }),
@@ -232,7 +228,6 @@ await test('[/api/web_page/content] reports errors in content extractor', async 
   const browserContextMock = createBrowserContextMock(pageMock);
 
   const response = await registerGetContentRoutes(
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     createMock({ browser: createBrowserMock(browserContextMock) as unknown as Browser }),
   ).inject({
     method: 'POST',
