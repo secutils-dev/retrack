@@ -270,10 +270,10 @@ async function extractContent(page: Page, context: WebPageContext<string>): Prom
 
       try {
         return typeof extractContent === 'function'
-          ? (await extractContent({
+          ? ((await extractContent({
               ...context,
               previous: context.previous !== undefined ? JSON.parse(context.previous) : context.previous,
-            })) ?? null
+            })) ?? null)
           : null;
       } catch (err: unknown) {
         console.error(`[browser] Content extractor script has thrown an exception: ${(err as Error)?.message ?? err}.`);
