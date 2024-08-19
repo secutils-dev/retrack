@@ -79,6 +79,8 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
     /// Creates a new web page content tracker.
     pub async fn create_tracker(&self, params: TrackerCreateParams) -> anyhow::Result<Tracker> {
+        let created_at =
+            OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())?;
         let tracker = Tracker {
             id: Uuid::now_v7(),
             name: params.name,
@@ -87,9 +89,8 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             config: params.config,
             job_id: None,
             // Preserve timestamp only up to seconds.
-            created_at: OffsetDateTime::from_unix_timestamp(
-                OffsetDateTime::now_utc().unix_timestamp(),
-            )?,
+            created_at,
+            updated_at: created_at,
         };
 
         self.validate_tracker(&tracker).await?;
@@ -155,6 +156,10 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             url: params.url.unwrap_or(existing_tracker.url),
             target: params.target.unwrap_or(existing_tracker.target),
             config: params.config.unwrap_or(existing_tracker.config),
+            // Preserve timestamp only up to seconds.
+            updated_at: OffsetDateTime::from_unix_timestamp(
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )?,
             job_id,
             ..existing_tracker
         };
@@ -991,6 +996,7 @@ mod tests {
             .await?;
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
+            updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -1012,6 +1018,7 @@ mod tests {
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
             url: "http://localhost:1234/my/app?q=3".parse()?,
+            updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -1040,6 +1047,7 @@ mod tests {
                 revisions: 4,
                 ..tracker.config.clone()
             },
+            updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -1084,6 +1092,7 @@ mod tests {
                 }),
                 ..tracker.config.clone()
             },
+            updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);
@@ -1114,6 +1123,7 @@ mod tests {
                 job: None,
                 ..tracker.config.clone()
             },
+            updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
         assert_eq!(expected_tracker, updated_tracker);

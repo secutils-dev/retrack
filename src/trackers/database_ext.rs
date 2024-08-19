@@ -33,9 +33,9 @@ impl<'pool> TrackersDatabaseExt<'pool> {
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, url, target, config, created_at, job_id, job_needed
+SELECT id, name, url, target, config, created_at, updated_at, job_id, job_needed
 FROM trackers
-ORDER BY created_at
+ORDER BY updated_at
                 "#
         )
         .fetch_all(self.pool)
@@ -54,7 +54,7 @@ ORDER BY created_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, target, config, created_at, job_id, job_needed
+    SELECT id, name, url, target, config, created_at, updated_at, job_id, job_needed
     FROM trackers
     WHERE id = $1
                     "#,
@@ -71,8 +71,8 @@ ORDER BY created_at
         let raw_tracker = RawTracker::try_from(tracker)?;
         let result = query!(
             r#"
-    INSERT INTO trackers (id, name, url, target, config, created_at, job_needed, job_id)
-    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8 )
+    INSERT INTO trackers (id, name, url, target, config, created_at, updated_at, job_needed, job_id)
+    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )
             "#,
             raw_tracker.id,
             raw_tracker.name,
@@ -80,6 +80,7 @@ ORDER BY created_at
             raw_tracker.target,
             raw_tracker.config,
             raw_tracker.created_at,
+            raw_tracker.updated_at,
             raw_tracker.job_needed,
             raw_tracker.job_id,
         )
@@ -110,7 +111,7 @@ ORDER BY created_at
         let result = query!(
             r#"
 UPDATE trackers
-SET name = $2, url = $3, target = $4, config = $5, job_needed = $6, job_id = $7
+SET name = $2, url = $3, target = $4, config = $5, updated_at = $6, job_needed = $7, job_id = $8
 WHERE id = $1
         "#,
             raw_tracker.id,
@@ -118,6 +119,7 @@ WHERE id = $1
             raw_tracker.url,
             raw_tracker.target,
             raw_tracker.config,
+            raw_tracker.updated_at,
             raw_tracker.job_needed,
             raw_tracker.job_id
         )
@@ -267,10 +269,10 @@ ORDER BY data.created_at
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, url, target, config, created_at, job_needed, job_id
+SELECT id, name, url, target, config, created_at, updated_at, job_needed, job_id
 FROM trackers
 WHERE job_needed = TRUE AND job_id IS NULL
-ORDER BY created_at
+ORDER BY updated_at
                 "#
         )
         .fetch_all(self.pool)
@@ -301,7 +303,7 @@ ORDER BY created_at
                  let records = query!(
 r#"
 SELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config,
-       trackers.created_at, trackers.job_needed, trackers.job_id, jobs.extra
+       trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra
 FROM trackers
 INNER JOIN scheduler_jobs as jobs
 ON trackers.job_id = jobs.id
@@ -334,6 +336,7 @@ LIMIT $2;
                         target: record.target,
                         config: record.config,
                         created_at: record.created_at,
+                        updated_at: record.updated_at,
                         job_needed: record.job_needed,
                         job_id: record.job_id,
                     })?;
@@ -351,7 +354,7 @@ LIMIT $2;
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, target, config, created_at, job_needed, job_id
+    SELECT id, name, url, target, config, created_at, updated_at, job_needed, job_id
     FROM trackers
     WHERE job_id = $1
                     "#,
@@ -1034,8 +1037,8 @@ mod tests {
 
         let trackers = db.trackers();
         for (index, tracker) in trackers_list.iter_mut().enumerate() {
-            tracker.created_at = tracker
-                .created_at
+            tracker.updated_at = tracker
+                .updated_at
                 .checked_add(Duration::from_secs(index as u64).try_into()?)
                 .unwrap();
             trackers.insert_tracker(tracker).await?;

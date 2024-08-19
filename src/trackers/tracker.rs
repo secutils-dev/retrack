@@ -25,6 +25,9 @@ pub struct Tracker {
     /// Date and time when the tracker was created.
     #[serde(with = "time::serde::timestamp")]
     pub created_at: OffsetDateTime,
+    /// Date and time when the tracker was last updated.
+    #[serde(with = "time::serde::timestamp")]
+    pub updated_at: OffsetDateTime,
 }
 
 #[cfg(test)]
@@ -66,7 +69,8 @@ mod tests {
           "config": {
             "revisions": 3
           },
-          "createdAt": 946720800
+          "createdAt": 946720800,
+          "updatedAt": 946720810
         }
         "###);
 
@@ -100,7 +104,8 @@ mod tests {
               "schedule": "0 0 * * *"
             }
           },
-          "createdAt": 946720800
+          "createdAt": 946720800,
+          "updatedAt": 946720810
         }
         "###);
 
@@ -136,7 +141,8 @@ mod tests {
               "schedule": "0 0 * * *"
             }
           },
-          "createdAt": 946720800
+          "createdAt": 946720800,
+          "updatedAt": 946720810
         }
         "###);
 
@@ -172,7 +178,8 @@ mod tests {
               "schedule": "0 0 * * *"
             }
           },
-          "createdAt": 946720800
+          "createdAt": 946720800,
+          "updatedAt": 946720810
         }
         "###);
 
@@ -221,7 +228,8 @@ mod tests {
               }
             }
           },
-          "createdAt": 946720800
+          "createdAt": 946720800,
+          "updatedAt": 946720810
         }
         "###);
 

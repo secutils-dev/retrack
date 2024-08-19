@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS trackers
     target      BYTEA            NOT NULL,
     config      BYTEA            NOT NULL,
     created_at  TIMESTAMPTZ      NOT NULL,
+    updated_at  TIMESTAMPTZ      NOT NULL,
     -- Internal fields for tracking job status.
     job_needed  BOOL             NOT NULL,
     job_id      UUID UNIQUE

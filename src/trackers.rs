@@ -60,6 +60,7 @@ pub mod tests {
                         job: None,
                     },
                     created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                    updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 },
             })
         }

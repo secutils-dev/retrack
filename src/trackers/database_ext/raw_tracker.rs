@@ -22,6 +22,7 @@ pub(super) struct RawTracker {
     pub config: Vec<u8>,
     pub target: Vec<u8>,
     pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
     pub job_id: Option<Uuid>,
     pub job_needed: bool,
 }
@@ -134,6 +135,7 @@ impl TryFrom<RawTracker> for Tracker {
                 job: job_config,
             },
             created_at: raw.created_at,
+            updated_at: raw.updated_at,
         })
     }
 }
@@ -214,6 +216,7 @@ impl TryFrom<&Tracker> for RawTracker {
                 job: job_config,
             })?,
             created_at: item.created_at,
+            updated_at: item.updated_at,
             job_id: item.job_id,
             job_needed: item.config.job.is_some(),
         })
@@ -246,6 +249,8 @@ mod tests {
                 config: vec![1, 0, 0, 0],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                // January 1, 2000 10:00:10
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: None,
                 job_needed: false,
             })?,
@@ -261,6 +266,7 @@ mod tests {
                     job: None,
                 },
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: None,
             }
         );
@@ -280,6 +286,8 @@ mod tests {
                 ],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                // January 1, 2000 10:00:10
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
                 job_needed: true,
             })?,
@@ -315,6 +323,7 @@ mod tests {
                     }),
                 },
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
             }
         );
@@ -337,6 +346,7 @@ mod tests {
                     job: None,
                 },
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: None,
             })?,
             RawTracker {
@@ -347,6 +357,8 @@ mod tests {
                 config: vec![1, 0, 0, 0],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                // January 1, 2000 10:00:10
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: None,
                 job_needed: false,
             }
@@ -385,6 +397,7 @@ mod tests {
                     }),
                 },
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
             })?,
             RawTracker {
@@ -401,6 +414,8 @@ mod tests {
                 ],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                // January 1, 2000 10:00:10
+                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
                 job_needed: true,
             }
