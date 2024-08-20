@@ -155,15 +155,14 @@ impl TrackersFetchJob {
             };
 
             let execution_time = fetch_start.elapsed();
-            info!(
-                tracker.id = %tracker.id,
-                tracker.name = tracker.name,
-                metrics.job_execution_time = execution_time.as_nanos() as u64,
-                "Successfully created tracker data revision in {}.",
-                humantime::format_duration(execution_time)
-            );
-
             if let Some(revision) = new_revision {
+                info!(
+                    tracker.id = %tracker.id,
+                    tracker.name = tracker.name,
+                    metrics.job_execution_time = execution_time.as_nanos() as u64,
+                    "Successfully checked tracker data — changes detected, and a new data revision has been created."
+                );
+
                 let tracker_name = tracker.name.clone();
                 Self::try_notify(
                     &api,
@@ -174,6 +173,13 @@ impl TrackersFetchJob {
                     },
                 )
                 .await;
+            } else {
+                info!(
+                    tracker.id = %tracker.id,
+                    tracker.name = tracker.name,
+                    metrics.job_execution_time = execution_time.as_nanos() as u64,
+                    "Successfully checked tracker data — no changes detected since the last check."
+                );
             }
 
             api.db.reset_scheduler_job_state(job_id, false).await?;
