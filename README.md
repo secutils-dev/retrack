@@ -78,3 +78,18 @@ DATABASE_URL=postgres://postgres@localhost/retrack
 # Path to the configuration file.
 RETRACK_CONFIG=${PWD}/retrack.toml
 ```
+
+If you plan to interact with the web page trackers, you'll also need to have Chromium installed and start the Web Scraper component:
+```shell
+npm run watch -w components/web_scraper
+```
+
+You can also use `.env` file to configure Web Scraper:
+
+```dotenv
+# A path to the Chromium/Chrome executable.
+RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# An amount of time in seconds to cache the web page content by the Web Scraper component.
+RETRACK_WEB_SCRAPER_CACHE_TTL_SEC=5
+```
