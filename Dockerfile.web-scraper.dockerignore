@@ -1,0 +1,19 @@
+# Paths that should be ignored by all Docker images
+node_modules
+.idea
+.DS_Store
+dev
+.parcel-cache
+target
+dist
+.env
+.nvmrc
+.github
+.husky
+Dockerfile
+Dockerfile.web-scraper
+*.md
+*.dockerignore
+LICENSE
+retrack.toml
+rustfmt.toml
