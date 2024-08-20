@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths-ignore:
       - 'Dockerfile'
-      - '*.json'
+      - 'Dockerfile.*'
       - '*.md'
       - 'retrack.toml'
       - '.husky/**'
@@ -17,7 +17,7 @@ env:
 
 jobs:
   ci:
-    name: Build (Linux)
+    name: API Build (Linux)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -79,7 +79,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ws
 
       - name: Test
         run: npm test -w components/web_scraper
