@@ -2,7 +2,7 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 
 /// Parameters for getting a list of revisions of a tracker.
-#[derive(Deserialize, Default, Debug, Clone, PartialEq, Eq, IntoParams)]
+#[derive(Deserialize, Default, Debug, Copy, Clone, PartialEq, Eq, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerListRevisionsParams {
     /// Whether to refresh the list of revisions by triggering the tracker to fetch a new revision.

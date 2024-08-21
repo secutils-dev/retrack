@@ -58,6 +58,9 @@ httpmock = "0.7.0"
 insta = "1.39.0"
 toml = "0.8.19"
 
+[patch.crates-io]
+tokio-cron-scheduler = { git = 'https://github.com/azasypkin/tokio-cron-scheduler.git', branch = 'fix-time-till-next-job' }
+
 [features]
 default = [
     "bytes/serde",

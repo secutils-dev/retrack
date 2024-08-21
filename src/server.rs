@@ -26,7 +26,7 @@ use crate::{
     config::{Config, RawConfig},
     server::handlers::RetrackOpenApi,
 };
-pub use server_state::{ServerState, Status};
+pub use server_state::{GetStatusParams, SchedulerStatus, ServerState, Status};
 
 #[tokio::main]
 pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
@@ -77,9 +77,8 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
         create_templates()?,
     ));
 
-    Scheduler::start(api.clone()).await?;
-
-    let state = web::Data::new(ServerState::new(api));
+    let scheduler = Scheduler::start(api.clone()).await?;
+    let state = web::Data::new(ServerState::new(api, scheduler));
     let http_server = HttpServer::new(move || {
         App::new()
             .wrap(middleware::Compat::new(TracingLogger::default()))

@@ -31,6 +31,7 @@ use crate::{
     scheduler::scheduler_jobs::{
         NotificationsSendJob, TrackersFetchJob, TrackersScheduleJob, TrackersTriggerJob,
     },
+    server::SchedulerStatus,
 };
 
 /// Defines a maximum number of jobs that can be retrieved from the database at once.
@@ -47,8 +48,8 @@ const SCHEDULER_NOTIFICATION_STATES_TABLE: &str = "scheduler_notification_states
 
 /// The scheduler is responsible for scheduling and executing jobs.
 pub struct Scheduler<DR: DnsResolver, ET: EmailTransport> {
-    inner_scheduler: JobScheduler,
-    api: Arc<Api<DR, ET>>,
+    pub inner_scheduler: JobScheduler,
+    pub api: Arc<Api<DR, ET>>,
 }
 
 impl<DR: DnsResolver, ET: EmailTransport> Scheduler<DR, ET>
@@ -195,6 +196,23 @@ where
         }
 
         Ok(unique_resumed_jobs)
+    }
+
+    /// Returns the status of the scheduler.
+    pub async fn status(&mut self) -> anyhow::Result<SchedulerStatus> {
+        match self.inner_scheduler.time_till_next_job().await {
+            Ok(time_till_next_job) => Ok(SchedulerStatus {
+                operational: true,
+                time_till_next_job,
+            }),
+            Err(err) => {
+                error!(error = %err, "Failed to get scheduler status.");
+                Ok(SchedulerStatus {
+                    operational: false,
+                    time_till_next_job: None,
+                })
+            }
+        }
     }
 }
 
@@ -549,6 +567,22 @@ pub mod tests {
             ),
         ]
         "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn schedules_return_status(pool: PgPool) -> anyhow::Result<()> {
+        let mock_config = mock_scheduler_config(&pool).await?;
+        let api = Arc::new(mock_api_with_config(pool, mock_config).await?);
+        let mut scheduler = Scheduler::start(api.clone()).await?;
+
+        let jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
+        assert_eq!(jobs.len(), 3);
+
+        let status = scheduler.status().await?;
+        assert!(status.time_till_next_job.is_some());
+        assert!(status.operational);
 
         Ok(())
     }
