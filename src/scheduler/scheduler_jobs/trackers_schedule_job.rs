@@ -245,6 +245,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -266,6 +267,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -287,6 +289,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -367,6 +370,7 @@ mod tests {
                     headers: Default::default(),
                     job: Default::default(),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -426,6 +430,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 

@@ -89,6 +89,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 

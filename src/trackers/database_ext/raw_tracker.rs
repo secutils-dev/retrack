@@ -21,6 +21,7 @@ pub(super) struct RawTracker {
     pub url: String,
     pub config: Vec<u8>,
     pub target: Vec<u8>,
+    pub tags: Vec<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub job_id: Option<Uuid>,
@@ -134,6 +135,7 @@ impl TryFrom<RawTracker> for Tracker {
                 headers: raw_config.headers.map(Cow::into_owned),
                 job: job_config,
             },
+            tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
         })
@@ -215,6 +217,7 @@ impl TryFrom<&Tracker> for RawTracker {
                 headers: item.config.headers.as_ref().map(Cow::Borrowed),
                 job: job_config,
             })?,
+            tags: item.tags.clone(),
             created_at: item.created_at,
             updated_at: item.updated_at,
             job_id: item.job_id,
@@ -247,6 +250,7 @@ mod tests {
                 url: "https://retrack.dev".to_string(),
                 target: vec![0, 0, 0],
                 config: vec![1, 0, 0, 0],
+                tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 // January 1, 2000 10:00:10
@@ -265,6 +269,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: None,
@@ -284,6 +289,7 @@ mod tests {
                     101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
                     120, 0, 5, 1, 1
                 ],
+                tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 // January 1, 2000 10:00:10
@@ -322,6 +328,7 @@ mod tests {
                         notifications: Some(true)
                     }),
                 },
+                tags: vec!["tag".to_string()],
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
@@ -345,6 +352,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: None,
@@ -355,6 +363,7 @@ mod tests {
                 url: "https://retrack.dev/".to_string(),
                 target: vec![0, 0, 0],
                 config: vec![1, 0, 0, 0],
+                tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 // January 1, 2000 10:00:10
@@ -396,6 +405,7 @@ mod tests {
                         notifications: Some(true)
                     }),
                 },
+                tags: vec!["tag".to_string()],
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
@@ -412,6 +422,7 @@ mod tests {
                     101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
                     120, 0, 5, 1, 1
                 ],
+                tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                 // January 1, 2000 10:00:10

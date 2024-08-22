@@ -383,6 +383,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec![],
             })
             .await?;
         api.trackers()
@@ -456,6 +457,7 @@ mod tests {
                     notifications: None,
                 }),
             },
+            tags: vec![],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -579,6 +581,7 @@ mod tests {
                     notifications: Some(true),
                 }),
             },
+            tags: vec![],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -729,6 +732,7 @@ mod tests {
                     notifications: Some(true),
                 }),
             },
+            tags: vec![],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -877,6 +881,7 @@ mod tests {
                     notifications: Some(true),
                 }),
             },
+            tags: vec![],
 
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
@@ -1061,6 +1066,7 @@ mod tests {
                     notifications: Some(true),
                 }),
             },
+            tags: vec![],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(

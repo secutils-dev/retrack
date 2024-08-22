@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT id, name, url, target, config, created_at, updated_at, job_needed, job_id\nFROM trackers\nWHERE job_needed = TRUE AND job_id IS NULL\nORDER BY updated_at\n                ",
+  "query": "\nSELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed\nFROM trackers\nWHERE tags @> $1\nORDER BY updated_at\n                ",
   "describe": {
     "columns": [
       {
@@ -30,27 +30,34 @@
       },
       {
         "ordinal": 5,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 7,
-        "name": "job_needed",
-        "type_info": "Bool"
       },
       {
         "ordinal": 8,
         "name": "job_id",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "job_needed",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "TextArray"
+      ]
     },
     "nullable": [
       false,
@@ -61,8 +68,9 @@
       false,
       false,
       false,
-      true
+      true,
+      false
     ]
   },
-  "hash": "1a5808364d4fd5811898595a358ef516b087b976c8ea8e141b23df7fd2e0fb62"
+  "hash": "5c622f5f589318118c2719c33ff656e86bee01e48400502b119f9340b1bd0a0f"
 }

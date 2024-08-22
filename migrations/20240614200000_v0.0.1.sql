@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS trackers
     url         TEXT             NOT NULL COLLATE case_insensitive,
     target      BYTEA            NOT NULL,
     config      BYTEA            NOT NULL,
+    tags        TEXT[]           NOT NULL COLLATE case_insensitive DEFAULT '{}',
     created_at  TIMESTAMPTZ      NOT NULL,
     updated_at  TIMESTAMPTZ      NOT NULL,
     -- Internal fields for tracking job status.

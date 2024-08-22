@@ -65,10 +65,14 @@ mod tests {
                 .set_json(json!({ "name": "my-minimal-tracker".to_string(), "url": "https://retrack.dev/app"}))
                 .to_request(),
         )
-        .await;
+            .await;
         assert_eq!(response.status(), 200);
 
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
@@ -134,7 +138,11 @@ mod tests {
 
         assert_eq!(status, 200);
 
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
@@ -216,10 +224,15 @@ mod tests {
 
         assert_eq!(response.status(), 400);
         assert_eq!(
-            from_utf8(&response.into_body().try_into_bytes().unwrap()).unwrap(),
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
             r###"{"message":"Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/app."}"###
         );
-        assert!(server_state.api.trackers().get_trackers().await?.is_empty());
+        assert!(server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?
+            .is_empty());
 
         Ok(())
     }

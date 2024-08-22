@@ -9,7 +9,9 @@ mod tracker_target;
 mod web_scraper;
 
 pub use self::{
-    api_ext::{TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams},
+    api_ext::{
+        TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams, TrackersListParams,
+    },
     tracker::Tracker,
     tracker_config::TrackerConfig,
     tracker_data_revision::TrackerDataRevision,
@@ -59,6 +61,7 @@ pub mod tests {
                         headers: Default::default(),
                         job: None,
                     },
+                    tags: vec![],
                     created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                     updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 },
@@ -91,6 +94,11 @@ pub mod tests {
 
         pub fn with_extractor(mut self, extractor: String) -> Self {
             self.tracker.config.extractor = Some(extractor);
+            self
+        }
+
+        pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+            self.tracker.tags = tags;
             self
         }
 

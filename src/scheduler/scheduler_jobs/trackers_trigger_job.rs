@@ -180,6 +180,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()
@@ -251,6 +252,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()
@@ -301,6 +303,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()
@@ -351,6 +354,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()

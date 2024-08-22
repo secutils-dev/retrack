@@ -84,9 +84,14 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert_eq!(trackers.len(), 1);
 
         let response = call_service(
@@ -113,6 +118,7 @@ mod tests {
                             "notifications": true
                         }
                     },
+                    "tags": ["tag_two"]
                 }))
                 .to_request(),
         )
@@ -127,6 +133,7 @@ mod tests {
             .unwrap();
         assert_eq!(tracker.name, "new_name_one");
         assert_eq!(tracker.url, "https://retrack.dev/new-app".parse()?);
+        assert_eq!(tracker.tags, vec!["tag_two".to_string()]);
         assert_debug_snapshot!(tracker.config, @r###"
         TrackerConfig {
             revisions: 5,
@@ -178,9 +185,14 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert_eq!(trackers.len(), 1);
 
         let server_state = web::Data::new(
@@ -212,10 +224,14 @@ mod tests {
         .await;
         assert_eq!(response.status(), 400);
         assert_eq!(
-            from_utf8(&response.into_body().try_into_bytes().unwrap()).unwrap(),
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
             r###"{"message":"Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."}"###
         );
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert_eq!(trackers, vec![tracker]);
 
         Ok(())

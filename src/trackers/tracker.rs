@@ -22,6 +22,8 @@ pub struct Tracker {
     pub job_id: Option<Uuid>,
     /// Tracker config.
     pub config: TrackerConfig,
+    /// Case-insensitive tags to categorize the tracker.
+    pub tags: Vec<String>,
     /// Date and time when the tracker was created.
     #[serde(with = "time::serde::timestamp")]
     pub created_at: OffsetDateTime,
@@ -69,6 +71,7 @@ mod tests {
           "config": {
             "revisions": 3
           },
+          "tags": [],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
@@ -104,6 +107,7 @@ mod tests {
               "schedule": "0 0 * * *"
             }
           },
+          "tags": [],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
@@ -141,6 +145,7 @@ mod tests {
               "schedule": "0 0 * * *"
             }
           },
+          "tags": [],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
@@ -178,6 +183,7 @@ mod tests {
               "schedule": "0 0 * * *"
             }
           },
+          "tags": [],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
@@ -203,6 +209,7 @@ mod tests {
                 max_attempts: 10,
             }),
         })
+        .with_tags(vec!["tag".to_string()])
         .build();
         assert_json_snapshot!(tracker, @r###"
         {
@@ -228,6 +235,9 @@ mod tests {
               }
             }
           },
+          "tags": [
+            "tag"
+          ],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }

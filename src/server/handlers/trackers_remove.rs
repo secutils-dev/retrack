@@ -84,9 +84,14 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert_eq!(trackers.len(), 1);
 
         let response = call_service(
@@ -98,7 +103,11 @@ mod tests {
         .await;
         assert_eq!(response.status(), 204);
 
-        let trackers = server_state.api.trackers().get_trackers().await?;
+        let trackers = server_state
+            .api
+            .trackers()
+            .get_trackers(Default::default())
+            .await?;
         assert!(trackers.is_empty());
 
         Ok(())

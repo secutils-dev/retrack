@@ -17,6 +17,9 @@ pub struct TrackerCreateParams {
     /// Tracker config.
     #[serde(default)]
     pub config: TrackerConfig,
+    /// Tracker tags.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[cfg(test)]
@@ -38,7 +41,8 @@ mod tests {
                 name: "tck".to_string(),
                 url: Url::parse("https://retrack.dev")?,
                 target: Default::default(),
-                config: Default::default()
+                config: Default::default(),
+                tags: vec![]
             }
         );
 
@@ -62,6 +66,7 @@ mod tests {
                     revisions: 10,
                     ..Default::default()
                 },
+                tags: vec![]
             }
         );
 
@@ -86,6 +91,7 @@ mod tests {
                     revisions: 3,
                     ..Default::default()
                 },
+                tags: vec![]
             }
         );
 
@@ -117,7 +123,8 @@ mod tests {
                 },
                 "notifications": true
             }
-        }
+        },
+        "tags": ["tag"]
     }
               "#
             )?,
@@ -147,6 +154,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()]
             }
         );
 

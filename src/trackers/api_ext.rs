@@ -1,11 +1,12 @@
 mod tracker_create_params;
 mod tracker_list_revisions_params;
 mod tracker_update_params;
+mod trackers_list_params;
 
 pub use self::{
     tracker_create_params::TrackerCreateParams,
     tracker_list_revisions_params::TrackerListRevisionsParams,
-    tracker_update_params::TrackerUpdateParams,
+    tracker_update_params::TrackerUpdateParams, trackers_list_params::TrackersListParams,
 };
 use crate::{
     api::Api,
@@ -68,8 +69,8 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
     }
 
     /// Returns all trackers.
-    pub async fn get_trackers(&self) -> anyhow::Result<Vec<Tracker>> {
-        self.trackers.get_trackers().await
+    pub async fn get_trackers(&self, params: TrackersListParams) -> anyhow::Result<Vec<Tracker>> {
+        self.trackers.get_trackers(&params.tags).await
     }
 
     /// Returns tracker by its ID.
@@ -87,6 +88,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             url: params.url,
             target: params.target,
             config: params.config,
+            tags: params.tags,
             job_id: None,
             // Preserve timestamp only up to seconds.
             created_at,
@@ -110,9 +112,10 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             && params.url.is_none()
             && params.target.is_none()
             && params.config.is_none()
+            && params.tags.is_none()
         {
             bail!(RetrackError::client(format!(
-                "Either new name, url, target, or config should be provided ({id})."
+                "Either new name, url, target, config, or tags should be provided ({id})."
             )));
         }
 
@@ -156,6 +159,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             url: params.url.unwrap_or(existing_tracker.url),
             target: params.target.unwrap_or(existing_tracker.target),
             config: params.config.unwrap_or(existing_tracker.config),
+            tags: params.tags.unwrap_or(existing_tracker.tags),
             // Preserve timestamp only up to seconds.
             updated_at: OffsetDateTime::from_unix_timestamp(
                 OffsetDateTime::now_utc().unix_timestamp(),
@@ -551,7 +555,8 @@ mod tests {
         },
         trackers::{
             Tracker, TrackerConfig, TrackerCreateParams, TrackerListRevisionsParams, TrackerTarget,
-            TrackerUpdateParams, WebPageTarget, WebPageWaitFor, WebPageWaitForState,
+            TrackerUpdateParams, TrackersListParams, WebPageTarget, WebPageWaitFor,
+            WebPageWaitForState,
         },
     };
     use actix_web::ResponseError;
@@ -601,6 +606,7 @@ mod tests {
                         notifications: None,
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -635,6 +641,7 @@ mod tests {
             headers: Default::default(),
             job: None,
         };
+        let tags = vec!["tag".to_string()];
         let url = Url::parse("https://retrack.dev")?;
 
         let create_and_fail = |result: anyhow::Result<_>| -> RetrackError {
@@ -648,6 +655,7 @@ mod tests {
                 url: url.clone(),
                 target: target.clone(),
                 config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker name cannot be empty.""###
         );
@@ -658,7 +666,8 @@ mod tests {
                 name: "a".repeat(101),
                 url: url.clone(),
                 target: target.clone(),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker name cannot be longer than 100 characters.""###
         );
@@ -672,7 +681,8 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 31,
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker revisions count cannot be greater than 30.""###
         );
@@ -686,7 +696,8 @@ mod tests {
                     delay: Some(Duration::from_secs(61)),
                     ..Default::default()
                 }),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker web page delay cannot be greater than 60000ms.""###
         );
@@ -700,7 +711,8 @@ mod tests {
                     wait_for: Some("".parse()?),
                     ..Default::default()
                 }),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker web page wait-for selector cannot be empty.""###
         );
@@ -714,7 +726,8 @@ mod tests {
                     wait_for: Some("a".repeat(101).parse()?),
                     ..Default::default()
                 }),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker web page wait-for selector cannot be longer than 100 characters.""###
         );
@@ -732,7 +745,8 @@ mod tests {
                     }),
                     ..Default::default()
                 }),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker web page wait-for timeout cannot be greater than 60000ms.""###
         );
@@ -746,7 +760,8 @@ mod tests {
                 config: TrackerConfig {
                     extractor: Some("".to_string()),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker extractor script cannot be empty.""###
         );
@@ -764,7 +779,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###"
         Error {
@@ -787,7 +803,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker schedule must have at least 10s between occurrences, but detected 5s.""###
         );
@@ -808,7 +825,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker max retry attempts cannot be zero or greater than 10, but received 0.""###
         );
@@ -829,7 +847,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker max retry attempts cannot be zero or greater than 10, but received 11.""###
         );
@@ -850,7 +869,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker min retry interval cannot be less than 1m, but received 30s.""###
         );
@@ -873,7 +893,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker retry strategy max interval cannot be less than 1m, but received 30s.""###
         );
@@ -896,7 +917,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 12h, but received 13h.""###
         );
@@ -918,7 +940,8 @@ mod tests {
                         notifications: None,
                     }),
                     ..config.clone()
-                }
+                },
+                tags: tags.clone()
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
@@ -929,7 +952,8 @@ mod tests {
                 name: "name".to_string(),
                 url: Url::parse("ftp://retrack.dev")?,
                 target: target.clone(),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
         );
@@ -954,7 +978,8 @@ mod tests {
                 name: "name".to_string(),
                 url: Url::parse("https://127.0.0.1")?,
                 target: target.clone(),
-                config: config.clone()
+                config: config.clone(),
+                tags: tags.clone()
             }).await),
             @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
@@ -981,6 +1006,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -1056,6 +1082,33 @@ mod tests {
             api.get_tracker(tracker.id).await?.unwrap()
         );
 
+        // Update tags.
+        let updated_tracker = api
+            .update_tracker(
+                tracker.id,
+                TrackerUpdateParams {
+                    tags: Some(vec!["tag_two".to_string(), "tag_three".to_string()]),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let expected_tracker = Tracker {
+            name: "name_two".to_string(),
+            url: "http://localhost:1234/my/app?q=3".parse()?,
+            config: TrackerConfig {
+                revisions: 4,
+                ..tracker.config.clone()
+            },
+            tags: vec!["tag_two".to_string(), "tag_three".to_string()],
+            updated_at: updated_tracker.updated_at,
+            ..tracker.clone()
+        };
+        assert_eq!(expected_tracker, updated_tracker);
+        assert_eq!(
+            expected_tracker,
+            api.get_tracker(tracker.id).await?.unwrap()
+        );
+
         // Update job config.
         let updated_tracker = api
             .update_tracker(
@@ -1092,6 +1145,7 @@ mod tests {
                 }),
                 ..tracker.config.clone()
             },
+            tags: vec!["tag_two".to_string(), "tag_three".to_string()],
             updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
@@ -1123,6 +1177,7 @@ mod tests {
                 job: None,
                 ..tracker.config.clone()
             },
+            tags: vec!["tag_two".to_string(), "tag_three".to_string()],
             updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
@@ -1171,6 +1226,7 @@ mod tests {
                         notifications: None,
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -1187,7 +1243,7 @@ mod tests {
         assert_eq!(
             update_result.to_string(),
             format!(
-                "Either new name, url, target, or config should be provided ({}).",
+                "Either new name, url, target, config, or tags should be provided ({}).",
                 tracker.id
             )
         );
@@ -1518,6 +1574,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -1615,6 +1672,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         let tracker_two = trackers
@@ -1623,21 +1681,25 @@ mod tests {
                 url: Url::parse("https://retrack.dev")?,
                 target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
+                tags: tracker_one.tags.clone(),
             })
             .await?;
 
         assert_eq!(
-            trackers.get_trackers().await?,
+            trackers.get_trackers(Default::default()).await?,
             vec![tracker_one.clone(), tracker_two.clone()],
         );
 
         trackers.remove_tracker(tracker_one.id).await?;
 
-        assert_eq!(trackers.get_trackers().await?, vec![tracker_two.clone()],);
+        assert_eq!(
+            trackers.get_trackers(Default::default()).await?,
+            vec![tracker_two.clone()],
+        );
 
         trackers.remove_tracker(tracker_two.id).await?;
 
-        assert!(trackers.get_trackers().await?.is_empty());
+        assert!(trackers.get_trackers(Default::default()).await?.is_empty());
 
         Ok(())
     }
@@ -1670,6 +1732,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         assert_eq!(
@@ -1683,6 +1746,7 @@ mod tests {
                 url: Url::parse("https://retrack.dev")?,
                 target: tracker_one.target,
                 config: tracker_one.config.clone(),
+                tags: tracker_one.tags.clone(),
             })
             .await?;
 
@@ -1699,7 +1763,7 @@ mod tests {
         let api = mock_api(pool).await?;
 
         let trackers = api.trackers();
-        assert!(trackers.get_trackers().await?.is_empty(),);
+        assert!(trackers.get_trackers(Default::default()).await?.is_empty(),);
 
         let tracker_one = trackers
             .create_tracker(TrackerCreateParams {
@@ -1719,22 +1783,65 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag:1".to_string(), "tag:common".to_string()],
             })
             .await?;
-        assert_eq!(trackers.get_trackers().await?, vec![tracker_one.clone()],);
+        assert_eq!(
+            trackers.get_trackers(Default::default()).await?,
+            vec![tracker_one.clone()],
+        );
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
                 url: Url::parse("https://retrack.dev")?,
                 target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
+                tags: vec!["tag:2".to_string(), "tag:common".to_string()],
             })
             .await?;
 
         assert_eq!(
-            trackers.get_trackers().await?,
+            trackers.get_trackers(Default::default()).await?,
             vec![tracker_one.clone(), tracker_two.clone()],
         );
+        assert_eq!(
+            trackers
+                .get_trackers(TrackersListParams {
+                    tags: vec!["tag:2".to_string()]
+                })
+                .await?,
+            vec![tracker_two.clone()],
+        );
+        assert_eq!(
+            trackers
+                .get_trackers(TrackersListParams {
+                    tags: vec!["tag:1".to_string()]
+                })
+                .await?,
+            vec![tracker_one.clone()],
+        );
+        assert_eq!(
+            trackers
+                .get_trackers(TrackersListParams {
+                    tags: vec!["tag:1".to_string(), "tag:common".to_string()]
+                })
+                .await?,
+            vec![tracker_one.clone()],
+        );
+        assert_eq!(
+            trackers
+                .get_trackers(TrackersListParams {
+                    tags: vec!["tag:2".to_string(), "tag:common".to_string()]
+                })
+                .await?,
+            vec![tracker_two.clone()],
+        );
+        assert!(trackers
+            .get_trackers(TrackersListParams {
+                tags: vec!["tag:unknown".to_string(), "tag:common".to_string()]
+            })
+            .await?
+            .is_empty());
 
         Ok(())
     }
@@ -1770,6 +1877,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         let tracker_two = trackers
@@ -1778,6 +1886,7 @@ mod tests {
                 url: Url::parse("https://retrack.dev/two")?,
                 target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
+                tags: tracker_one.tags.clone(),
             })
             .await?;
 
@@ -1962,6 +2071,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2033,6 +2143,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2114,6 +2225,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2196,6 +2308,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2264,6 +2377,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2330,6 +2444,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2419,6 +2534,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()
@@ -2456,6 +2572,7 @@ mod tests {
                         }),
                         ..tracker.config.clone()
                     }),
+                    tags: Some(vec!["tag".to_string()]),
                 },
             )
             .await?;
@@ -2519,6 +2636,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()
@@ -2556,6 +2674,7 @@ mod tests {
                         }),
                         ..tracker.config.clone()
                     }),
+                    tags: Some(vec!["tag_two".to_string()]),
                 },
             )
             .await?;
@@ -2616,6 +2735,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -2727,6 +2847,7 @@ mod tests {
                             notifications: Some(true),
                         }),
                     },
+                    tags: vec!["tag".to_string()],
                 })
                 .await?;
         }
@@ -2739,7 +2860,7 @@ mod tests {
         assert!(pending_trackers.is_empty());
 
         // Assign job IDs to trackers.
-        let all_trackers = trackers.get_trackers().await?;
+        let all_trackers = trackers.get_trackers(Default::default()).await?;
         for (n, tracker) in all_trackers.iter().enumerate() {
             api.trackers()
                 .update_tracker_job(
@@ -2761,13 +2882,13 @@ mod tests {
             .collect::<anyhow::Result<Vec<_>, _>>()?;
         assert_eq!(pending_trackers.len(), 2);
 
-        let all_trackers = trackers.get_trackers().await?;
+        let all_trackers = trackers.get_trackers(Default::default()).await?;
         assert_eq!(
             vec![all_trackers[0].clone(), all_trackers[2].clone()],
             pending_trackers,
         );
 
-        let all_trackers = trackers.get_trackers().await?;
+        let all_trackers = trackers.get_trackers(Default::default()).await?;
         assert_eq!(all_trackers.len(), 3);
 
         Ok(())

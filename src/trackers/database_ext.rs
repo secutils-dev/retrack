@@ -28,18 +28,33 @@ impl<'pool> TrackersDatabaseExt<'pool> {
         Self { pool }
     }
 
-    /// Retrieves all trackers.
-    pub async fn get_trackers(&self) -> anyhow::Result<Vec<Tracker>> {
-        let raw_trackers = query_as!(
-            RawTracker,
-            r#"
-SELECT id, name, url, target, config, created_at, updated_at, job_id, job_needed
+    /// Retrieves all trackers that have all specified tags. If `tags` is empty, all trackers are returned.
+    pub async fn get_trackers(&self, tags: &[String]) -> anyhow::Result<Vec<Tracker>> {
+        let raw_trackers = if tags.is_empty() {
+            query_as!(
+                RawTracker,
+                r#"
+SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed
 FROM trackers
 ORDER BY updated_at
                 "#
-        )
-        .fetch_all(self.pool)
-        .await?;
+            )
+            .fetch_all(self.pool)
+            .await?
+        } else {
+            query_as!(
+                RawTracker,
+                r#"
+SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed
+FROM trackers
+WHERE tags @> $1
+ORDER BY updated_at
+                "#,
+                tags
+            )
+            .fetch_all(self.pool)
+            .await?
+        };
 
         let mut trackers = vec![];
         for raw_tracker in raw_trackers {
@@ -54,7 +69,7 @@ ORDER BY updated_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, target, config, created_at, updated_at, job_id, job_needed
+    SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed
     FROM trackers
     WHERE id = $1
                     "#,
@@ -71,21 +86,22 @@ ORDER BY updated_at
         let raw_tracker = RawTracker::try_from(tracker)?;
         let result = query!(
             r#"
-    INSERT INTO trackers (id, name, url, target, config, created_at, updated_at, job_needed, job_id)
-    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )
+    INSERT INTO trackers (id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id)
+    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 )
             "#,
             raw_tracker.id,
             raw_tracker.name,
             raw_tracker.url,
             raw_tracker.target,
             raw_tracker.config,
+            &raw_tracker.tags,
             raw_tracker.created_at,
             raw_tracker.updated_at,
             raw_tracker.job_needed,
             raw_tracker.job_id,
         )
-        .execute(self.pool)
-        .await;
+            .execute(self.pool)
+            .await;
 
         if let Err(err) = result {
             bail!(match err.as_database_error() {
@@ -111,7 +127,7 @@ ORDER BY updated_at
         let result = query!(
             r#"
 UPDATE trackers
-SET name = $2, url = $3, target = $4, config = $5, updated_at = $6, job_needed = $7, job_id = $8
+SET name = $2, url = $3, target = $4, config = $5, tags = $6, updated_at = $7, job_needed = $8, job_id = $9
 WHERE id = $1
         "#,
             raw_tracker.id,
@@ -119,12 +135,13 @@ WHERE id = $1
             raw_tracker.url,
             raw_tracker.target,
             raw_tracker.config,
+            &raw_tracker.tags,
             raw_tracker.updated_at,
             raw_tracker.job_needed,
             raw_tracker.job_id
         )
-        .execute(self.pool)
-        .await;
+            .execute(self.pool)
+            .await;
 
         match result {
             Ok(result) => {
@@ -269,7 +286,7 @@ ORDER BY data.created_at
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, url, target, config, created_at, updated_at, job_needed, job_id
+SELECT id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id
 FROM trackers
 WHERE job_needed = TRUE AND job_id IS NULL
 ORDER BY updated_at
@@ -302,7 +319,7 @@ ORDER BY updated_at
             loop {
                  let records = query!(
 r#"
-SELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config,
+SELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config, trackers.tags,
        trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra
 FROM trackers
 INNER JOIN scheduler_jobs as jobs
@@ -335,6 +352,7 @@ LIMIT $2;
                         url: record.url,
                         target: record.target,
                         config: record.config,
+                        tags: record.tags,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
                         job_needed: record.job_needed,
@@ -354,7 +372,7 @@ LIMIT $2;
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, target, config, created_at, updated_at, job_needed, job_id
+    SELECT id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id
     FROM trackers
     WHERE job_id = $1
                     "#,
@@ -756,7 +774,69 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        assert_eq!(trackers.get_trackers().await?, trackers_list);
+        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_retrieve_trackers_by_tags(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let trackers_list = vec![
+            MockWebPageTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                "some-name",
+                "https://retrack.dev",
+                3,
+            )?
+            .with_tags(vec!["tag:1".to_string()])
+            .build(),
+            MockWebPageTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                "some-name-2",
+                "https://retrack.dev",
+                3,
+            )?
+            .with_tags(vec!["tag:1".to_string(), "tag:2".to_string()])
+            .build(),
+            MockWebPageTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000003"),
+                "some-name-3",
+                "https://retrack.dev",
+                3,
+            )?
+            .build(),
+        ];
+
+        let trackers = db.trackers();
+        for tracker in trackers_list.iter() {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+        assert_eq!(
+            trackers.get_trackers(&["tag:1".to_string()]).await?,
+            vec![trackers_list[0].clone(), trackers_list[1].clone()]
+        );
+        assert_eq!(
+            trackers.get_trackers(&["tag:2".to_string()]).await?,
+            vec![trackers_list[1].clone()]
+        );
+        assert_eq!(
+            trackers
+                .get_trackers(&["tag:1".to_string(), "tag:2".to_string()])
+                .await?,
+            vec![trackers_list[1].clone()]
+        );
+        assert!(trackers
+            .get_trackers(&[
+                "tag:1".to_string(),
+                "tag:2".to_string(),
+                "tag:3".to_string()
+            ])
+            .await?
+            .is_empty());
 
         Ok(())
     }
@@ -1044,7 +1124,7 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        assert_eq!(trackers.get_trackers().await?, trackers_list);
+        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
 
         let trackers = db.trackers();
         assert_eq!(
@@ -1063,7 +1143,7 @@ mod tests {
             )
             .await?;
         assert_eq!(
-            trackers.get_trackers().await?,
+            trackers.get_trackers(&[]).await?,
             vec![
                 trackers_list[0].clone(),
                 Tracker {

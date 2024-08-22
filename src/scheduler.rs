@@ -347,6 +347,7 @@ pub mod tests {
                         notifications: Some(true),
                     }),
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
         api.trackers()

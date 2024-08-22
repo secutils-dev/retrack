@@ -2,6 +2,10 @@
 GET {{host}}/api/trackers
 Accept: application/json
 
+### Get trackers by tags
+GET {{host}}/api/trackers?tag=app:retrack
+Accept: application/json
+
 ### Get tracker
 GET {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4
 Accept: application/json
@@ -30,7 +34,8 @@ Accept: application/json
     "job": {
       "schedule": "0 */2 * * * * *"
     }
-  }
+  },
+  "tags": ["app:retrack"]
 }
 
 ### Update tracker

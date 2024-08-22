@@ -16,6 +16,8 @@ pub struct TrackerUpdateParams {
     pub target: Option<TrackerTarget>,
     /// Tracker config.
     pub config: Option<TrackerConfig>,
+    /// Tracker tags.
+    pub tags: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -44,7 +46,8 @@ mod tests {
                 name: Some("tck".to_string()),
                 url: None,
                 target: None,
-                config: None
+                config: None,
+                tags: None
             }
         );
 
@@ -67,7 +70,8 @@ mod tests {
                     delay: Some(Duration::from_millis(3000)),
                     wait_for: Some("div".parse()?),
                 })),
-                config: None
+                config: None,
+                tags: None
             }
         );
         assert_eq!(
@@ -98,6 +102,7 @@ mod tests {
                     ),
                     job: None
                 }),
+                tags: None
             }
         );
 
@@ -133,7 +138,8 @@ mod tests {
                 },
                 "notifications": true
             }
-        }
+        },
+        "tags": ["tag1", "tag2"]
     }
               "#
             )?,
@@ -167,6 +173,7 @@ mod tests {
                         notifications: Some(true),
                     }),
                 }),
+                tags: Some(vec!["tag1".to_string(), "tag2".to_string()])
             }
         );
 

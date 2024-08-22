@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    INSERT INTO trackers (id, name, url, target, config, created_at, updated_at, job_needed, job_id)\n    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )\n            ",
+  "query": "\n    INSERT INTO trackers (id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id)\n    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 )\n            ",
   "describe": {
     "columns": [],
     "parameters": {
@@ -10,6 +10,7 @@
         "Text",
         "Bytea",
         "Bytea",
+        "TextArray",
         "Timestamptz",
         "Timestamptz",
         "Bool",
@@ -18,5 +19,5 @@
     },
     "nullable": []
   },
-  "hash": "bf0a3f8159aae1ddcf874032ed057f90bb580f45b6a21012c2bacedd35779a58"
+  "hash": "f876a7c583c1fbb23ce1236882050fc587b0d0c480414916e9cb6044a9dfbdc4"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT id, name, url, target, config, created_at, updated_at, job_id, job_needed\n    FROM trackers\n    WHERE id = $1\n                    ",
+  "query": "\n    SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed\n    FROM trackers\n    WHERE id = $1\n                    ",
   "describe": {
     "columns": [
       {
@@ -30,21 +30,26 @@
       },
       {
         "ordinal": 5,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "job_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "job_needed",
         "type_info": "Bool"
       }
@@ -62,9 +67,10 @@
       false,
       false,
       false,
+      false,
       true,
       false
     ]
   },
-  "hash": "eaa893cb965412868ebae3060c48142b44eaa7729acc01e3daa279fa73fb771b"
+  "hash": "995c6c27af797ab7b05f22dbfa02a733dd56c1fa305f2faa0a12d6ecf7d5964b"
 }

@@ -1,17 +1,22 @@
-use crate::{error::Error as RetrackError, server::ServerState};
+use crate::{error::Error as RetrackError, server::ServerState, trackers::TrackersListParams};
 use actix_web::{get, web, HttpResponse};
+use actix_web_lab::extract::Query;
 use tracing::error;
 
 /// Gets a list of active trackers.
 #[utoipa::path(
     tags = ["trackers"],
+    params(TrackersListParams),
     responses(
-        (status = 200, description = "A list of currently active trackers.", body = [Tracker])
+        (status = 200, description = "A list of currently active trackers, optionally filtered by the specified tags.", body = [Tracker])
     )
 )]
 #[get("/api/trackers")]
-pub async fn trackers_list(state: web::Data<ServerState>) -> Result<HttpResponse, RetrackError> {
-    match state.api.trackers().get_trackers().await {
+pub async fn trackers_list(
+    state: web::Data<ServerState>,
+    params: Query<TrackersListParams>,
+) -> Result<HttpResponse, RetrackError> {
+    match state.api.trackers().get_trackers(params.into_inner()).await {
         Ok(trackers) => Ok(HttpResponse::Ok().json(trackers)),
         Err(err) => {
             error!("Failed to retrieve trackers: {err:?}");
@@ -73,6 +78,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag".to_string()],
             })
             .await?;
 
@@ -104,6 +110,7 @@ mod tests {
                     headers: Default::default(),
                     job: None,
                 },
+                tags: vec!["tag_two".to_string()],
             })
             .await?;
 
