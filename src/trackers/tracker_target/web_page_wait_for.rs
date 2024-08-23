@@ -13,6 +13,7 @@ use void::Void;
 #[serde(rename_all = "camelCase")]
 pub struct WebPageWaitFor {
     /// The CSS selector to locate a target element.
+    #[schema(min_length = 1, max_length = 100)]
     pub selector: String,
 
     /// Optional state of the element to wait for. If not specified, the default state is `Visible`.

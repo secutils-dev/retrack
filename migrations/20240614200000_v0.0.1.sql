@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS trackers
     job_needed  BOOL             NOT NULL,
     job_id      UUID UNIQUE
 );
+CREATE INDEX trackers_tags_idx ON trackers USING gin(tags);
 
 -- Table to store trackers captured data.
 CREATE TABLE IF NOT EXISTS trackers_data

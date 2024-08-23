@@ -25,7 +25,7 @@ use crate::{
 use anyhow::{anyhow, bail};
 use cron::Schedule;
 use futures::Stream;
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 use time::OffsetDateTime;
 use tracing::debug;
 use uuid::Uuid;
@@ -54,6 +54,12 @@ const MAX_TRACKER_RETRY_INTERVAL: Duration = Duration::from_secs(12 * 3600);
 /// Defines the maximum length of a tracker name.
 pub const MAX_TRACKER_NAME_LENGTH: usize = 100;
 
+/// Defines the maximum length of a tracker tag.
+pub const MAX_TRACKER_TAG_LENGTH: usize = 50;
+
+/// Defines the maximum count of tracker tags.
+pub const MAX_TRACKER_TAGS_COUNT: usize = 10;
+
 pub struct TrackersApiExt<'a, DR: DnsResolver, ET: EmailTransport> {
     api: &'a Api<DR, ET>,
     trackers: TrackersDatabaseExt<'a>,
@@ -70,7 +76,15 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
     /// Returns all trackers.
     pub async fn get_trackers(&self, params: TrackersListParams) -> anyhow::Result<Vec<Tracker>> {
-        self.trackers.get_trackers(&params.tags).await
+        let normalized_tags = Self::normalize_tracker_tags(params.tags);
+        if normalized_tags.len() > MAX_TRACKER_TAGS_COUNT {
+            bail!(RetrackError::client(format!(
+                "Trackers filter params cannot use more than {MAX_TRACKER_TAGS_COUNT} tags."
+            )));
+        }
+        Self::validate_tracker_tags(&normalized_tags)?;
+
+        self.trackers.get_trackers(&normalized_tags).await
     }
 
     /// Returns tracker by its ID.
@@ -88,7 +102,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             url: params.url,
             target: params.target,
             config: params.config,
-            tags: params.tags,
+            tags: Self::normalize_tracker_tags(params.tags),
             job_id: None,
             // Preserve timestamp only up to seconds.
             created_at,
@@ -159,7 +173,10 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             url: params.url.unwrap_or(existing_tracker.url),
             target: params.target.unwrap_or(existing_tracker.target),
             config: params.config.unwrap_or(existing_tracker.config),
-            tags: params.tags.unwrap_or(existing_tracker.tags),
+            tags: params
+                .tags
+                .map(Self::normalize_tracker_tags)
+                .unwrap_or(existing_tracker.tags),
             // Preserve timestamp only up to seconds.
             updated_at: OffsetDateTime::from_unix_timestamp(
                 OffsetDateTime::now_utc().unix_timestamp(),
@@ -297,6 +314,15 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         self.trackers.update_tracker_job(id, job_id).await
     }
 
+    /// Normalizes tracker tags (trim, deduplicate, and lowercase).
+    fn normalize_tracker_tags(tags: Vec<String>) -> Vec<String> {
+        tags.into_iter()
+            .map(|tag| tag.trim().to_lowercase())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Validates tracker parameters.
     async fn validate_tracker(&self, tracker: &Tracker) -> anyhow::Result<()> {
         if tracker.name.is_empty() {
@@ -309,6 +335,14 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             )));
         }
 
+        if tracker.tags.len() > MAX_TRACKER_TAGS_COUNT {
+            bail!(RetrackError::client(format!(
+                "Tracker cannot have more than {MAX_TRACKER_TAGS_COUNT} tags."
+            )));
+        }
+
+        Self::validate_tracker_tags(&tracker.tags)?;
+
         let config = &self.api.config.trackers;
         if tracker.config.revisions > config.max_revisions {
             bail!(RetrackError::client(format!(
@@ -318,7 +352,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         }
 
         if let TrackerTarget::WebPage(ref web_page_target) = tracker.target {
-            self.validate_web_page_target(web_page_target)?;
+            Self::validate_web_page_target(web_page_target)?;
         }
 
         if let Some(ref script) = tracker.config.extractor {
@@ -412,8 +446,22 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         Ok(())
     }
 
+    /// Validates tracker tags.
+    fn validate_tracker_tags(tags: &[String]) -> anyhow::Result<()> {
+        if tags
+            .iter()
+            .any(|tag| tag.is_empty() || tag.len() > MAX_TRACKER_TAG_LENGTH)
+        {
+            bail!(RetrackError::client(format!(
+                "Tracker tags cannot be empty or longer than {MAX_TRACKER_TAG_LENGTH} characters."
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Validates tracker's web page target parameters.
-    fn validate_web_page_target(&self, target: &WebPageTarget) -> anyhow::Result<()> {
+    fn validate_web_page_target(target: &WebPageTarget) -> anyhow::Result<()> {
         if let Some(ref delay) = target.delay {
             if delay > &MAX_TRACKER_WEB_PAGE_WAIT_DELAY {
                 bail!(RetrackError::client(format!(
@@ -606,11 +654,12 @@ mod tests {
                         notifications: None,
                     }),
                 },
-                tags: vec!["tag".to_string()],
+                tags: vec!["tag".to_string(), "TAG".to_string(), " tag".to_string()],
             })
             .await?;
 
         assert_eq!(tracker, api.get_tracker(tracker.id).await?.unwrap());
+        assert_eq!(tracker.tags, vec!["tag".to_string()]);
 
         Ok(())
     }
@@ -685,6 +734,42 @@ mod tests {
                 tags: tags.clone()
             }).await),
             @r###""Tracker revisions count cannot be greater than 30.""###
+        );
+
+        // Very long tag.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                url: url.clone(),
+                target: target.clone(),
+                config: config.clone(),
+                tags: vec!["a".repeat(51)]
+            }).await),
+            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+        );
+
+        // Empty tag.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                url: url.clone(),
+                target: target.clone(),
+                config: config.clone(),
+                tags: vec!["tag".to_string(), "".to_string()]
+            }).await),
+            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+        );
+
+        // Too many tags.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                url: url.clone(),
+                target: target.clone(),
+                config: config.clone(),
+                tags: (0..11).map(|i| i.to_string()).collect()
+            }).await),
+            @r###""Tracker cannot have more than 10 tags.""###
         );
 
         // Too long web page target delay.
@@ -1087,7 +1172,11 @@ mod tests {
             .update_tracker(
                 tracker.id,
                 TrackerUpdateParams {
-                    tags: Some(vec!["tag_two".to_string(), "tag_three".to_string()]),
+                    tags: Some(vec![
+                        "tag_two".to_string(),
+                        "TAG_TWO".to_string(),
+                        " tag_two".to_string(),
+                    ]),
                     ..Default::default()
                 },
             )
@@ -1099,7 +1188,7 @@ mod tests {
                 revisions: 4,
                 ..tracker.config.clone()
             },
-            tags: vec!["tag_two".to_string(), "tag_three".to_string()],
+            tags: vec!["tag_two".to_string()],
             updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
@@ -1145,7 +1234,7 @@ mod tests {
                 }),
                 ..tracker.config.clone()
             },
-            tags: vec!["tag_two".to_string(), "tag_three".to_string()],
+            tags: vec!["tag_two".to_string()],
             updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
@@ -1177,7 +1266,7 @@ mod tests {
                 job: None,
                 ..tracker.config.clone()
             },
-            tags: vec!["tag_two".to_string(), "tag_three".to_string()],
+            tags: vec!["tag_two".to_string()],
             updated_at: updated_tracker.updated_at,
             ..tracker.clone()
         };
@@ -1293,6 +1382,33 @@ mod tests {
                 ..Default::default()
             }).await),
             @r###""Tracker revisions count cannot be greater than 30.""###
+        );
+
+        // Very long tag.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                tags: Some(vec!["a".repeat(51)]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+        );
+
+        // Empty tag.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                tags: Some(vec!["tag".to_string(), "".to_string()]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+        );
+
+        // Too many tags.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                tags: Some((0..11).map(|i| i.to_string()).collect()),
+                ..Default::default()
+            }).await),
+            @r###""Tracker cannot have more than 10 tags.""###
         );
 
         // Too long web page target delay.
@@ -1842,6 +1958,42 @@ mod tests {
             })
             .await?
             .is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_validates_trackers_list_parameters(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let api = api.trackers();
+
+        let list_and_fail = |result: anyhow::Result<_>| -> RetrackError {
+            result.unwrap_err().downcast::<RetrackError>().unwrap()
+        };
+
+        // Very long tag.
+        assert_debug_snapshot!(
+            list_and_fail(api.get_trackers(TrackersListParams {
+                tags: vec!["a".repeat(51)]
+            }).await),
+            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+        );
+
+        // Empty tag.
+        assert_debug_snapshot!(
+            list_and_fail(api.get_trackers(TrackersListParams {
+                tags: vec!["tag".to_string(), "".to_string()]
+            }).await),
+            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+        );
+
+        // Too many tags.
+        assert_debug_snapshot!(
+            list_and_fail(api.get_trackers(TrackersListParams {
+                tags: (0..11).map(|i| i.to_string()).collect()
+            }).await),
+            @r###""Trackers filter params cannot use more than 10 tags.""###
+        );
 
         Ok(())
     }

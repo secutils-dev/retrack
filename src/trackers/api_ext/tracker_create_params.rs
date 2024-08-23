@@ -8,6 +8,7 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct TrackerCreateParams {
     /// Arbitrary name of the tracker.
+    #[schema(min_length = 1, max_length = 100)]
     pub name: String,
     /// URL of the resource to track.
     pub url: Url,
@@ -18,6 +19,7 @@ pub struct TrackerCreateParams {
     #[serde(default)]
     pub config: TrackerConfig,
     /// Tracker tags.
+    #[schema(max_items = 10, min_length = 1, max_length = 50)]
     #[serde(default)]
     pub tags: Vec<String>,
 }

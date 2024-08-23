@@ -6,6 +6,7 @@ use utoipa::IntoParams;
 #[serde(rename_all = "camelCase")]
 pub struct TrackersListParams {
     /// List of tags to filter trackers by.
+    #[param(max_items = 10, min_length = 1, max_length = 50)]
     #[serde(default, rename = "tag")]
     pub tags: Vec<String>,
 }
