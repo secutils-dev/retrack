@@ -41,7 +41,7 @@ mod tests {
     use url::Url;
 
     #[sqlx::test]
-    async fn can_list_tracker(pool: PgPool) -> anyhow::Result<()> {
+    async fn can_list_trackers(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
             App::new()
@@ -123,6 +123,151 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&[tracker_1, tracker_2])?,
             from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_list_trackers_with_tags(pool: PgPool) -> anyhow::Result<()> {
+        let server_state = web::Data::new(mock_server_state(pool).await?);
+        let app = init_service(
+            App::new()
+                .app_data(server_state.clone())
+                .service(trackers_list),
+        )
+        .await;
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=app:retrack").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
+            "[]"
+        );
+
+        // Create tracker.
+        let tracker_1 = server_state
+            .api
+            .trackers()
+            .create_tracker(TrackerCreateParams {
+                name: "name_one".to_string(),
+                url: Url::parse("http://localhost:1234/my/app?q=2")?,
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
+                }),
+                config: TrackerConfig {
+                    revisions: 3,
+                    extractor: Default::default(),
+                    headers: Default::default(),
+                    job: None,
+                },
+                tags: vec!["app:retrack".to_string(), "User:1".to_string()],
+            })
+            .await?;
+
+        // Create another tracker.
+        let tracker_2 = server_state
+            .api
+            .trackers()
+            .create_tracker(TrackerCreateParams {
+                name: "name_two".to_string(),
+                url: Url::parse("http://localhost:1234/my/app?q=2")?,
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    delay: Some(Duration::from_millis(2000)),
+                    wait_for: Some("div".parse()?),
+                }),
+                config: TrackerConfig {
+                    revisions: 3,
+                    extractor: Default::default(),
+                    headers: Default::default(),
+                    job: None,
+                },
+                tags: vec!["app:retrack".to_string(), "User:2".to_string()],
+            })
+            .await?;
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=user:1").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            serde_json::to_string(&[&tracker_1])?,
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=user:1&tag=app:retrack")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            serde_json::to_string(&[&tracker_1])?,
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=USER:2").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            serde_json::to_string(&[&tracker_2])?,
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=user:2&tag=app:retrack")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            serde_json::to_string(&[&tracker_2])?,
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=App:retrack").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            serde_json::to_string(&[&tracker_1, &tracker_2])?,
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=app:retrack").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            serde_json::to_string(&[tracker_1, tracker_2])?,
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?tag=app:unknown").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
+            "[]"
         );
 
         Ok(())
