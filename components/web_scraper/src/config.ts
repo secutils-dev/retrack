@@ -1,6 +1,6 @@
 import * as dotenv from 'dotenv';
 
-import pkg from '../package.json' assert { type: 'json' };
+import pkg from '../package.json' with { type: 'json' };
 
 export interface Config {
   version: string;

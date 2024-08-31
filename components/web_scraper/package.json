@@ -7,7 +7,7 @@
   },
   "version": "0.0.1",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "type": "module",
   "main": "dist/src/index.js",
@@ -17,8 +17,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "watch": "NODE_OPTIONS=--import=./register.js RETRACK_WEB_SCRAPER_ENV_PATH=../../.env nodemon src/index.ts",
-    "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --test ./src/tests.ts",
-    "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --test --watch ./src/tests.ts"
+    "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test ./src/tests.ts",
+    "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test --watch ./src/tests.ts"
   },
   "dependencies": {
     "@fastify/compress": "^7.0.3",
@@ -27,14 +27,15 @@
     "fastify": "^4.28.1",
     "js-beautify": "^1.15.1",
     "node-cache": "^5.1.2",
-    "playwright": "1.45.1"
+    "playwright-core": "1.45.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
-    "@eslint/js": "^9.9.0",
+    "@eslint/js": "^9.9.1",
     "@types/js-beautify": "^1.14.3",
-    "@types/node": "^22.2.0",
-    "eslint": "^9.9.0",
+    "@types/node": "^22.5.1",
+    "@types/ws": "^8.5.12",
+    "eslint": "^9.9.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "globals": "^15.9.0",
@@ -43,6 +44,7 @@
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4",
-    "typescript-eslint": "^8.1.0"
+    "typescript-eslint": "^8.3.0",
+    "ws": "^8.18.0"
   }
 }

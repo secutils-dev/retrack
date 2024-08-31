@@ -1,0 +1,134 @@
+// DEBUG=pw:protocol npm run test:watch -w components/web_scraper
+
+[11:41:36 UTC] INFO: Step 1: Connecting to a browser…
+  pw:protocol SEND ► {"id":1,"method":"Browser.getVersion"} +0ms
+  pw:protocol ◀ RECV {"id":1,"result":{"protocolVersion":"1.3","product":"Chrome/128.0.6613.113","revision":"@9597ae93a15d4d03089b4e9997b1072228baa9ad","userAgent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/128.0.0.0 Safari/537.36","jsVersion":"12.8.374.24"}} +368ms
+
+  pw:protocol SEND ► {"id":2,"method":"Target.setAutoAttach","params":{"autoAttach":true,"waitForDebuggerOnStart":true,"flatten":true}} +0ms
+  pw:protocol ◀ RECV {"id":2,"result":{}} +1ms
+
+[11:41:42 UTC] INFO: Step 2: Creating context…
+  pw:protocol SEND ► {"id":3,"method":"Target.createBrowserContext","params":{"disposeOnDetach":true}} +8s
+  pw:protocol ◀ RECV {"id":3,"result":{"browserContextId":"38E5A7C26517FD366108C7A312C21FF1"}} +7ms
+
+  pw:protocol SEND ► {"id":4,"method":"Browser.setDownloadBehavior","params":{"behavior":"allowAndName","browserContextId":"38E5A7C26517FD366108C7A312C21FF1","downloadPath":"/var/folders/9j/8dppfsyj4j70c0hfldz8l2g80000gn/T/playwright-artifacts-3tAj0ggGiytf","eventsEnabled":true}} +2ms
+  pw:protocol ◀ RECV {"id":4,"result":{}} +1ms
+
+[11:41:48 UTC] INFO: Step 3: Creating a page…
+  pw:protocol SEND ► {"id":5,"method":"Target.createTarget","params":{"url":"about:blank","browserContextId":"38E5A7C26517FD366108C7A312C21FF1"}} +6s
+  pw:protocol ◀ RECV {"method":"Target.attachedToTarget","params":{"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43","targetInfo":{"targetId":"B3A3B434CC5001702EA73A7B76F02DB4","type":"page","title":"","url":"about:blank","attached":true,"canAccessOpener":false,"browserContextId":"38E5A7C26517FD366108C7A312C21FF1"},"waitingForDebugger":true}} +69ms
+  pw:protocol ◀ RECV {"id":5,"result":{"targetId":"B3A3B434CC5001702EA73A7B76F02DB4"}} +6ms
+
+  pw:protocol SEND ► {"id":6,"method":"Browser.getWindowForTarget","sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+  pw:protocol ◀ RECV {"id":6,"result":{"windowId":395781215,"bounds":{"left":22,"top":47,"width":1200,"height":1371,"windowState":"normal"}},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +7ms
+
+  pw:protocol SEND ► {"id":7,"method":"Page.enable","sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":7,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":8,"method":"Page.getFrameTree","sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":8,"result":{"frameTree":{"frame":{"id":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","url":"about:blank","domainAndRegistry":"","securityOrigin":"://","mimeType":"text/html","adFrameStatus":{"adFrameType":"none"},"secureContextType":"InsecureScheme","crossOriginIsolatedContextType":"NotIsolated","gatedAPIFeatures":[]}}
+
+  pw:protocol SEND ► {"id":9,"method":"Log.enable","params":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":9,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":10,"method":"Page.setLifecycleEventsEnabled","params":{"enabled":true},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"commit","timestamp":466951.881846},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"DOMContentLoaded","timestamp":466951.881891},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"load","timestamp":466951.882378},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"networkAlmostIdle","timestamp":466951.882291},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"networkIdle","timestamp":466951.882291},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+  pw:protocol ◀ RECV {"id":10,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":11,"method":"Runtime.enable","params":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Runtime.executionContextCreated","params":{"context":{"id":1,"origin":"://","name":"","uniqueId":"-4794704493778289939.5863022730874866662","auxData":{"isDefault":true,"type":"default","frameId":"B3A3B434CC5001702EA73A7B76F02DB4"}}},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":11,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":12,"method":"Page.addScriptToEvaluateOnNewDocument","params":{"source":"","worldName":"__playwright_utility_world__"},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":12,"result":{"identifier":"1"},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":13,"method":"Network.enable","sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+  pw:protocol ◀ RECV {"method":"Network.policyUpdated","params":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +25ms
+  pw:protocol ◀ RECV {"id":13,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":14,"method":"Target.setAutoAttach","params":{"autoAttach":true,"waitForDebuggerOnStart":true,"flatten":true},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":14,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":15,"method":"Emulation.setFocusEmulationEnabled","params":{"enabled":true},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":15,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":16,"method":"Emulation.setDeviceMetricsOverride","params":{"mobile":false,"width":1280,"height":720,"screenWidth":1280,"screenHeight":720,"deviceScaleFactor":1,"screenOrientation":{"angle":0,"type":"landscapePrimary"}},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":16,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":17,"method":"Browser.setWindowBounds","params":{"windowId":395781215,"bounds":{"width":1280,"height":720}},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.frameResized","params":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":17,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +2ms
+
+  pw:protocol SEND ► {"id":18,"method":"Page.setFontFamilies","params":{"fontFamilies":{"standard":"Times","fixed":"Courier","serif":"Times","sansSerif":"Helvetica","cursive":"Apple Chancery","fantasy":"Papyrus"},"forScripts":[{"script":"jpan","fontFamilies":{"standard":"Hiragino Kaku Gothic ProN","fixed":"Osaka-Mono","serif":"Hiragino Mincho ProN","sansSerif":"Hiragino Kaku Goth
+  pw:protocol ◀ RECV {"id":18,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+
+  pw:protocol SEND ► {"id":19,"method":"Emulation.setEmulatedMedia","params":{"media":"","features":[{"name":"prefers-color-scheme","value":"light"},{"name":"prefers-reduced-motion","value":"no-preference"},{"name":"forced-colors","value":"none"}]},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":19,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol SEND ► {"id":20,"method":"Runtime.runIfWaitingForDebugger","sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+  pw:protocol ◀ RECV {"id":20,"result":{},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol ◀ RECV {"method":"Page.frameStoppedLoading","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4"},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +2ms
+
+  pw:protocol SEND ► {"id":21,"method":"Page.createIsolatedWorld","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","grantUniveralAccess":true,"worldName":"__playwright_utility_world__"},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+  pw:protocol ◀ RECV {"method":"Runtime.executionContextCreated","params":{"context":{"id":2,"origin":"","name":"__playwright_utility_world__","uniqueId":"3619076036493720473.2291309561558851914","auxData":{"isDefault":false,"type":"isolated","frameId":"B3A3B434CC5001702EA73A7B76F02DB4"}}},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+  pw:protocol ◀ RECV {"id":21,"result":{"executionContextId":2},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"networkAlmostIdle","timestamp":466951.882291},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1s
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","loaderId":"DA0E26D2A15233E2E16AFEDB6F4654BC","name":"networkIdle","timestamp":466951.882291},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+
+[11:41:48 UTC] INFO: Step 4: Go to…
+  pw:protocol SEND ► {"id":22,"method":"Page.navigate","params":{"url":"https://y5l3m6u-demo.webhooks.dev.secutils.dev/","frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","referrerPolicy":"unsafeUrl"},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +4s
+  pw:protocol ◀ RECV {"method":"Page.frameStartedLoading","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD"},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Network.requestWillBeSent","params":{"requestId":"93512EFAE4DED1EAA9180540339BB64A","loaderId":"93512EFAE4DED1EAA9180540339BB64A","documentURL":"https://y5l3m6u-demo.webhooks.dev.secutils.dev/","request":{"url":"https://y5l3m6u-demo.webhooks.dev.secutils.dev/","method":"GET","headers":{"Upgrade-Insecure-Requests":"1","User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/128.0.0.0 Safari/537.36","sec-ch-ua":"\"Chromium\";v=\"128\", \"Not;A=Brand\";v=\"24\", \"Google Chrome\";v=\"128\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\""},"mixedContentType":"none","initialPriority":"VeryHigh","referrerPolicy":"unsafe-url","isSameSite":true},"timestamp":470419.656571,"wallTime":1725107977.144978,"initiator":{"type":"other"},"redirectHasExtraInfo":false,"type":"Document","frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","hasUserGesture":false},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Network.requestWillBeSentExtraInfo","params":{"requestId":"93512EFAE4DED1EAA9180540339BB64A","associatedCookies":[],"headers":{":authority":"y5l3m6u-demo.webhooks.dev.secutils.dev",":method":"GET",":path":"/",":scheme":"https","accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7","accept-encoding":"gzip, deflate, br, zstd","accept-language":"en-GB,en;q=0.9","priority":"u=0, i","sec-ch-ua":"\"Chromium\";v=\"128\", \"Not;A=Brand\";v=\"24\", \"Google Chrome\";v=\"128\"","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"\"macOS\"","sec-fetch-dest":"document","sec-fetch-mode":"navigate","sec-fetch-site":"none","sec-fetch-user":"?1","upgrade-insecure-requests":"1","user-agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/128.0.0.0 Safari/537.36"},"connectTiming":{"requestTime":470419.656859},"siteHasCookieInOtherPartition":false},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +127ms
+  pw:protocol ◀ RECV {"method":"Network.responseReceivedExtraInfo","params":{"requestId":"93512EFAE4DED1EAA9180540339BB64A","blockedCookies":[],"headers":{"content-encoding":"br","content-type":"text/html; charset=utf-8","date":"Sat, 31 Aug 2024 12:39:37 GMT","vary":"accept-encoding"},"resourceIPAddressSpace":"Public","statusCode":200,"cookiePartitionKey":{"topLevelSite":"https://secutils.dev","hasCrossSiteAncestor":false},"cookiePartitionKeyOpaque":false,"exemptedCookies":[]},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +41ms
+  pw:protocol ◀ RECV {"method":"Network.responseReceived","params":{"requestId":"93512EFAE4DED1EAA9180540339BB64A","loaderId":"93512EFAE4DED1EAA9180540339BB64A","timestamp":470419.825108,"type":"Document","response":{"url":"https://y5l3m6u-demo.webhooks.dev.secutils.dev/","status":200,"statusText":"","headers":{"content-encoding":"br","content-type":"text/html; charset=utf-8","date":"Sat, 31 Aug 2024 12:39:37 GMT","vary":"accept-encoding"},"mimeType":"text/html","charset":"utf-8","connectionReused":false,"connectionId":149,"remoteIPAddress":"141.147.60.150","remotePort":443,"fromDiskCache":false,"fromServiceWorker":false,"fromPrefetchCache":false,"encodedDataLength":74,"timing":{"requestTime":470419.656859,"proxyStart":-1,"proxyEnd":-1,"dnsStart":0,"dnsEnd":38.357,"connectStart":38.383,"connectEnd":126.385,"sslStart":64.2,"sslEnd":126.382,"workerStart":-1,"workerReady":-1,"workerFetchStart":-1,"workerRespondWithSettled":-1,"sendStart":126.501,"sendEnd":126.548,"pushStart":0,"pushEnd":0,"receiveHeadersStart":167.892,"receiveHeadersEnd":167.939},"responseTime":1725107977313.158,"protocol":"h2","alternateProtocolUsage":"unspecifiedReason","securityState":"secure","securityDetails":{"protocol":"TLS 1.3","keyExchange":"","keyExchangeGroup":"X25519","cipher":"AES_128_GCM","certificateId":0,"subjectName":"*.webhooks.dev.secutils.dev","sanList":["*.webhooks.dev.secutils.dev"],"issuer":"R10","validFrom":1723183874,"validTo":1730959873,"signedCertificateTimestampList":[{"status":"Verified","origin":"Embedded in certificate","logDescription":"Let's Encrypt 'Oak2024H2' log","logId":"3F174B4FD7224758941D651C84BE0D12ED90377F1F856AEBC1BF2885ECF8646E","timestamp":1723187384714,"hashAlgorithm":"SHA-256","signatureAlgorithm":"ECDSA","signatureData":"30450221008CF3D525695CB1442768B619FBDDCB1053E934A11C727E7E80416A981D2CF92A0220760102F28F82FEAEABBE3FB7F70D517D8ABB6FCCBDACA73D284BE0CB96EFE0A1"},{"status":"Verified","origin":"Embedded in certificate","logDescription":"DigiCert Yeti2024 Log","logId":"48B0E36BDAA647340FE56A02FA9D30EB1C5201CB56DD2C81D9BBBFAB39D88473","timestamp":1723187384719,"hashAlgorithm":"SHA-256","signatureAlgorithm":"ECDSA","signatureData":"3046022100E8583CD4974C7C1C48E58EDA3C733C4D1E8C14085F98278953F24B3D5EA2EF61022100F486FDBB0A6F1541A4EEB141B7B9D6D2D5DAA36A4D8005A22580FA30F713F9AD"}],"certificateTransparencyCompliance":"compliant","serverSignatureAlgorithm":2052,"encryptedClientHello":false}},"hasExtraInfo":true,"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD"},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"id":22,"result":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A"},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +2ms
+
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"init","timestamp":470419.827894},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Runtime.executionContextsCleared","params":{},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.frameNavigated","params":{"frame":{"id":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","url":"https://y5l3m6u-demo.webhooks.dev.secutils.dev/","domainAndRegistry":"secutils.dev","securityOrigin":"https://y5l3m6u-demo.webhooks.dev.secutils.dev","mimeType":"text/html","adFrameStatus":{"adFrameType":"none"},"secureContextType":"Secure","crossOriginIsolatedContextType":"NotIsolated","gatedAPIFeatures":[]},"type":"Navigation"},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Network.policyUpdated","params":{},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Network.dataReceived","params":{"requestId":"93512EFAE4DED1EAA9180540339BB64A","timestamp":470419.828648,"dataLength":59,"encodedDataLength":0},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Runtime.executionContextCreated","params":{"context":{"id":3,"origin":"https://y5l3m6u-demo.webhooks.dev.secutils.dev","name":"","uniqueId":"-2610867348221850951.-4972601015215501478","auxData":{"isDefault":true,"type":"default","frameId":"47AAACCFCAA5C17FD8E42179CD506CBD"}}},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Runtime.executionContextCreated","params":{"context":{"id":4,"origin":"://","name":"__playwright_utility_world__","uniqueId":"3716384730603951001.7583649978469418254","auxData":{"isDefault":false,"type":"isolated","frameId":"47AAACCFCAA5C17FD8E42179CD506CBD"}}},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Network.loadingFinished","params":{"requestId":"93512EFAE4DED1EAA9180540339BB64A","timestamp":470419.824916,"encodedDataLength":148},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Page.domContentEventFired","params":{"timestamp":470419.83008},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"DOMContentLoaded","timestamp":470419.83008},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.loadEventFired","params":{"timestamp":470419.830279},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"load","timestamp":470419.830279},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.frameStoppedLoading","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD"},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +3ms
+
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"firstPaint","timestamp":470419.857223},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +10ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"firstContentfulPaint","timestamp":470419.857223},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +1ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"firstMeaningfulPaintCandidate","timestamp":470419.857223},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"networkAlmostIdle","timestamp":470419.830232},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +956ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"firstMeaningfulPaint","timestamp":470419.857223},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"networkIdle","timestamp":470419.881963},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +0ms
+  pw:protocol ◀ RECV {"method":"Page.lifecycleEvent","params":{"frameId":"47AAACCFCAA5C17FD8E42179CD506CBD","loaderId":"93512EFAE4DED1EAA9180540339BB64A","name":"InteractiveTime","timestamp":470424.859879},"sessionId":"3F2683741E9935900DDAB6B76CC96699"} +4s
+
+[11:41:54 UTC] INFO: Step 5: Get page content…
+  pw:protocol SEND ► {"id":23,"method":"Runtime.evaluate","params":{"expression":"\n      (() => {\n        const module = {};\n        \nvar __commonJS = obj => {\n  let required = false;\n  let result;\n  return function __require() {\n    if (!required) {\n      required = true;\n      let fn;\n      for (co   const args = argsAndHandles.slice(0, argCount);\n    const handles = argsAndHandles.slice(argCount);\n    const parameters = [];\n    for (let i = 0; i < args.length; i++)\n      parameters[i] = this.parseEvaluationResultValue(args[i], handles);\n    let result2 = globalThis.eval(expression);\n    if (isFunction === true) {\n      result2 = result2(...parameters);\n    } else if (isFunction === false) {\n      result2 = result2;\n    } else {\n      if (typeof result2 === \"function\")\n        result2 = result2(...parameters);\n    }\n    return returnByValue ? this._promiseAwareJsonValueNoThrow(result2) : result2;\n  }\n  jsonValue(returnByValue, value) {\n    if (Object.is(value, void 0))\n      return void 0;\n    return serializeAsCallArgument(value, (value2) => ({ fallThrough: value2 }));\n  }\n  _promiseAwareJsonValueNoThrow(value) {\n    const safeJson = (value2) => {\n      try {\n        return this.jsonValue(true, value2);\n      } catch (e) {\n        return void 0;\n      }\n    };\n    if (value && typeof value === \"object\" && typeof value.then === \"function\") {\n      return (async () => {\n        const promiseValue = await value;\n        return safeJson(promiseValue);\n      })();\n    }\n    return safeJson(value);\n  }\n  _setBuiltins() {\n    var _a, _b;\n    const window = globalThis;\n    window.builtinSetTimeout = (callback, timeout) => {\n      var _a2;\n      if ((_a2 = window.__pwClock) == null ? void 0 : _a2.builtin)\n        return window.__pwClock.builtin.setTimeout(callback, timeout);\n      return setTimeout(callback, timeout);\n    };\n    window.builtinClearTimeout = (id) => {\n      var _a2;\n      if ((_a2 = window.__pwClock) == null ? void 0 : _a2.builtin)\n        return window.__pwClock.builtin.clearTimeout(id);\n      return clearTimeout(id);\n    };\n    window.builtinSetInterval = (callback, timeout) => {\n      var _a2;\n      if ((_a2 = window.__pwClock) == null ? void 0 : _a2.builtin)\n        return window.__pwClock.builtin.setInterval(callback, timeout);\n      return setInterval(callback, timeout);\n    };\n    window.builtinClearInterval = (id) => {\n      var _a2;\n      if ((_a2 = window.__pwClock) == null ? void 0 : _a2.builtin)\n        return window.__pwClock.builtin.clearInterval(id);\n      return clearInterval(id);\n    };\n    window.builtinRequestAnimationFrame = (callback) => {\n      var _a2;\n      if ((_a2 = window.__pwClock) == null ? void 0 : _a2.builtin)\n        return window.__pwClock.builtin.requestAnimationFrame(callback);\n      return requestAnimationFrame(callback);\n    };\n    window.builtinCancelAnimationFrame = (id) => {\n      var _a2;\n      if ((_a2 = window.__pwClock) == null ? void 0 : _a2.builtin)\n        return window.__pwClock.builtin.cancelAnimationFrame(id);\n      return cancelAnimationFrame(id);\n    };\n    window.builtinDate = ((_a = window.__pwClock) == null ? void 0 : _a.builtin.Date) || Date;\n    window.builtinPerformance = ((_b = window.__pwClock) == null ? void 0 : _b.builtin.performance) || performance;\n  }\n};\n\n        return new (module.exports.UtilityScript())(false);\n      })();","contextId":4},"sessionId":"64808CB073F6E16A7E6006F5FD7C9A7D"} +4s
+  pw:protocol ◀ RECV {"id":23,"result":{"result":{"type":"object","className":"UtilityScript","description":"UtilityScript","objectId":"2533827586503800783.4.1"}},"sessionId":"64808CB073F6E16A7E6006F5FD7C9A7D"} +2ms
+  pw:protocol SEND ► {"id":24,"method":"Runtime.callFunctionOn","params":{"functionDeclaration":"(utilityScript, ...args) => utilityScript.evaluate(...args)","objectId":"2533827586503800783.4.1","arguments":[{"objectId":"2533827586503800783.4.1"},{"value":true},{"value":true},{"value":"() => {\n        let retVal = '';\n        if (document.doctype) retVal = new XMLSerializer().serializeToString(document.doctype);\n        if (document.documentElement) retVal += document.documentElement.outerHTML;\n        return retVal;\n      }"},{"value":1},{"value":{"v":"undefined"}}],"returnByValue":true,"awaitPromise":true,"userGesture":true},"sessionId":"64808CB073F6E16A7E6006F5FD7C9A7D"} +0ms
+  pw:protocol ◀ RECV {"id":24,"result":{"result":{"type":"string","value":"<html><head></head><body>Hello from <a href=\"https://secutils.dev\">Secutils.dev</a>!</body></html>"}},"sessionId":"64808CB073F6E16A7E6006F5FD7C9A7D"} +1ms
+
+[11:41:54 UTC] INFO: Step 6: Closing the context…
+  pw:protocol SEND ► {"id":22,"method":"Target.disposeBrowserContext","params":{"browserContextId":"38E5A7C26517FD366108C7A312C21FF1"}} +5s
+  pw:protocol ◀ RECV {"method":"Inspector.detached","params":{"reason":"Render process gone."},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+  pw:protocol ◀ RECV {"method":"Target.detachedFromTarget","params":{"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43","targetId":"B3A3B434CC5001702EA73A7B76F02DB4"}} +1ms
+  pw:protocol ◀ RECV {"id":22,"result":{}} +10ms
+
+[11:42:00 UTC] INFO: Step 7: Browser closing…
+  pw:protocol ◀ RECV {"id":-9999,"result":{}} +10m
+
+
+
+
+

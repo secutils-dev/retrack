@@ -1,32 +1,17 @@
 import * as process from 'process';
 
 import { fastifyCompress } from '@fastify/compress';
-import type { FastifyInstance } from 'fastify';
 import { fastify } from 'fastify';
 import NodeCache from 'node-cache';
-import type { Browser } from 'playwright';
-import { chromium } from 'playwright';
+import type { BrowserServer } from 'playwright-core';
+import { chromium } from 'playwright-core';
 
 import { Diagnostics } from './api/diagnostics.js';
 import { registerRoutes } from './api/index.js';
 import { configure } from './config.js';
+import type { BrowserEndpoint } from './utilities/browser.js';
 
 const config = configure();
-
-export interface BrowserInfo {
-  running: boolean;
-  name?: string;
-  version?: string;
-  contexts: BrowserContext[];
-}
-
-export interface BrowserContext {
-  pages: string[];
-}
-
-let browser: Browser | undefined;
-let browserShutdownTimer: NodeJS.Timeout | undefined;
-let browserInfo: BrowserInfo = { running: false, contexts: [] };
 
 const cache = new NodeCache({ stdTTL: config.cacheTTLSec });
 const server = fastify({
@@ -39,108 +24,104 @@ const server = fastify({
         },
 })
   .register(fastifyCompress)
-  .addHook('onClose', (instance) => stopBrowser(instance));
+  .addHook('onClose', () => stopBrowserServer());
 
-async function runBrowser(serverInstance: FastifyInstance) {
-  const headless = true;
+const browserServer: {
+  cachedEndpoint: BrowserEndpoint;
+  pendingEndpoint?: Promise<BrowserEndpoint>;
+  shutdownTimer?: NodeJS.Timeout;
+  server?: BrowserServer;
+} = {
+  // The scraper can connect to a remote browser or run a local one:
+  // * `browserType.connectOverCDP` is used to connect to a remote Chromium CDP session. In this case, Playwright
+  // doesn't even need to be installed where Chromium is running (e.g., in a Docker container with the following
+  // switches `--remote-debugging-port=9222 --remote-allow-origins="*"`). Both Playwright server and client will be
+  // running locally and talking to remote browser over CDP.
+  // * `browserType.connect` is used to connect to a remote Playwright Server launched via `browserType.launchServer`.
+  // In this case communication between Playwright client and server will be done over the special Playwright protocol,
+  // and then the Playwright Server would be talking to the browser over normal CDP.
+  // See https://github.com/microsoft/playwright/issues/15265#issuecomment-1172860134 for more details.
+  cachedEndpoint: process.env.RETRACK_WEB_SCRAPER_BROWSER_CDP_WS_ENDPOINT
+    ? { protocol: 'cdp', url: process.env.RETRACK_WEB_SCRAPER_BROWSER_CDP_WS_ENDPOINT }
+    : { protocol: 'playwright', url: '' },
+};
+
+async function launchBrowserServer() {
+  const headless = process.env.RETRACK_WEB_SCRAPER_BROWSER_NO_HEADLESS !== 'true';
   const chromiumSandbox = !(process.env.RETRACK_WEB_SCRAPER_BROWSER_NO_SANDBOX === 'true');
   const executablePath = process.env.RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH || undefined;
-  serverInstance.log.info(
-    `Running browser (executable: ${executablePath}, headless: ${headless}, sandbox: ${chromiumSandbox})...`,
-  );
+  server.log.info(`Browser server will be run locally (headless: ${headless}, sandbox: ${chromiumSandbox}).`);
+
   try {
-    const browserToRun = await chromium.launch({
+    const localServer = await chromium.launchServer({
       executablePath,
       headless,
       chromiumSandbox,
       args: ['--disable-web-security'],
     });
-    serverInstance.log.info(`Successfully run browser (headless: ${headless}, sandbox: ${chromiumSandbox}).`);
-
-    browserInfo = {
-      running: true,
-      name: browserToRun.browserType().name(),
-      version: browserToRun.version(),
-      contexts: [],
-    };
-
-    return browserToRun;
+    server.log.info(
+      `Browser server is running locally at ${browserServer.cachedEndpoint.url} (headless: ${headless}, sandbox: ${chromiumSandbox}).`,
+    );
+    return localServer;
   } catch (err) {
-    serverInstance.log.error(
-      `Failed to run browser (headless: ${headless}, sandbox: ${chromiumSandbox}): ${Diagnostics.errorMessage(err)}`,
+    server.log.error(
+      `Failed to run browser server locally (headless: ${headless}, sandbox: ${chromiumSandbox}): ${Diagnostics.errorMessage(err)}`,
     );
     throw err;
   }
 }
 
-async function stopBrowser(serverInstance: FastifyInstance) {
-  if (!browser) {
+async function stopBrowserServer() {
+  const localServer = browserServer.server;
+  if (!localServer) {
     return;
   }
 
+  server.log.info('Stopping local browser server...');
+
+  browserServer.server = undefined;
+  browserServer.cachedEndpoint.url = '';
+  clearTimeout(browserServer.shutdownTimer);
+  browserServer.shutdownTimer = undefined;
+
   try {
-    serverInstance.log.info('Stopping browser...');
-    await browser.close();
-    browser = undefined;
-    browserInfo.running = false;
-    serverInstance.log.info('Successfully stopped browser.');
+    await localServer.close();
+    server.log.info('Successfully stopped local browser server.');
   } catch (err) {
-    serverInstance.log.error(`Failed to stop browser: ${Diagnostics.errorMessage(err)}`);
+    server.log.error(`Failed to stop local browser server: ${Diagnostics.errorMessage(err)}`);
   }
 }
 
-let browserIsLaunching: Promise<Browser> | undefined;
 registerRoutes({
   server,
   cache,
   config,
-  browserInfo: () => {
-    return {
-      ...browserInfo,
-      contexts: browser
-        ? browser.contexts().map((context) => ({ pages: context.pages().map((page) => page.url()) }))
-        : [],
-    };
-  },
-  acquireBrowser: async () => {
-    if (browserIsLaunching) {
-      server.log.info('Requested browser while it is still launching, waiting...');
-      return browserIsLaunching;
+  getBrowserEndpoint: async ({ launchServer = true }: { launchServer?: boolean } = {}) => {
+    // For local browser server, we will stop it after a certain period of inactivity to free up resources.
+    if (browserServer.cachedEndpoint.protocol === 'playwright') {
+      if (browserServer.shutdownTimer) {
+        clearTimeout(browserServer.shutdownTimer);
+      }
+      browserServer.shutdownTimer = setTimeout(() => stopBrowserServer().catch(() => {}), config.browserTTLSec * 1000);
     }
 
-    if (browserShutdownTimer) {
-      clearTimeout(browserShutdownTimer);
-      browserShutdownTimer = undefined;
+    if (browserServer.cachedEndpoint.url || !launchServer) {
+      return browserServer.cachedEndpoint;
     }
 
-    if (browser?.isConnected()) {
-      browserShutdownTimer = setTimeout(() => {
-        stopBrowser(server).catch((err: Error) => {
-          server.log.error(`Failed to stop browser: ${err?.message}`);
+    if (!browserServer.pendingEndpoint) {
+      browserServer.pendingEndpoint = launchBrowserServer()
+        .then((localServer) => {
+          browserServer.server = localServer;
+          browserServer.cachedEndpoint.url = localServer.wsEndpoint();
+          return browserServer.cachedEndpoint;
+        })
+        .finally(() => {
+          browserServer.pendingEndpoint = undefined;
         });
-      }, config.browserTTLSec * 1000);
-      return browser;
     }
 
-    return (browserIsLaunching = (browser ? stopBrowser(server).then(() => runBrowser(server)) : runBrowser(server))
-      .then(
-        (newBrowser) => {
-          browser = newBrowser;
-          browserShutdownTimer = setTimeout(() => {
-            stopBrowser(server).catch((err: Error) => {
-              server.log.error(`Failed to stop browser: ${err?.message}`);
-            });
-          }, config.browserTTLSec * 1000);
-          return newBrowser;
-        },
-        (err) => {
-          browser = undefined;
-          throw err;
-        },
-      )
-      .finally(() => {
-        browserIsLaunching = undefined;
-      }));
+    return browserServer.pendingEndpoint;
   },
 });
 

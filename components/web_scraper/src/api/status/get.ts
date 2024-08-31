@@ -1,6 +1,6 @@
 import type { ApiRouteParams } from '../api_route_params.js';
 
-export function registerStatusGetRoutes({ server, config, browserInfo }: ApiRouteParams) {
+export function registerStatusGetRoutes({ server, config, getBrowserEndpoint }: ApiRouteParams) {
   // Register a route that returns the status of the Web Scraper component.
   return server.get(
     '/api/status',
@@ -14,13 +14,8 @@ export function registerStatusGetRoutes({ server, config, browserInfo }: ApiRout
               browser: {
                 type: 'object',
                 properties: {
-                  running: { type: 'boolean' },
-                  name: { type: 'string', nullable: true },
-                  version: { type: 'string', nullable: true },
-                  contexts: {
-                    type: 'array',
-                    items: { type: 'object', properties: { pages: { type: 'array', items: { type: 'string' } } } },
-                  },
+                  protocol: { type: 'string' },
+                  url: { type: 'string', nullable: true },
                 },
               },
             },
@@ -28,10 +23,10 @@ export function registerStatusGetRoutes({ server, config, browserInfo }: ApiRout
         },
       },
     },
-    () => {
+    async () => {
       return {
         version: config.version,
-        browser: browserInfo(),
+        browser: await getBrowserEndpoint({ launchServer: false }),
       };
     },
   );
