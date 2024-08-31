@@ -24,7 +24,13 @@ fi
 
 if ! cargo test
 then
-    echo "There are some test issues."
+    echo "There are some API tests issues."
+    exit 1
+fi
+
+if ! npm run test --ws
+then
+    echo "There are some component tests issues."
     exit 1
 fi
 
