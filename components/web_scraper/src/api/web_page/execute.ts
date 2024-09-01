@@ -4,7 +4,7 @@ import { Worker } from 'node:worker_threads';
 import type { ApiRouteParams } from '../api_route_params.js';
 import { Diagnostics } from '../diagnostics.js';
 import type { WorkerLogMessage, WorkerResultMessage } from './constants.js';
-import { DEFAULT_USER_SCRIPT_TIMEOUT_MS } from './constants.js';
+import { DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS } from './constants.js';
 import { WorkerMessageType } from './constants.js';
 
 /**
@@ -12,11 +12,12 @@ import { WorkerMessageType } from './constants.js';
  */
 interface RequestBodyType {
   /**
-   * Playwright scenario to execute. It should be represented as an ES module that exports a function named "execute"
-   * that accepts a previously saved web page "content", if available and returns a new one. The function is supposed
-   * to return any JSON-serializable value that will be used as a new web page "content".
+   * Playwright script to extract content from a web page to track. It should be represented as an ES module that
+   * exports a function named "execute" that accepts a previously saved web page "content", if available and returns a
+   * new one. The function is supposed to return any JSON-serializable value or `ExecutionResult` instance that will be
+   * used as a new web page "content".
    */
-  scenario: string;
+  extractor: string;
 
   /**
    * Optional web page content that has been extracted previously.
@@ -24,7 +25,7 @@ interface RequestBodyType {
   previousContent?: { type: string; value: string };
 
   /**
-   * Number of milliseconds to wait until user script finishes processing. Default is 30000ms.
+   * Number of milliseconds to wait until extractor script finishes processing. Default is 30000ms.
    */
   timeout?: number;
 }
@@ -35,7 +36,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
     {
       schema: {
         body: {
-          scenario: { type: 'string' },
+          extractor: { type: 'string' },
           previousContent: {
             type: 'object',
             properties: { timestamp: { type: 'number' }, content: { type: 'string' } },
@@ -51,18 +52,18 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
     async (request, reply) => {
       const log = server.log.child({ provider: 'web_page_execute' });
       const workerLog = log.child({ provider: 'worker' });
-      const timeout = request.body.timeout ?? DEFAULT_USER_SCRIPT_TIMEOUT_MS;
+      const timeout = request.body.timeout ?? DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS;
 
       try {
-        // The scenario is executed in a separate thread to isolate it from the main thread. We filter the environment
-        // variables to only include the ones that are necessary for the scenario to run.
+        // The extractor script is executed in a separate thread to isolate it from the main thread. We filter the
+        // environment variables to only include the ones that are necessary for the extractor script to run.
         const worker = new Worker(resolve(import.meta.dirname, 'worker.js'), {
           eval: false,
           env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k === 'NODE' || k === 'NODE_OPTIONS')),
           execArgv: ['--no-experimental-global-webcrypto'],
           workerData: {
             endpoint: await getBrowserEndpoint(),
-            scenario: request.body.scenario,
+            extractor: request.body.extractor,
             previousContent: request.body.previousContent,
           },
         });
@@ -72,9 +73,9 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
           let successfulResult: WorkerResultMessage['content'] | undefined;
 
           const forcedWorkerTimeout = setTimeout(() => {
-            errorResult = new Error(`Scenario was terminated due to timeout ${timeout}ms.`);
+            errorResult = new Error(`The execution was terminated due to timeout ${timeout}ms.`);
             void worker.terminate();
-          }, request.body.timeout ?? DEFAULT_USER_SCRIPT_TIMEOUT_MS);
+          }, request.body.timeout ?? DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS);
 
           worker.on('message', (message: WorkerLogMessage | WorkerResultMessage) => {
             if (message.type === WorkerMessageType.LOG) {
@@ -87,7 +88,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
                 workerLog.info(message.message, message.args);
               }
             } else {
-              workerLog.debug(`Successfully executed scenario.`);
+              workerLog.debug(`Successfully executed extractor script.`);
               successfulResult = message.content;
             }
           });
@@ -105,14 +106,14 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
             } else if (successfulResult) {
               resolve({ timestamp: Date.now(), content: JSON.stringify(successfulResult) });
             } else {
-              reject(new Error(`Unexpected error occurred while processing scenario (${code}).`));
+              reject(new Error(`Unexpected error occurred (${code}).`));
             }
           });
         });
       } catch (err) {
-        log.error(`Failed to execute scenario: ${Diagnostics.errorMessage(err)}`);
+        log.error(`Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`);
         return reply.code(500).send({
-          message: `Failed to execute scenario: ${Diagnostics.errorMessage(err)}`,
+          message: `Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`,
         });
       }
     },

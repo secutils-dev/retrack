@@ -2,7 +2,7 @@ import jsonStableStringify from 'fast-json-stable-stringify';
 import type { WorkerResultMessage } from './constants.js';
 
 /**
- * Represents the result of the execution of a scenario.
+ * Represents the result of the execution of an extractor script.
  */
 export class ExecutionResult {
   readonly value: string;

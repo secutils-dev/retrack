@@ -3,45 +3,45 @@ GET {{web-scraper}}/api/status
 Accept: application/json
 Content-Type: application/json
 
-### Execute scenario
+### Execute extractor script
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
 Content-Type: application/json
 
 {
-  "scenario": "data:text/javascript,console.log(process.env);"
+  "extractor": "data:text/javascript,console.log(process.env);"
 }
 
-### Execute scenario (complex, should fail).
+### Execute extractor script (complex, should fail).
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
 Content-Type: application/json
 
 {
-  "scenario": "async function execute(context) { const { workerData } = await import('node:worker_threads');console.log(`LEAK: ${JSON.stringify(workerData.wsEndpoint)}`); const page = await context.newPage(); await page.goto('https://google.com'); return await page.evaluate(([x, y]) => Promise.resolve(x * y), [7, 8]); }; export { execute };"
+  "extractor": "async function execute(context) { const { workerData } = await import('node:worker_threads');console.log(`LEAK: ${JSON.stringify(workerData.wsEndpoint)}`); const page = await context.newPage(); await page.goto('https://google.com'); return await page.evaluate(([x, y]) => Promise.resolve(x * y), [7, 8]); }; export { execute };"
 }
 
-### Execute scenario (complex).
+### Execute extractor script (complex).
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
 Content-Type: application/json
 
 {
-  "scenario": "async function execute(context) { const page = await context.newPage(); await page.goto('https://yandex.ru'); return await page.context().browser().contexts().length }; export { execute };"
+  "extractor": "async function execute(context) { const page = await context.newPage(); await page.goto('https://yandex.ru'); return await page.context().browser().contexts().length }; export { execute };"
 }
 
-### Execute scenario (cdp).
+### Execute extractor script (cdp).
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
 Content-Type: application/json
 
 {
-  "scenario": "async function execute(context) { const page = await context.newPage(); await page.goto('https://google.com'); return JSON.stringify(await (await context.newCDPSession(page)).send('Target.getTargets')); }; export { execute };"
+  "extractor": "async function execute(context) { const page = await context.newPage(); await page.goto('https://google.com'); return JSON.stringify(await (await context.newCDPSession(page)).send('Target.getTargets')); }; export { execute };"
 }
 
-### Execute scenario (cdp).
+### Execute extractor script (cdp).
 < {%
-  const scenario = `
+  const extractor = `
     async function execute(context, result) {
       const page = await context.newPage();
       const delay = (time) => new Promise((resolve) => setTimeout(resolve, time));
@@ -53,12 +53,12 @@ Content-Type: application/json
     };
     export { execute };
   `;
-  request.variables.set("scenario", scenario.replaceAll('\n', '').trim())
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
 %}
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
 Content-Type: application/json
 
 {
-  "scenario": "{{scenario}}"
+  "extractor": "{{extractor}}"
 }
