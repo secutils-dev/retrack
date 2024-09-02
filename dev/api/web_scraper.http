@@ -3,22 +3,13 @@ GET {{web-scraper}}/api/status
 Accept: application/json
 Content-Type: application/json
 
-### Execute extractor script
-POST {{web-scraper}}/api/web_page/execute
-Accept: application/json
-Content-Type: application/json
-
-{
-  "extractor": "data:text/javascript,console.log(process.env);"
-}
-
 ### Execute extractor script (complex, should fail).
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
 Content-Type: application/json
 
 {
-  "extractor": "async function execute(context) { const { workerData } = await import('node:worker_threads');console.log(`LEAK: ${JSON.stringify(workerData.wsEndpoint)}`); const page = await context.newPage(); await page.goto('https://google.com'); return await page.evaluate(([x, y]) => Promise.resolve(x * y), [7, 8]); }; export { execute };"
+  "extractor": "export async function execute(page) { const { workerData } = await import('node:worker_threads');console.log(`LEAK: ${JSON.stringify(workerData.wsEndpoint)}`); await page.goto('https://google.com'); return await page.evaluate(([x, y]) => Promise.resolve(x * y), [7, 8]); };"
 }
 
 ### Execute extractor script (complex).
@@ -27,7 +18,7 @@ Accept: application/json
 Content-Type: application/json
 
 {
-  "extractor": "async function execute(context) { const page = await context.newPage(); await page.goto('https://yandex.ru'); return await page.context().browser().contexts().length }; export { execute };"
+  "extractor": "export async function execute(page) { await page.goto('https://google.com'); return await page.context().browser().contexts().length };"
 }
 
 ### Execute extractor script (cdp).
@@ -36,14 +27,13 @@ Accept: application/json
 Content-Type: application/json
 
 {
-  "extractor": "async function execute(context) { const page = await context.newPage(); await page.goto('https://google.com'); return JSON.stringify(await (await context.newCDPSession(page)).send('Target.getTargets')); }; export { execute };"
+  "extractor": "async function execute(page) { await page.goto('https://google.com'); return JSON.stringify(await (await page.context().newCDPSession(page)).send('Target.getTargets')); }; export { execute };"
 }
 
 ### Execute extractor script (cdp).
 < {%
   const extractor = `
-    async function execute(context, result) {
-      const page = await context.newPage();
+    export async function execute(page, result) {
       const delay = (time) => new Promise((resolve) => setTimeout(resolve, time));
       await delay(5000);
       await page.goto('https://y5l3m6u-demo.webhooks.dev.secutils.dev/');
@@ -51,7 +41,6 @@ Content-Type: application/json
       /*return result.html(await page.locator('table.overview-table').innerHTML());*/
       return await page.content();
     };
-    export { execute };
   `;
   request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
 %}
@@ -61,4 +50,24 @@ Content-Type: application/json
 
 {
   "extractor": "{{extractor}}"
+}
+
+### Execute extractor script (cdp).
+< {%
+  const extractor = `
+    export async function execute(page, result) {
+      await page.goto('https://y5l3m6u-demo.webhooks.dev.secutils.dev/');
+      return await page.content();
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{web-scraper}}/api/web_page/execute
+Accept: application/json
+Content-Type: application/json
+
+{
+  "extractor": "{{extractor}}",
+  "userAgent": "Retrack/1.0.0",
+  "ignoreHTTPSErrors": true
 }

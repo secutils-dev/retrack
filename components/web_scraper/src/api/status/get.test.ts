@@ -1,4 +1,4 @@
-import * as assert from 'node:assert';
+import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { registerStatusGetRoutes } from './get.js';

@@ -5,6 +5,13 @@ import { WebSocketServer } from 'ws';
 export interface BrowserServerMockParams {
   logReceivedMessages?: boolean;
 }
+
+export interface IncomingMessage {
+  id: number;
+  method: string;
+  params: unknown;
+  sessionId?: string;
+}
 export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
   const port = 8080;
 
@@ -23,6 +30,7 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
     };
   };
 
+  const messages: Array<IncomingMessage> = [];
   const runtimeCallFunctionOn = mock.fn<
     (params: Protocol.CommandParameters['Runtime.callFunctionOn']) => Protocol.Runtime.RemoteObject
   >(() => ({ type: 'string', value: 'Hello from Retrack.dev!' }));
@@ -36,12 +44,8 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
         console.debug(`received: %s`, rawMessage);
       }
 
-      const message = JSON.parse(rawMessage.toString()) as {
-        id: number;
-        method: string;
-        params: unknown;
-        sessionId?: string;
-      };
+      const message = JSON.parse(rawMessage.toString()) as IncomingMessage;
+      messages.push(message);
 
       // Ceremony: browser initialization
       // pw:protocol SEND ► {"id":1,"method":"Browser.getVersion"}
@@ -304,6 +308,25 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
         );
       }
 
+      // Ceremony: page close
+      //   pw:protocol SEND ► {"id":25,"method":"Target.closeTarget","params":{"targetId":"B3A3B434CC5001702EA73A7B76F02DB4"}} +977ms
+      //   pw:protocol ◀ RECV {"id":25,"result":{"success":true}} +1ms
+      if (message.method === 'Target.closeTarget') {
+        const messageParams = message.params as { targetId: string; sessionId?: string };
+        ws.send(JSON.stringify({ id: message.id, result: { success: true } }), getOnSendCallback('Page.navigate'));
+
+        //   pw:protocol ◀ RECV {"method":"Inspector.detached","params":{"reason":"Render process gone."},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
+        //   pw:protocol ◀ RECV {"method":"Target.detachedFromTarget","params":{"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43","targetId":"B3A3B434CC5001702EA73A7B76F02DB4"}} +1ms
+        return ws.send(
+          JSON.stringify({
+            method: 'Target.detachedFromTarget',
+            params: { targetId: messageParams.targetId, sessionId: messageParams.sessionId ?? sessionId },
+            sessionId: message.sessionId,
+          }),
+          getOnSendCallback('Target.detachedFromTarget'),
+        );
+      }
+
       ws.send(
         JSON.stringify({ id: message.id, result: {}, sessionId: message.sessionId }),
         getOnSendCallback(message.method),
@@ -313,6 +336,7 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
 
   return {
     endpoint: `ws://localhost:${port}`,
+    messages,
     runtimeCallFunctionOn,
     isBuiltInPageContent: (params: Protocol.CommandParameters['Runtime.callFunctionOn']) =>
       params.objectId === utilityScriptObjectId &&

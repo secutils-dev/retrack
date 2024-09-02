@@ -3,7 +3,7 @@ import * as process from 'node:process';
 import { Worker } from 'node:worker_threads';
 import type { ApiRouteParams } from '../api_route_params.js';
 import { Diagnostics } from '../diagnostics.js';
-import type { WorkerLogMessage, WorkerResultMessage } from './constants.js';
+import type { WorkerData, WorkerLogMessage, WorkerResultMessage, WorkerStringResultType } from './constants.js';
 import { DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS } from './constants.js';
 import { WorkerMessageType } from './constants.js';
 
@@ -22,12 +22,22 @@ interface RequestBodyType {
   /**
    * Optional web page content that has been extracted previously.
    */
-  previousContent?: { type: string; value: string };
+  previousContent?: { type: WorkerStringResultType; value: string };
 
   /**
    * Number of milliseconds to wait until extractor script finishes processing. Default is 30000ms.
    */
   timeout?: number;
+
+  /**
+   * Optional user agent string to use for every request at the web page.
+   */
+  userAgent?: string;
+
+  /**
+   * Whether to ignore HTTPS errors when sending network requests. Defaults to false.
+   */
+  ignoreHTTPSErrors?: boolean;
 }
 
 export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRouteParams) {
@@ -43,6 +53,8 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
             nullable: true,
           },
           timeout: { type: 'number', nullable: true },
+          userAgent: { type: 'string', nullable: true },
+          ignoreHTTPSErrors: { type: 'boolean', nullable: true },
         },
         response: {
           200: { type: 'object', properties: { timestamp: { type: 'number' }, content: { type: 'string' } } },
@@ -54,6 +66,14 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
       const workerLog = log.child({ provider: 'worker' });
       const timeout = request.body.timeout ?? DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS;
 
+      const workerData: WorkerData = {
+        endpoint: await getBrowserEndpoint(),
+        extractor: request.body.extractor,
+        previousContent: request.body.previousContent,
+        userAgent: request.body.userAgent,
+        ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
+      };
+
       try {
         // The extractor script is executed in a separate thread to isolate it from the main thread. We filter the
         // environment variables to only include the ones that are necessary for the extractor script to run.
@@ -61,11 +81,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
           eval: false,
           env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k === 'NODE' || k === 'NODE_OPTIONS')),
           execArgv: ['--no-experimental-global-webcrypto'],
-          workerData: {
-            endpoint: await getBrowserEndpoint(),
-            extractor: request.body.extractor,
-            previousContent: request.body.previousContent,
-          },
+          workerData,
         });
 
         return await new Promise((resolve, reject) => {

@@ -2,10 +2,10 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import type { Browser } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
 
-import type { BrowserEndpoint } from '../../utilities/browser.js';
 import { Diagnostics } from '../diagnostics.js';
+import type { WorkerData, WorkerStringResultType } from './constants.js';
 import { EXTRACTOR_MODULE_PREFIX, WorkerMessageType } from './constants.js';
 import { ExecutionResult } from './execution_result.js';
 
@@ -15,11 +15,7 @@ if (!parentPort) {
 }
 
 // Load the extractor script as an ES module.
-const { endpoint, extractor, previousContent } = workerData as {
-  endpoint: BrowserEndpoint;
-  extractor: string;
-  previousContent?: { type: ExecutionResult['type']; value: string };
-};
+const { endpoint, extractor, previousContent, userAgent, ignoreHTTPSErrors } = workerData as WorkerData;
 
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
 // `--frozen-intrinsics`. It DOES NOT protect against all prototype pollution vectors.
@@ -47,7 +43,13 @@ for (const Class of [
 // SECURITY: We load custom hooks to prevent extractor scripts from importing sensitive native and playwright modules.
 // See https://github.com/nodejs/node/issues/47747 for more details.
 register(resolve(import.meta.dirname, './extractor_module_hooks.js'), pathToFileURL('./'));
-const extractorModule = await import(`${EXTRACTOR_MODULE_PREFIX}${extractor}`);
+const extractorModule = (await import(`${EXTRACTOR_MODULE_PREFIX}${extractor}`)) as {
+  execute: (
+    page: Page,
+    executionResult: typeof ExecutionResult,
+    previousContent?: { type: WorkerStringResultType; value: string },
+  ) => Promise<ExecutionResult | unknown>;
+};
 if (typeof extractorModule?.execute !== 'function') {
   throw new Error('The extractor script must export a function named "execute".');
 }
@@ -79,7 +81,7 @@ try {
   throw new Error('Failed to connect to a browser.');
 }
 
-const context = await browser.newContext();
+const context = await browser.newContext({ ignoreHTTPSErrors, userAgent });
 
 // SECURITY: Ideally, the extractor script shouldn't have access to the browser instance, as it could close the browser
 // and access other contexts. Unfortunately, the browser instance and context are accessible through various Playwright
@@ -91,6 +93,7 @@ const context = await browser.newContext();
 // source code directly.
 const browserPrototype = Object.getPrototypeOf(browser);
 delete browserPrototype.newBrowserCDPSession;
+delete browserPrototype.newContext;
 
 // We need to preserve the original `browser.close` method to close the browser after the extractor execution.
 const originalBrowserClose = browser.close.bind(browser);
@@ -98,10 +101,12 @@ delete browserPrototype.close;
 
 const contextPrototype = Object.getPrototypeOf(context);
 delete contextPrototype.newCDPSession;
+delete contextPrototype.constructor;
 
+const page = await context.newPage();
 try {
   const executionResult = await extractorModule.execute(
-    context,
+    page,
     ExecutionResult,
     previousContent?.type === 'json' ? JSON.parse(previousContent.value) : previousContent?.value,
   );
@@ -132,6 +137,7 @@ try {
   }
   throw err;
 } finally {
+  await page.close();
   await context.close();
   await originalBrowserClose();
 }

@@ -119,11 +119,15 @@
   pw:protocol SEND ► {"id":24,"method":"Runtime.callFunctionOn","params":{"functionDeclaration":"(utilityScript, ...args) => utilityScript.evaluate(...args)","objectId":"2533827586503800783.4.1","arguments":[{"objectId":"2533827586503800783.4.1"},{"value":true},{"value":true},{"value":"() => {\n        let retVal = '';\n        if (document.doctype) retVal = new XMLSerializer().serializeToString(document.doctype);\n        if (document.documentElement) retVal += document.documentElement.outerHTML;\n        return retVal;\n      }"},{"value":1},{"value":{"v":"undefined"}}],"returnByValue":true,"awaitPromise":true,"userGesture":true},"sessionId":"64808CB073F6E16A7E6006F5FD7C9A7D"} +0ms
   pw:protocol ◀ RECV {"id":24,"result":{"result":{"type":"string","value":"<html><head></head><body>Hello from <a href=\"https://secutils.dev\">Secutils.dev</a>!</body></html>"}},"sessionId":"64808CB073F6E16A7E6006F5FD7C9A7D"} +1ms
 
-[11:41:54 UTC] INFO: Step 6: Closing the context…
-  pw:protocol SEND ► {"id":22,"method":"Target.disposeBrowserContext","params":{"browserContextId":"38E5A7C26517FD366108C7A312C21FF1"}} +5s
+[11:41:54 UTC] INFO: Step 6: Closing the page…
+  pw:protocol SEND ► {"id":25,"method":"Target.closeTarget","params":{"targetId":"B3A3B434CC5001702EA73A7B76F02DB4"}} +977ms
+  pw:protocol ◀ RECV {"id":25,"result":{"success":true}} +1ms
   pw:protocol ◀ RECV {"method":"Inspector.detached","params":{"reason":"Render process gone."},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
   pw:protocol ◀ RECV {"method":"Target.detachedFromTarget","params":{"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43","targetId":"B3A3B434CC5001702EA73A7B76F02DB4"}} +1ms
-  pw:protocol ◀ RECV {"id":22,"result":{}} +10ms
+
+[11:41:54 UTC] INFO: Step 7: Closing the context…
+  pw:protocol SEND ► {"id":26,"method":"Target.disposeBrowserContext","params":{"browserContextId":"38E5A7C26517FD366108C7A312C21FF1"}} +5s
+  pw:protocol ◀ RECV {"id":26,"result":{}} +10ms
 
 [11:42:00 UTC] INFO: Step 7: Browser closing…
   pw:protocol ◀ RECV {"id":-9999,"result":{}} +10m

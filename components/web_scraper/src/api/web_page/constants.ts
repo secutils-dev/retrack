@@ -1,3 +1,5 @@
+import type { BrowserEndpoint } from '../../utilities/browser.js';
+
 /**
  * Default timeout for the extractor script, in ms.
  */
@@ -34,3 +36,19 @@ export interface WorkerResultMessage {
 }
 
 export type WorkerStringResultType = 'html' | 'text' | 'json';
+
+/**
+ * Represents the data that is passed to the worker thread.
+ */
+export interface WorkerData {
+  // The browser endpoint that the worker should connect Playwright to.
+  endpoint: BrowserEndpoint;
+  // The extractor script that the worker should execute.
+  extractor: string;
+  // The previous content that the extractor script extracted previously.
+  previousContent?: { type: WorkerStringResultType; value: string };
+  // The user agent that should be used for all requests.
+  userAgent?: string;
+  // Whether to ignore HTTPS errors when sending network requests.
+  ignoreHTTPSErrors?: boolean;
+}
