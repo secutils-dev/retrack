@@ -64,7 +64,6 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
     async (request, reply) => {
       const log = server.log.child({ provider: 'web_page_execute' });
       const workerLog = log.child({ provider: 'worker' });
-      const timeout = request.body.timeout ?? DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS;
 
       const workerData: WorkerData = {
         endpoint: await getBrowserEndpoint(),
