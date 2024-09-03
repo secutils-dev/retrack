@@ -42,7 +42,6 @@ mod tests {
     };
     use sqlx::PgPool;
     use std::{str::from_utf8, time::Duration};
-    use url::Url;
     use uuid::uuid;
 
     #[sqlx::test]
@@ -55,14 +54,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Default::default(),
                     job: None,
                 },
@@ -103,14 +102,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Default::default(),
                     job: None,
                 },

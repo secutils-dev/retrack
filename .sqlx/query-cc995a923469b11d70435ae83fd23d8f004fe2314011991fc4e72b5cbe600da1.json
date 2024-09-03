@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id\nFROM trackers\nWHERE job_needed = TRUE AND job_id IS NULL\nORDER BY updated_at\n                ",
+  "query": "\nSELECT trackers.id, trackers.name, trackers.target, trackers.config, trackers.tags,\n       trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra\nFROM trackers\nINNER JOIN scheduler_jobs as jobs\nON trackers.job_id = jobs.id\nWHERE jobs.stopped = true AND trackers.created_at > $1\nORDER BY trackers.created_at\nLIMIT $2;\n",
   "describe": {
     "columns": [
       {
@@ -15,47 +15,50 @@
       },
       {
         "ordinal": 2,
-        "name": "url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 3,
         "name": "target",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 4,
+        "ordinal": 3,
         "name": "config",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "tags",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "job_needed",
         "type_info": "Bool"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "job_id",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "extra",
+        "type_info": "Bytea"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -66,9 +69,9 @@
       false,
       false,
       false,
-      false,
+      true,
       true
     ]
   },
-  "hash": "10c99810b3a3bdaa99a7da05126ab905ba89a4870a7878c3c34b10a82a23db2b"
+  "hash": "cc995a923469b11d70435ae83fd23d8f004fe2314011991fc4e72b5cbe600da1"
 }

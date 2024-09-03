@@ -128,7 +128,6 @@ mod tests {
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
     use std::{sync::Arc, time::Duration};
-    use url::Url;
     use uuid::uuid;
 
     #[sqlx::test]
@@ -230,14 +229,14 @@ mod tests {
         let tracker_one = trackers
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_secs(10)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "1 2 3 4 5 6 2030".to_string(),
@@ -252,14 +251,14 @@ mod tests {
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "tracker-two".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_secs(2)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "1 2 3 4 5 6 2035".to_string(),
@@ -274,14 +273,14 @@ mod tests {
         let tracker_three = trackers
             .create_tracker(TrackerCreateParams {
                 name: "tracker-three".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=3")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_secs(2)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "1 2 3 4 5 6 2040".to_string(),
@@ -359,14 +358,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_secs(10)),
                     headers: Default::default(),
                     job: Default::default(),
                 },
@@ -415,14 +414,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 0,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_secs(10)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "1 2 3 4 5 6 2030".to_string(),

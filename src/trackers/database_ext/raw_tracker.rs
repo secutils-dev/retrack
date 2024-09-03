@@ -1,9 +1,6 @@
 use crate::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-    trackers::{
-        JsonApiTarget, Tracker, TrackerConfig, TrackerTarget, WebPageTarget, WebPageWaitFor,
-        WebPageWaitForState,
-    },
+    trackers::{JsonApiTarget, Tracker, TrackerConfig, TrackerTarget, WebPageTarget},
 };
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -18,7 +15,6 @@ use uuid::Uuid;
 pub(super) struct RawTracker {
     pub id: Uuid,
     pub name: String,
-    pub url: String,
     pub config: Vec<u8>,
     pub target: Vec<u8>,
     pub tags: Vec<String>,
@@ -32,7 +28,7 @@ pub(super) struct RawTracker {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct RawTrackerConfig<'s> {
     revisions: usize,
-    extractor: Option<Cow<'s, str>>,
+    timeout: Option<Duration>,
     headers: Option<Cow<'s, HashMap<String, String>>>,
     job: Option<RawSchedulerJobConfig<'s>>,
 }
@@ -54,13 +50,19 @@ enum RawSchedulerJobRetryStrategy {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 enum RawTrackerTarget<'s> {
     WebPage(RawWebPageTarget<'s>),
-    JsonApi(JsonApiTarget),
+    JsonApi(RawJsonApiTarget<'s>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawWebPageTarget<'s> {
-    delay: Option<Duration>,
-    wait_for: Option<(Cow<'s, str>, Option<WebPageWaitForState>, Option<Duration>)>,
+    extractor: Cow<'s, str>,
+    user_agent: Option<Cow<'s, str>>,
+    ignore_https_errors: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+struct RawJsonApiTarget<'s> {
+    url: Cow<'s, str>,
 }
 
 impl TryFrom<RawTracker> for Tracker {
@@ -114,24 +116,20 @@ impl TryFrom<RawTracker> for Tracker {
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
-            url: raw.url.parse()?,
             target: match postcard::from_bytes::<RawTrackerTarget>(&raw.target)? {
                 RawTrackerTarget::WebPage(target) => TrackerTarget::WebPage(WebPageTarget {
-                    delay: target.delay,
-                    wait_for: target
-                        .wait_for
-                        .map(|(selector, state, timeout)| WebPageWaitFor {
-                            selector: selector.into_owned(),
-                            state,
-                            timeout,
-                        }),
+                    extractor: target.extractor.into_owned(),
+                    user_agent: target.user_agent.map(Cow::into_owned),
+                    ignore_https_errors: target.ignore_https_errors.unwrap_or_default(),
                 }),
-                RawTrackerTarget::JsonApi(target) => TrackerTarget::JsonApi(target),
+                RawTrackerTarget::JsonApi(target) => TrackerTarget::JsonApi(JsonApiTarget {
+                    url: target.url.into_owned().parse()?,
+                }),
             },
             job_id: raw.job_id,
             config: TrackerConfig {
                 revisions: raw_config.revisions,
-                extractor: raw_config.extractor.map(Cow::into_owned),
+                timeout: raw_config.timeout,
                 headers: raw_config.headers.map(Cow::into_owned),
                 job: job_config,
             },
@@ -191,29 +189,28 @@ impl TryFrom<&Tracker> for RawTracker {
         Ok(RawTracker {
             id: item.id,
             name: item.name.clone(),
-            url: item.url.to_string(),
             target: postcard::to_stdvec(
                 &(match &item.target {
                     TrackerTarget::WebPage(target) => RawTrackerTarget::WebPage(RawWebPageTarget {
-                        delay: target.delay,
-                        wait_for: target.wait_for.as_ref().map(|wait_for| {
-                            (
-                                Cow::Borrowed(wait_for.selector.as_str()),
-                                wait_for.state,
-                                wait_for.timeout,
-                            )
-                        }),
+                        extractor: Cow::Borrowed(target.extractor.as_ref()),
+                        user_agent: target
+                            .user_agent
+                            .as_ref()
+                            .map(|ua| Cow::Borrowed(ua.as_ref())),
+                        ignore_https_errors: if target.ignore_https_errors {
+                            Some(true)
+                        } else {
+                            None
+                        },
                     }),
-                    TrackerTarget::JsonApi(target) => RawTrackerTarget::JsonApi(*target),
+                    TrackerTarget::JsonApi(target) => RawTrackerTarget::JsonApi(RawJsonApiTarget {
+                        url: target.url.as_str().into(),
+                    }),
                 }),
             )?,
             config: postcard::to_stdvec(&RawTrackerConfig {
                 revisions: item.config.revisions,
-                extractor: item
-                    .config
-                    .extractor
-                    .as_ref()
-                    .map(|extractor| Cow::Borrowed(extractor.as_ref())),
+                timeout: item.config.timeout,
                 headers: item.config.headers.as_ref().map(Cow::Borrowed),
                 job: job_config,
             })?,
@@ -231,14 +228,10 @@ mod tests {
     use super::RawTracker;
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{
-            Tracker, TrackerConfig, TrackerTarget, WebPageTarget, WebPageWaitFor,
-            WebPageWaitForState,
-        },
+        trackers::{Tracker, TrackerConfig, TrackerTarget, WebPageTarget},
     };
     use std::time::Duration;
     use time::OffsetDateTime;
-    use url::Url;
     use uuid::uuid;
 
     #[test]
@@ -247,9 +240,8 @@ mod tests {
             Tracker::try_from(RawTracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: "https://retrack.dev".to_string(),
-                target: vec![0, 0, 0],
-                config: vec![1, 0, 0, 0],
+                target: vec![0, 111, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 44, 32, 114, 41, 32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39, 41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 114, 46, 104, 116, 109, 108, 40, 97, 119, 97, 105, 116, 32, 112, 46, 99, 111, 110, 116, 101, 110, 116, 40, 41, 41, 59, 32, 125, 0, 0],
+                config: vec![1, 1, 2, 0, 0, 0],
                 tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -261,11 +253,14 @@ mod tests {
             Tracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: Url::parse("https://retrack.dev")?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Default::default(),
                     job: None,
                 },
@@ -280,14 +275,9 @@ mod tests {
             Tracker::try_from(RawTracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: "https://retrack.dev".to_string(),
-                target: vec![0, 1, 2, 0, 1, 3, 100, 105, 118, 1, 0, 1, 5, 0],
+                target: vec![0, 111, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 44, 32, 114, 41, 32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39, 41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 114, 46, 104, 116, 109, 108, 40, 97, 119, 97, 105, 116, 32, 112, 46, 99, 111, 110, 116, 101, 110, 116, 40, 41, 41, 59, 32, 125, 1, 13, 82, 101, 116, 114, 97, 99, 107, 47, 49, 46, 48, 46, 48, 1, 1],
                 config: vec![
-                    1, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109, 101, 110,
-                    116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
-                    1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105,
-                    101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
-                    120, 0, 5, 1, 1
+                    1, 1, 2, 0, 1, 1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105, 101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2, 120, 0, 5, 1, 1
                 ],
                 tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
@@ -300,18 +290,14 @@ mod tests {
             Tracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some(WebPageWaitFor {
-                        selector: "div".to_string(),
-                        state: Some(WebPageWaitForState::Attached),
-                        timeout: Some(Duration::from_secs(5)),
-                    }),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Some("return document.body.innerHTML;".to_string()),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()
@@ -344,11 +330,14 @@ mod tests {
             RawTracker::try_from(&Tracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: Url::parse("https://retrack.dev")?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Default::default(),
                     job: None,
                 },
@@ -360,9 +349,8 @@ mod tests {
             RawTracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: "https://retrack.dev/".to_string(),
-                target: vec![0, 0, 0],
-                config: vec![1, 0, 0, 0],
+                target: vec![0, 111, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 44, 32, 114, 41, 32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39, 41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 114, 46, 104, 116, 109, 108, 40, 97, 119, 97, 105, 116, 32, 112, 46, 99, 111, 110, 116, 101, 110, 116, 40, 41, 41, 59, 32, 125, 0, 0],
+                config: vec![1, 1, 2, 0, 0, 0],
                 tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -377,18 +365,14 @@ mod tests {
             RawTracker::try_from(&Tracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some(WebPageWaitFor {
-                        selector: "div".to_string(),
-                        state: Some(WebPageWaitForState::Attached),
-                        timeout: Some(Duration::from_secs(5)),
-                    }),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Some("return document.body.innerHTML;".to_string()),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()
@@ -413,14 +397,9 @@ mod tests {
             RawTracker {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 name: "tk".to_string(),
-                url: "https://retrack.dev/".to_string(),
-                target: vec![0, 1, 2, 0, 1, 3, 100, 105, 118, 1, 0, 1, 5, 0],
+                target: vec![0, 111, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102, 117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 44, 32, 114, 41, 32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39, 41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 114, 46, 104, 116, 109, 108, 40, 97, 119, 97, 105, 116, 32, 112, 46, 99, 111, 110, 116, 101, 110, 116, 40, 41, 41, 59, 32, 125, 1, 13, 82, 101, 116, 114, 97, 99, 107, 47, 49, 46, 48, 46, 48, 1, 1],
                 config: vec![
-                    1, 1, 31, 114, 101, 116, 117, 114, 110, 32, 100, 111, 99, 117, 109, 101, 110,
-                    116, 46, 98, 111, 100, 121, 46, 105, 110, 110, 101, 114, 72, 84, 77, 76, 59, 1,
-                    1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105,
-                    101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
-                    120, 0, 5, 1, 1
+                    1, 1, 2, 0, 1, 1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107, 105, 101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2, 120, 0, 5, 1, 1,
                 ],
                 tags: vec!["tag".to_string()],
                 // January 1, 2000 10:00:00

@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS trackers
 (
     id          UUID PRIMARY KEY NOT NULL,
     name        TEXT             NOT NULL UNIQUE COLLATE case_insensitive,
-    url         TEXT             NOT NULL COLLATE case_insensitive,
     target      BYTEA            NOT NULL,
     config      BYTEA            NOT NULL,
     tags        TEXT[]           NOT NULL COLLATE case_insensitive DEFAULT '{}',

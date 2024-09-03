@@ -115,7 +115,7 @@ mod tests {
     use crate::{
         scheduler::{scheduler_job::SchedulerJob, SchedulerJobConfig},
         tests::{mock_api, mock_get_scheduler_job, mock_scheduler, mock_scheduler_job},
-        trackers::{Tracker, TrackerConfig, TrackerCreateParams},
+        trackers::{Tracker, TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
     };
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
@@ -168,11 +168,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
-                url: "https://localhost:1234/my/app?q=2".parse()?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 4,
-                    extractor: Default::default(),
+                    timeout: None,
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -240,11 +243,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
-                url: "https://localhost:1234/my/app?q=2".parse()?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 4,
-                    extractor: Default::default(),
+                    timeout: None,
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "1 0 * * * *".to_string(),
@@ -295,11 +301,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
-                url: "https://localhost:1234/my/app?q=2".parse()?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 4,
-                    extractor: Default::default(),
+                    timeout: None,
                     headers: Default::default(),
                     job: None,
                 },
@@ -342,11 +351,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker".to_string(),
-                url: "https://localhost:1234/my/app?q=2".parse()?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 0,
-                    extractor: Default::default(),
+                    timeout: None,
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),

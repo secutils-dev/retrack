@@ -15,9 +15,7 @@ pub use self::{
     tracker::Tracker,
     tracker_config::TrackerConfig,
     tracker_data_revision::TrackerDataRevision,
-    tracker_target::{
-        JsonApiTarget, TrackerTarget, WebPageTarget, WebPageWaitFor, WebPageWaitForState,
-    },
+    tracker_target::{JsonApiTarget, TrackerTarget, WebPageTarget},
 };
 
 #[cfg(test)]
@@ -31,7 +29,6 @@ pub mod tests {
     };
     use std::time::Duration;
     use time::OffsetDateTime;
-    use url::Url;
     use uuid::Uuid;
 
     pub struct MockWebPageTrackerBuilder {
@@ -42,7 +39,6 @@ pub mod tests {
         pub fn create<N: Into<String>>(
             id: Uuid,
             name: N,
-            url: &str,
             revisions: usize,
         ) -> anyhow::Result<Self> {
             Ok(Self {
@@ -50,14 +46,14 @@ pub mod tests {
                     id,
                     name: name.into(),
                     job_id: None,
-                    url: Url::parse(url)?,
                     target: TrackerTarget::WebPage(WebPageTarget {
-                        delay: Some(Duration::from_millis(2000)),
-                        wait_for: Some("div".parse()?),
+                        extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                        user_agent: Some("Retrack/1.0.0".to_string()),
+                        ignore_https_errors: false,
                     }),
                     config: TrackerConfig {
                         revisions,
-                        extractor: Default::default(),
+                        timeout: Some(Duration::from_millis(2000)),
                         headers: Default::default(),
                         job: None,
                     },
@@ -92,8 +88,8 @@ pub mod tests {
             self
         }
 
-        pub fn with_extractor(mut self, extractor: String) -> Self {
-            self.tracker.config.extractor = Some(extractor);
+        pub fn with_timeout(mut self, timeout: Duration) -> Self {
+            self.tracker.config.timeout = Some(timeout);
             self
         }
 

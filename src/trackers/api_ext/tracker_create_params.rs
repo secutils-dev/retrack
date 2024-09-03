@@ -1,6 +1,5 @@
 use crate::trackers::{TrackerConfig, TrackerTarget};
 use serde::Deserialize;
-use url::Url;
 use utoipa::ToSchema;
 
 /// Parameters for creating a tracker.
@@ -10,10 +9,7 @@ pub struct TrackerCreateParams {
     /// Arbitrary name of the tracker.
     #[schema(min_length = 1, max_length = 100)]
     pub name: String,
-    /// URL of the resource to track.
-    pub url: Url,
     /// Target of the tracker (web page, API, or file).
-    #[serde(default)]
     pub target: TrackerTarget,
     /// Tracker config.
     #[serde(default)]
@@ -31,18 +27,18 @@ mod tests {
         trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
     };
     use std::time::Duration;
-    use url::Url;
 
     #[test]
     fn deserialization() -> anyhow::Result<()> {
         assert_eq!(
-            serde_json::from_str::<TrackerCreateParams>(
-                r#"{ "name": "tck", "url": "https://retrack.dev" }"#
-            )?,
+            serde_json::from_str::<TrackerCreateParams>(r#"{ "name": "tck", "target": { "type": "web:page", "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }" } }"#)?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                url: Url::parse("https://retrack.dev")?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: Default::default(),
                 tags: vec![]
             }
@@ -53,7 +49,10 @@ mod tests {
                 r#"
     {
         "name": "tck",
-        "url": "https://retrack.dev",
+        "target": {
+            "type": "web:page",
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }"
+        },
         "config": {
             "revisions": 10
         }
@@ -62,8 +61,11 @@ mod tests {
             )?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                url: Url::parse("https://retrack.dev")?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 10,
                     ..Default::default()
@@ -77,20 +79,27 @@ mod tests {
                 r#"
     {
         "name": "tck",
-        "url": "https://retrack.dev",
-        "target": { "type": "web:page" },
+        "target": {
+            "type": "web:page",
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }"
+        },
         "config": {
-            "revisions": 3
+            "revisions": 3,
+            "timeout": 2000
         }
     }
               "#
             )?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                url: Url::parse("https://retrack.dev")?,
-                target: TrackerTarget::WebPage(Default::default()),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 3,
+                    timeout: Some(Duration::from_millis(2000)),
                     ..Default::default()
                 },
                 tags: vec![]
@@ -102,15 +111,15 @@ mod tests {
                 r#"
     {
         "name": "tck",
-        "url": "https://retrack.dev",
         "target": {
             "type": "web:page",
-            "delay": 2000,
-            "waitFor": "div"
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/1.0.0",
+            "ignoreHTTPSErrors": true
         },
         "config": {
             "revisions": 3,
-            "extractor":  "return document.body.innerHTML;",
+            "timeout": 2000,
             "headers": {
                 "cookie": "my-cookie"
             },
@@ -132,14 +141,14 @@ mod tests {
             )?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Some("return document.body.innerHTML;".to_string()),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()

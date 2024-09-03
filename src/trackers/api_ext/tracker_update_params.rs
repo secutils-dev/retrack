@@ -1,6 +1,5 @@
 use crate::trackers::{TrackerConfig, TrackerTarget};
 use serde::Deserialize;
-use url::Url;
 use utoipa::ToSchema;
 
 /// Parameters for updating a tracker.
@@ -11,8 +10,6 @@ pub struct TrackerUpdateParams {
     /// Arbitrary name of the tracker.
     #[schema(min_length = 1, max_length = 100)]
     pub name: Option<String>,
-    /// URL of the resource to track.
-    pub url: Option<Url>,
     /// Target of the tracker (web page, API, or file).
     pub target: Option<TrackerTarget>,
     /// Tracker config.
@@ -26,13 +23,9 @@ pub struct TrackerUpdateParams {
 mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{
-            TrackerConfig, TrackerTarget, TrackerUpdateParams, WebPageTarget, WebPageWaitFor,
-            WebPageWaitForState,
-        },
+        trackers::{TrackerConfig, TrackerTarget, TrackerUpdateParams, WebPageTarget},
     };
     use std::time::Duration;
-    use url::Url;
 
     #[test]
     fn deserialization() -> anyhow::Result<()> {
@@ -46,7 +39,6 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: Some("tck".to_string()),
-                url: None,
                 target: None,
                 config: None,
                 tags: None
@@ -59,18 +51,19 @@ mod tests {
     {
         "target": {
             "type": "web:page",
-            "delay": 3000,
-            "waitFor": "div"
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/1.0.0",
+            "ignoreHTTPSErrors": true
         }
     }
               "#
             )?,
             TrackerUpdateParams {
                 name: None,
-                url: None,
                 target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(3000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 })),
                 config: None,
                 tags: None
@@ -82,7 +75,7 @@ mod tests {
     {
         "config": {
             "revisions": 3,
-            "extractor": "return document.body.innerHTML;",
+            "timeout": 2000,
             "headers": {
                 "cookie": "my-cookie"
             }
@@ -92,11 +85,10 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: None,
-                url: None,
                 target: None,
                 config: Some(TrackerConfig {
                     revisions: 3,
-                    extractor: Some("return document.body.innerHTML;".to_string()),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()
@@ -113,19 +105,15 @@ mod tests {
                 r#"
     {
         "name": "tck",
-        "url": "https://retrack.dev",
         "target": {
             "type": "web:page",
-            "delay": 2000,
-            "waitFor": {
-                "selector": "div",
-                "state": "attached",
-                "timeout": 5000
-            }
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/1.0.0",
+            "ignoreHTTPSErrors": true
         },
         "config": {
             "revisions": 3,
-            "extractor": "return document.body.innerHTML;",
+            "timeout": 2000,
             "headers": {
                 "cookie": "my-cookie"
             },
@@ -147,18 +135,14 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: Some("tck".to_string()),
-                url: Some(Url::parse("https://retrack.dev")?),
                 target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some(WebPageWaitFor {
-                        selector: "div".to_string(),
-                        state: Some(WebPageWaitForState::Attached),
-                        timeout: Some(Duration::from_millis(5000)),
-                    }),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 })),
                 config: Some(TrackerConfig {
                     revisions: 3,
-                    extractor: Some("return document.body.innerHTML;".to_string()),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Some(
                         [("cookie".to_string(), "my-cookie".to_string())]
                             .into_iter()

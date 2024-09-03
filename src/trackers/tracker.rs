@@ -1,7 +1,6 @@
 use crate::trackers::{TrackerConfig, TrackerTarget};
 use serde::Serialize;
 use time::OffsetDateTime;
-use url::Url;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -13,8 +12,6 @@ pub struct Tracker {
     pub id: Uuid,
     /// Arbitrary name of the tracker.
     pub name: String,
-    /// URL of the resource (e.g., web page, API, or file) to track.
-    pub url: Url,
     /// Target of the tracker (web page, API, file).
     pub target: TrackerTarget,
     /// ID of the optional job that triggers tracker. If not set,then the job is not scheduled yet.
@@ -48,28 +45,27 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "http://localhost:1234/my/app?q=2",
             3,
         )?
         .with_target(TrackerTarget::WebPage(WebPageTarget {
-            delay: Some(Duration::from_millis(2500)),
-            wait_for: Some("div".parse()?),
+            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+            user_agent: Some("Retrack/2.0.0".to_string()),
+            ignore_https_errors: true,
         }))
         .build();
         assert_json_snapshot!(tracker, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
-          "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500,
-            "waitFor": {
-              "selector": "div"
-            }
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/2.0.0",
+            "ignoreHTTPSErrors": true
           },
           "config": {
-            "revisions": 3
+            "revisions": 3,
+            "timeout": 2000
           },
           "tags": [],
           "createdAt": 946720800,
@@ -80,12 +76,12 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "http://localhost:1234/my/app?q=2",
             3,
         )?
         .with_target(TrackerTarget::WebPage(WebPageTarget {
-            delay: Some(Duration::from_millis(2500)),
-            wait_for: Some("div".parse()?),
+            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+            user_agent: Some("Retrack/2.0.0".to_string()),
+            ignore_https_errors: true,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -93,16 +89,15 @@ mod tests {
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
-          "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500,
-            "waitFor": {
-              "selector": "div"
-            }
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/2.0.0",
+            "ignoreHTTPSErrors": true
           },
           "config": {
             "revisions": 3,
+            "timeout": 2000,
             "job": {
               "schedule": "0 0 * * *"
             }
@@ -116,31 +111,28 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "http://localhost:1234/my/app?q=2",
             3,
         )?
         .with_target(TrackerTarget::WebPage(WebPageTarget {
-            delay: Some(Duration::from_millis(2500)),
-            wait_for: Some("div".parse()?),
+            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+            user_agent: Some("Retrack/2.0.0".to_string()),
+            ignore_https_errors: true,
         }))
         .with_schedule("0 0 * * *")
-        .with_extractor("return document.body.innerHTML;".to_string())
         .build();
         assert_json_snapshot!(tracker, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
-          "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500,
-            "waitFor": {
-              "selector": "div"
-            }
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/2.0.0",
+            "ignoreHTTPSErrors": true
           },
           "config": {
             "revisions": 3,
-            "extractor": "return document.body.innerHTML;",
+            "timeout": 2000,
             "job": {
               "schedule": "0 0 * * *"
             }
@@ -154,31 +146,28 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "http://localhost:1234/my/app?q=2",
             3,
         )?
         .with_target(TrackerTarget::WebPage(WebPageTarget {
-            delay: Some(Duration::from_millis(2500)),
-            wait_for: Some("div".parse()?),
+            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+            user_agent: Some("Retrack/2.0.0".to_string()),
+            ignore_https_errors: true,
         }))
         .with_schedule("0 0 * * *")
-        .with_extractor(Default::default())
         .build();
         assert_json_snapshot!(tracker, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
-          "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500,
-            "waitFor": {
-              "selector": "div"
-            }
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/2.0.0",
+            "ignoreHTTPSErrors": true
           },
           "config": {
             "revisions": 3,
-            "extractor": "",
+            "timeout": 2000,
             "job": {
               "schedule": "0 0 * * *"
             }
@@ -192,15 +181,14 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "http://localhost:1234/my/app?q=2",
             3,
         )?
         .with_target(TrackerTarget::WebPage(WebPageTarget {
-            delay: Some(Duration::from_millis(2500)),
-            wait_for: Some("div".parse()?),
+            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+            user_agent: Some("Retrack/2.0.0".to_string()),
+            ignore_https_errors: true,
         }))
         .with_schedule("0 0 * * *")
-        .with_extractor(Default::default())
         .with_job_config(SchedulerJobConfig {
             schedule: "0 0 * * *".to_string(),
             notifications: None,
@@ -215,17 +203,15 @@ mod tests {
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
-          "url": "http://localhost:1234/my/app?q=2",
           "target": {
             "type": "web:page",
-            "delay": 2500,
-            "waitFor": {
-              "selector": "div"
-            }
+            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "userAgent": "Retrack/2.0.0",
+            "ignoreHTTPSErrors": true
           },
           "config": {
             "revisions": 3,
-            "extractor": "",
+            "timeout": 2000,
             "job": {
               "schedule": "0 0 * * *",
               "retryStrategy": {

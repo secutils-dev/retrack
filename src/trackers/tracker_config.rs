@@ -1,17 +1,19 @@
 use crate::scheduler::SchedulerJobConfig;
 use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
-use std::collections::HashMap;
+use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
+use std::{collections::HashMap, time::Duration};
 use utoipa::ToSchema;
 
+#[serde_as]
 #[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerConfig {
-    /// A number of revisions of the web page content to track.
+    /// A number of revisions of the content to track.
     pub revisions: usize,
-    /// Optional custom script to extract data from a page, file, or API response.
-    pub extractor: Option<String>,
+    /// Number of milliseconds to wait content extraction is considered failed.
+    #[serde_as(as = "Option<DurationMilliSeconds<u64>>")]
+    pub timeout: Option<Duration>,
     /// Optional list of HTTP headers that should be sent with the tracker requests.
     pub headers: Option<HashMap<String, String>>,
     /// Configuration of the job that triggers tracker, if configured.
@@ -22,7 +24,7 @@ impl Default for TrackerConfig {
     fn default() -> Self {
         Self {
             revisions: 3,
-            extractor: None,
+            timeout: None,
             headers: None,
             job: None,
         }
@@ -34,6 +36,7 @@ mod tests {
     use crate::{scheduler::SchedulerJobConfig, trackers::TrackerConfig};
     use insta::assert_json_snapshot;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn serialization() -> anyhow::Result<()> {
@@ -46,7 +49,7 @@ mod tests {
 
         let config = TrackerConfig {
             revisions: 3,
-            extractor: Some("return document.body.innerHTML;".to_string()),
+            timeout: Some(Duration::from_millis(2500)),
             headers: Some(
                 [("cookie".to_string(), "my-cookie".to_string())]
                     .into_iter()
@@ -61,7 +64,7 @@ mod tests {
         assert_json_snapshot!(config, @r###"
         {
           "revisions": 3,
-          "extractor": "return document.body.innerHTML;",
+          "timeout": 2500,
           "headers": {
             "cookie": "my-cookie"
           },
@@ -79,20 +82,18 @@ mod tests {
     fn deserialization() -> anyhow::Result<()> {
         let config = TrackerConfig {
             revisions: 3,
-            extractor: Default::default(),
+            timeout: None,
             headers: Default::default(),
             job: None,
         };
         assert_eq!(
-            serde_json::from_str::<TrackerConfig>(
-                &json!({ "revisions": 3, "delay": 2000 }).to_string()
-            )?,
+            serde_json::from_str::<TrackerConfig>(&json!({ "revisions": 3 }).to_string())?,
             config
         );
 
         let config = TrackerConfig {
             revisions: 3,
-            extractor: Some("return document.body.innerHTML;".to_string()),
+            timeout: Some(Duration::from_millis(2500)),
             headers: Some(
                 [("cookie".to_string(), "my-cookie".to_string())]
                     .into_iter()
@@ -108,8 +109,7 @@ mod tests {
             serde_json::from_str::<TrackerConfig>(
                 &json!({
                     "revisions": 3,
-                    "delay": 2000,
-                    "extractor": "return document.body.innerHTML;",
+                    "timeout": 2500,
                     "headers": { "cookie": "my-cookie" },
                     "job": { "schedule": "1 2 3 4 5 6 2035", "notifications": true }
                 })

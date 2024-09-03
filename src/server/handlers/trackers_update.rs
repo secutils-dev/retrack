@@ -55,7 +55,6 @@ mod tests {
     use serde_json::json;
     use sqlx::PgPool;
     use std::{str::from_utf8, time::Duration};
-    use url::Url;
 
     #[sqlx::test]
     async fn can_update_tracker(pool: PgPool) -> anyhow::Result<()> {
@@ -73,14 +72,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/app")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Default::default(),
                     job: None,
                 },
@@ -100,11 +99,9 @@ mod tests {
                 .method(Method::PUT)
                 .set_json(json!({
                     "name": "new_name_one".to_string(),
-                    "url": "https://retrack.dev/new-app",
                     "config": {
                         "revisions": 5,
-                        "delay": 5000,
-                        "extractor": "return document.body.innerHTML;",
+                        "timeout": 5000,
                         "headers": {
                             "cookie": "my-cookie"
                         },
@@ -132,13 +129,12 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(tracker.name, "new_name_one");
-        assert_eq!(tracker.url, "https://retrack.dev/new-app".parse()?);
         assert_eq!(tracker.tags, vec!["tag_two".to_string()]);
         assert_debug_snapshot!(tracker.config, @r###"
         TrackerConfig {
             revisions: 5,
-            extractor: Some(
-                "return document.body.innerHTML;",
+            timeout: Some(
+                5s,
             ),
             headers: Some(
                 {
@@ -174,14 +170,14 @@ mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2000)),
                     headers: Default::default(),
                     job: None,
                 },
@@ -218,14 +214,16 @@ mod tests {
             &app,
             TestRequest::with_uri(&format!("https://retrack.dev/api/trackers/{}", tracker.id))
                 .method(Method::PUT)
-                .set_json(json!({ "url": "https://localhost/app" }))
+                .set_json(
+                    json!({ "target": { "type": "api:json", "url": "https://localhost/app" } }),
+                )
                 .to_request(),
         )
         .await;
         assert_eq!(response.status(), 400);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            r###"{"message":"Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."}"###
+            r###"{"message":"Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."}"###
         );
         let trackers = server_state
             .api

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config, trackers.tags,\n       trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra\nFROM trackers\nINNER JOIN scheduler_jobs as jobs\nON trackers.job_id = jobs.id\nWHERE jobs.stopped = true AND trackers.created_at > $1\nORDER BY trackers.created_at\nLIMIT $2;\n",
+  "query": "\n    SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed\n    FROM trackers\n    WHERE id = $1\n                    ",
   "describe": {
     "columns": [
       {
@@ -15,54 +15,43 @@
       },
       {
         "ordinal": 2,
-        "name": "url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 3,
         "name": "target",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 4,
+        "ordinal": 3,
         "name": "config",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "tags",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "updated_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "job_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 8,
         "name": "job_needed",
         "type_info": "Bool"
-      },
-      {
-        "ordinal": 9,
-        "name": "job_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 10,
-        "name": "extra",
-        "type_info": "Bytea"
       }
     ],
     "parameters": {
       "Left": [
-        "Timestamptz",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -73,11 +62,9 @@
       false,
       false,
       false,
-      false,
-      false,
       true,
-      true
+      false
     ]
   },
-  "hash": "80a8c7c10d05295e97d6180b65951cae21b5d01e1cf21da48536d6a763f52265"
+  "hash": "1495bae56829e4eb2506d6dec8d522a9de1902018c1b781023f0e7f488062dbf"
 }

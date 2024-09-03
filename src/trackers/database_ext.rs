@@ -34,7 +34,7 @@ impl<'pool> TrackersDatabaseExt<'pool> {
             query_as!(
                 RawTracker,
                 r#"
-SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed
+SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed
 FROM trackers
 ORDER BY updated_at
                 "#
@@ -45,7 +45,7 @@ ORDER BY updated_at
             query_as!(
                 RawTracker,
                 r#"
-SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed
+SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed
 FROM trackers
 WHERE tags @> $1
 ORDER BY updated_at
@@ -69,7 +69,7 @@ ORDER BY updated_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed
+    SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed
     FROM trackers
     WHERE id = $1
                     "#,
@@ -86,12 +86,11 @@ ORDER BY updated_at
         let raw_tracker = RawTracker::try_from(tracker)?;
         let result = query!(
             r#"
-    INSERT INTO trackers (id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id)
-    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 )
+    INSERT INTO trackers (id, name, target, config, tags, created_at, updated_at, job_needed, job_id)
+    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )
             "#,
             raw_tracker.id,
             raw_tracker.name,
-            raw_tracker.url,
             raw_tracker.target,
             raw_tracker.config,
             &raw_tracker.tags,
@@ -127,12 +126,11 @@ ORDER BY updated_at
         let result = query!(
             r#"
 UPDATE trackers
-SET name = $2, url = $3, target = $4, config = $5, tags = $6, updated_at = $7, job_needed = $8, job_id = $9
+SET name = $2, target = $3, config = $4, tags = $5, updated_at = $6, job_needed = $7, job_id = $8
 WHERE id = $1
         "#,
             raw_tracker.id,
             raw_tracker.name,
-            raw_tracker.url,
             raw_tracker.target,
             raw_tracker.config,
             &raw_tracker.tags,
@@ -140,8 +138,8 @@ WHERE id = $1
             raw_tracker.job_needed,
             raw_tracker.job_id
         )
-            .execute(self.pool)
-            .await;
+        .execute(self.pool)
+        .await;
 
         match result {
             Ok(result) => {
@@ -286,7 +284,7 @@ ORDER BY data.created_at
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id
+SELECT id, name, target, config, tags, created_at, updated_at, job_needed, job_id
 FROM trackers
 WHERE job_needed = TRUE AND job_id IS NULL
 ORDER BY updated_at
@@ -319,7 +317,7 @@ ORDER BY updated_at
             loop {
                  let records = query!(
 r#"
-SELECT trackers.id, trackers.name, trackers.url, trackers.target, trackers.config, trackers.tags,
+SELECT trackers.id, trackers.name, trackers.target, trackers.config, trackers.tags,
        trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra
 FROM trackers
 INNER JOIN scheduler_jobs as jobs
@@ -349,7 +347,6 @@ LIMIT $2;
                     yield Tracker::try_from(RawTracker {
                         id: record.id,
                         name: record.name,
-                        url: record.url,
                         target: record.target,
                         config: record.config,
                         tags: record.tags,
@@ -372,7 +369,7 @@ LIMIT $2;
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, url, target, config, tags, created_at, updated_at, job_needed, job_id
+    SELECT id, name, target, config, tags, created_at, updated_at, job_needed, job_id
     FROM trackers
     WHERE job_id = $1
                     "#,
@@ -457,14 +454,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000004"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -496,7 +491,6 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "https://retrack.dev",
             3,
         )?
         .build();
@@ -509,7 +503,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-other-name",
-                    "https://retrack.dev",
                     3,
                 )?
                 .build(),
@@ -533,7 +526,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-name",
-                    "https://retrack.dev",
                     3,
                 )?
                 .build(),
@@ -557,7 +549,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000003"),
                     "some-other-name",
-                    "https://retrack.dev",
                     3,
                 )?
                 .build(),
@@ -578,7 +569,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-name",
-                    "https://retrack.dev",
                     3,
                 )?
                 .build(),
@@ -589,7 +579,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-other-name",
-                    "https://retrack.dev",
                     3,
                 )?
                 .build(),
@@ -601,7 +590,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-name-2",
-                    "https://retrack.dev",
                     5,
                 )?
                 .build(),
@@ -612,7 +600,6 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-other-name-2",
-                    "https://retrack.dev",
                     5,
                 )?
                 .build(),
@@ -628,7 +615,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name-2",
-                "https://retrack.dev",
                 5,
             )?
             .build()
@@ -643,7 +629,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-other-name-2",
-                "https://retrack.dev",
                 5,
             )?
             .build()
@@ -661,15 +646,13 @@ mod tests {
                 &MockWebPageTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-name-2",
-                    "https://retrack.dev",
                     5,
                 )?
                 .build(),
             )
             .await
             .unwrap_err()
-            .downcast::<RetrackError>()
-            .unwrap();
+            .downcast::<RetrackError>()?;
         assert_debug_snapshot!(
             update_error,
             @r###""Tracker ('some-name-2') doesn't exist.""###
@@ -686,14 +669,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -756,14 +737,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000004"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -787,7 +766,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .with_tags(vec!["tag:1".to_string()])
@@ -795,7 +773,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .with_tags(vec!["tag:1".to_string(), "tag:2".to_string()])
@@ -803,7 +780,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name-3",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -849,14 +825,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -918,14 +892,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -1005,14 +977,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
@@ -1077,7 +1047,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000006"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .with_schedule("* * * * *")
@@ -1085,7 +1054,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000007"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .with_schedule("* * * * *")
@@ -1093,7 +1061,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000008"),
                 "some-name-3",
-                "https://retrack.dev",
                 3,
             )?
             .with_schedule("* * * * *")
@@ -1101,14 +1068,12 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000009"),
                 "some-name-4",
-                "https://retrack.dev",
                 3,
             )?
             .build(),
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000010"),
                 "some-name-5",
-                "https://retrack.dev",
                 0,
             )?
             .with_schedule("* * * * *")
@@ -1171,7 +1136,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
-                "https://retrack.dev",
                 3,
             )?
             .with_schedule("* * * * *")
@@ -1180,7 +1144,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
-                "https://retrack.dev",
                 3,
             )?
             .with_schedule("* * * * *")
@@ -1189,7 +1152,6 @@ mod tests {
             MockWebPageTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name-3",
-                "https://retrack.dev",
                 3,
             )?
             .with_schedule("* * * * *")
@@ -1225,7 +1187,6 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "https://retrack.dev",
             3,
         )?
         .with_schedule("* * * * *")
@@ -1272,7 +1233,6 @@ mod tests {
         let tracker = MockWebPageTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
-            "https://retrack.dev",
             3,
         )?
         .build();
@@ -1333,7 +1293,6 @@ mod tests {
                     &MockWebPageTrackerBuilder::create(
                         Uuid::parse_str(&format!("78e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
                         format!("name_{}", n),
-                        "https://retrack.dev",
                         3,
                     )?
                     .with_schedule("0 0 * * * *")
@@ -1405,7 +1364,6 @@ mod tests {
                     &MockWebPageTrackerBuilder::create(
                         Uuid::parse_str(&format!("77e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
                         format!("name_{}", n),
-                        "https://retrack.dev",
                         3,
                     )?
                     .with_schedule("0 0 * * * *")

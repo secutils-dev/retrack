@@ -10,6 +10,7 @@ pub use self::{
 };
 use crate::{
     api::Api,
+    config::TrackersConfig,
     error::Error as RetrackError,
     network::{DnsResolver, EmailTransport},
     scheduler::{ScheduleExt, SchedulerJobRetryStrategy},
@@ -19,7 +20,7 @@ use crate::{
         web_scraper::{
             WebScraperContentRequest, WebScraperContentResponse, WebScraperErrorResponse,
         },
-        Tracker, TrackerDataRevision, TrackerTarget, WebPageTarget,
+        JsonApiTarget, Tracker, TrackerDataRevision, TrackerTarget, WebPageTarget,
     },
 };
 use anyhow::{anyhow, bail};
@@ -27,20 +28,19 @@ use cron::Schedule;
 use futures::Stream;
 use std::{collections::HashSet, time::Duration};
 use time::OffsetDateTime;
-use tracing::debug;
 use uuid::Uuid;
 
 /// Defines a maximum number of jobs that can be retrieved from the database at once.
 const MAX_JOBS_PAGE_SIZE: usize = 1000;
 
-/// We currently wait up to 60 seconds before starting to track web page.
-const MAX_TRACKER_WEB_PAGE_WAIT_DELAY: Duration = Duration::from_secs(60);
+/// Defines the maximum length of the extractor script.
+const MAX_TRACKER_WEB_PAGE_EXTRACTOR_SCRIPT_LENGTH: usize = 2048;
 
-/// Defines the maximum length of the wait-for selector.
-const MAX_TRACKER_WEB_PAGE_WAIT_FOR_SELECTOR_LENGTH: usize = 100;
+/// Defines the maximum length of the user agent string.
+const MAX_TRACKER_WEB_PAGE_USER_AGENT_LENGTH: usize = 200;
 
-/// We currently wait up to 60 seconds for selected element to get into specified state.
-const MAX_TRACKER_WEB_PAGE_WAIT_FOR_TIMEOUT: Duration = Duration::from_secs(60);
+/// We currently wait up to 60 seconds for extractor script to execute.
+const MAX_TRACKER_EXTRACTOR_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// We currently support up to 10 retry attempts for the tracker.
 const MAX_TRACKER_RETRY_ATTEMPTS: u32 = 10;
@@ -99,7 +99,6 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         let tracker = Tracker {
             id: Uuid::now_v7(),
             name: params.name,
-            url: params.url,
             target: params.target,
             config: params.config,
             tags: Self::normalize_tracker_tags(params.tags),
@@ -123,13 +122,12 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         params: TrackerUpdateParams,
     ) -> anyhow::Result<Tracker> {
         if params.name.is_none()
-            && params.url.is_none()
             && params.target.is_none()
             && params.config.is_none()
             && params.tags.is_none()
         {
             bail!(RetrackError::client(format!(
-                "Either new name, url, target, config, or tags should be provided ({id})."
+                "Either new name, target, config, or tags should be provided ({id})."
             )));
         }
 
@@ -138,12 +136,6 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
                 "Tracker ('{id}') is not found."
             )));
         };
-
-        let changed_url = params
-            .url
-            .as_ref()
-            .map(|url| url != &existing_tracker.url)
-            .unwrap_or_default();
 
         let disabled_revisions = params
             .config
@@ -170,7 +162,6 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
         let tracker = Tracker {
             name: params.name.unwrap_or(existing_tracker.name),
-            url: params.url.unwrap_or(existing_tracker.url),
             target: params.target.unwrap_or(existing_tracker.target),
             config: params.config.unwrap_or(existing_tracker.config),
             tags: params
@@ -188,11 +179,6 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
         self.validate_tracker(&tracker).await?;
 
         self.trackers.update_tracker(&tracker).await?;
-
-        if changed_url {
-            debug!(tracker.id = %id, "Tracker changed URL, clearing all data revisions.");
-            self.trackers.clear_tracker_data(id).await?;
-        }
 
         Ok(tracker)
     }
@@ -351,15 +337,21 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             )));
         }
 
-        if let TrackerTarget::WebPage(ref web_page_target) = tracker.target {
-            Self::validate_web_page_target(web_page_target)?;
+        match tracker.target {
+            TrackerTarget::WebPage(ref target) => {
+                Self::validate_web_page_target(target)?;
+            }
+            TrackerTarget::JsonApi(ref target) => {
+                self.validate_json_api_target(config, target).await?;
+            }
         }
 
-        if let Some(ref script) = tracker.config.extractor {
-            if script.is_empty() {
-                bail!(RetrackError::client(
-                    "Tracker extractor script cannot be empty."
-                ));
+        if let Some(ref timeout) = tracker.config.timeout {
+            if timeout > &MAX_TRACKER_EXTRACTOR_TIMEOUT {
+                bail!(RetrackError::client(format!(
+                    "Tracker timeout cannot be greater than {}ms.",
+                    MAX_TRACKER_EXTRACTOR_TIMEOUT.as_millis()
+                )));
             }
         }
 
@@ -436,13 +428,6 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             }
         }
 
-        if config.restrict_to_public_urls && !self.api.network.is_public_web_url(&tracker.url).await
-        {
-            bail!(RetrackError::client(
-                format!("Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", tracker.url)
-            ));
-        }
-
         Ok(())
     }
 
@@ -462,36 +447,46 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
     /// Validates tracker's web page target parameters.
     fn validate_web_page_target(target: &WebPageTarget) -> anyhow::Result<()> {
-        if let Some(ref delay) = target.delay {
-            if delay > &MAX_TRACKER_WEB_PAGE_WAIT_DELAY {
+        if target.extractor.is_empty() {
+            bail!(RetrackError::client(
+                "Tracker web page extractor script cannot be empty."
+            ));
+        }
+
+        if target.extractor.len() > MAX_TRACKER_WEB_PAGE_EXTRACTOR_SCRIPT_LENGTH {
+            bail!(RetrackError::client(format!(
+                "Tracker web page extractor script cannot be longer than {MAX_TRACKER_WEB_PAGE_EXTRACTOR_SCRIPT_LENGTH} characters."
+            )));
+        }
+
+        if let Some(ref user_agent) = target.user_agent {
+            if user_agent.is_empty() {
+                bail!(RetrackError::client(
+                    "Tracker web page user-agent header cannot be empty.",
+                ));
+            }
+
+            if user_agent.len() > MAX_TRACKER_WEB_PAGE_USER_AGENT_LENGTH {
                 bail!(RetrackError::client(format!(
-                    "Tracker web page delay cannot be greater than {}ms.",
-                    MAX_TRACKER_WEB_PAGE_WAIT_DELAY.as_millis()
+                    "Tracker web page user-agent cannot be longer than {MAX_TRACKER_WEB_PAGE_USER_AGENT_LENGTH} characters."
                 )));
             }
         }
 
-        if let Some(ref wait_for) = target.wait_for {
-            if wait_for.selector.is_empty() {
-                bail!(RetrackError::client(
-                    "Tracker web page wait-for selector cannot be empty.",
-                ));
-            }
+        Ok(())
+    }
 
-            if wait_for.selector.len() > MAX_TRACKER_WEB_PAGE_WAIT_FOR_SELECTOR_LENGTH {
-                bail!(RetrackError::client(format!(
-                    "Tracker web page wait-for selector cannot be longer than {MAX_TRACKER_WEB_PAGE_WAIT_FOR_SELECTOR_LENGTH} characters."
-                )));
-            }
-
-            if let Some(ref timeout) = wait_for.timeout {
-                if timeout > &MAX_TRACKER_WEB_PAGE_WAIT_FOR_TIMEOUT {
-                    bail!(RetrackError::client(format!(
-                        "Tracker web page wait-for timeout cannot be greater than {}ms.",
-                        MAX_TRACKER_WEB_PAGE_WAIT_FOR_TIMEOUT.as_millis()
-                    )));
-                }
-            }
+    /// Validates tracker's JSON api target parameters.
+    async fn validate_json_api_target(
+        &self,
+        config: &TrackersConfig,
+        target: &JsonApiTarget,
+    ) -> anyhow::Result<()> {
+        if config.restrict_to_public_urls && !self.api.network.is_public_web_url(&target.url).await
+        {
+            bail!(RetrackError::client(
+                format!("Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", target.url)
+            ));
         }
 
         Ok(())
@@ -573,7 +568,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
     ) -> anyhow::Result<TrackerDataRevision> {
         let TrackerTarget::JsonApi(_) = tracker.target else {
             bail!(RetrackError::client(format!(
-                "Tracker ('{}') target is not a web page.",
+                "Tracker ('{}') target is not a JSON API.",
                 tracker.id
             )));
         };
@@ -602,9 +597,8 @@ mod tests {
             WebScraperErrorResponse,
         },
         trackers::{
-            Tracker, TrackerConfig, TrackerCreateParams, TrackerListRevisionsParams, TrackerTarget,
-            TrackerUpdateParams, TrackersListParams, WebPageTarget, WebPageWaitFor,
-            WebPageWaitForState,
+            JsonApiTarget, Tracker, TrackerConfig, TrackerCreateParams, TrackerListRevisionsParams,
+            TrackerTarget, TrackerUpdateParams, TrackersListParams, WebPageTarget,
         },
     };
     use actix_web::ResponseError;
@@ -636,14 +630,14 @@ mod tests {
         let tracker = api
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "@hourly".to_string(),
@@ -681,17 +675,17 @@ mod tests {
         let api = api.trackers();
 
         let target = TrackerTarget::WebPage(WebPageTarget {
-            delay: Some(Duration::from_millis(2000)),
-            wait_for: Some("div".parse()?),
+            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+            user_agent: Some("Retrack/1.0.0".to_string()),
+            ignore_https_errors: true,
         });
         let config = TrackerConfig {
             revisions: 3,
-            extractor: Default::default(),
+            timeout: Some(Duration::from_millis(2500)),
             headers: Default::default(),
             job: None,
         };
         let tags = vec!["tag".to_string()];
-        let url = Url::parse("https://retrack.dev")?;
 
         let create_and_fail = |result: anyhow::Result<_>| -> RetrackError {
             result.unwrap_err().downcast::<RetrackError>().unwrap()
@@ -701,7 +695,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: config.clone(),
                 tags: tags.clone()
@@ -713,7 +706,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "a".repeat(101),
-                url: url.clone(),
                 target: target.clone(),
                 config: config.clone(),
                 tags: tags.clone()
@@ -725,7 +717,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     revisions: 31,
@@ -740,7 +731,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: config.clone(),
                 tags: vec!["a".repeat(51)]
@@ -752,7 +742,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: config.clone(),
                 tags: vec!["tag".to_string(), "".to_string()]
@@ -764,7 +753,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: config.clone(),
                 tags: (0..11).map(|i| i.to_string()).collect()
@@ -772,90 +760,80 @@ mod tests {
             @r###""Tracker cannot have more than 10 tags.""###
         );
 
-        // Too long web page target delay.
+        // Too long timeout.
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_secs(61)),
-                    ..Default::default()
-                }),
-                config: config.clone(),
-                tags: tags.clone()
-            }).await),
-            @r###""Tracker web page delay cannot be greater than 60000ms.""###
-        );
-
-        // Empty web page target wait-for selector.
-        assert_debug_snapshot!(
-            create_and_fail(api.create_tracker(TrackerCreateParams {
-                name: "name".to_string(),
-                url: url.clone(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    wait_for: Some("".parse()?),
-                    ..Default::default()
-                }),
-                config: config.clone(),
-                tags: tags.clone()
-            }).await),
-            @r###""Tracker web page wait-for selector cannot be empty.""###
-        );
-
-        // Very long web page target wait-for selector.
-        assert_debug_snapshot!(
-            create_and_fail(api.create_tracker(TrackerCreateParams {
-                name: "name".to_string(),
-                url: url.clone(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    wait_for: Some("a".repeat(101).parse()?),
-                    ..Default::default()
-                }),
-                config: config.clone(),
-                tags: tags.clone()
-            }).await),
-            @r###""Tracker web page wait-for selector cannot be longer than 100 characters.""###
-        );
-
-        // Too long web page target wait-for timeout.
-        assert_debug_snapshot!(
-            create_and_fail(api.create_tracker(TrackerCreateParams {
-                name: "name".to_string(),
-                url: url.clone(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    wait_for: Some(WebPageWaitFor {
-                        selector: "div".to_string(),
-                        state: Some(WebPageWaitForState::Attached),
-                        timeout: Some(Duration::from_secs(61)),
-                    }),
-                    ..Default::default()
-                }),
-                config: config.clone(),
-                tags: tags.clone()
-            }).await),
-            @r###""Tracker web page wait-for timeout cannot be greater than 60000ms.""###
-        );
-
-        // Empty extractor script.
-        assert_debug_snapshot!(
-            create_and_fail(api.create_tracker(TrackerCreateParams {
-                name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
-                    extractor: Some("".to_string()),
+                    timeout: Some(Duration::from_secs(61)),
                     ..config.clone()
                 },
                 tags: tags.clone()
             }).await),
-            @r###""Tracker extractor script cannot be empty.""###
+            @r###""Tracker timeout cannot be greater than 60000ms.""###
+        );
+
+        // Empty web page target extractor.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                   extractor: "".to_string(),
+                    ..Default::default()
+                }),
+                config: config.clone(),
+                tags: tags.clone()
+            }).await),
+            @r###""Tracker web page extractor script cannot be empty.""###
+        );
+
+        // Very long web page target extractor.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "a".repeat(2049),
+                    ..Default::default()
+                }),
+                config: config.clone(),
+                tags: tags.clone()
+            }).await),
+            @r###""Tracker web page extractor script cannot be longer than 2048 characters.""###
+        );
+
+        // Empty web page target user agent.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                   user_agent: Some("".to_string()),
+                    ..Default::default()
+                }),
+                config: config.clone(),
+                tags: tags.clone()
+            }).await),
+            @r###""Tracker web page extractor script cannot be empty.""###
+        );
+
+        // Very long web page target user agent.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    user_agent: Some("a".repeat(201)),
+                    ..Default::default()
+                }),
+                config: config.clone(),
+                tags: tags.clone()
+            }).await),
+            @r###""Tracker web page extractor script cannot be empty.""###
         );
 
         // Invalid schedule.
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -879,7 +857,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -898,7 +875,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -920,7 +896,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -942,7 +917,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -964,7 +938,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -988,7 +961,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -1011,7 +983,6 @@ mod tests {
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: url.clone(),
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
@@ -1031,16 +1002,17 @@ mod tests {
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
-        // Invalid URL schema.
+        // Invalid JSON API target URL schema.
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: Url::parse("ftp://retrack.dev")?,
-                target: target.clone(),
+                target: TrackerTarget::JsonApi(JsonApiTarget {
+                    url: Url::parse("ftp://retrack.dev")?,
+                }),
                 config: config.clone(),
                 tags: tags.clone()
             }).await),
-            @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
+            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
         );
 
         let mut api_with_local_network = mock_api_with_network(
@@ -1057,16 +1029,17 @@ mod tests {
             .trackers
             .restrict_to_public_urls = true;
 
-        // Non-public URL.
+        // Non-public JSON API target URL.
         assert_debug_snapshot!(
             create_and_fail(api_with_local_network.trackers().create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
-                url: Url::parse("https://127.0.0.1")?,
-                target: target.clone(),
+                target: TrackerTarget::JsonApi(JsonApiTarget {
+                    url: Url::parse("https://127.0.0.1")?,
+                }),
                 config: config.clone(),
                 tags: tags.clone()
             }).await),
-            @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
+            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
 
         Ok(())
@@ -1080,14 +1053,14 @@ mod tests {
         let tracker = api
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("http://localhost:1234/my/app?q=2")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: None,
                 },
@@ -1116,28 +1089,6 @@ mod tests {
             api.get_tracker(tracker.id).await?.unwrap()
         );
 
-        // Update URL.
-        let updated_tracker = api
-            .update_tracker(
-                tracker.id,
-                TrackerUpdateParams {
-                    url: Some("http://localhost:1234/my/app?q=3".parse()?),
-                    ..Default::default()
-                },
-            )
-            .await?;
-        let expected_tracker = Tracker {
-            name: "name_two".to_string(),
-            url: "http://localhost:1234/my/app?q=3".parse()?,
-            updated_at: updated_tracker.updated_at,
-            ..tracker.clone()
-        };
-        assert_eq!(expected_tracker, updated_tracker);
-        assert_eq!(
-            expected_tracker,
-            api.get_tracker(tracker.id).await?.unwrap()
-        );
-
         // Update config.
         let updated_tracker = api
             .update_tracker(
@@ -1153,7 +1104,6 @@ mod tests {
             .await?;
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
-            url: "http://localhost:1234/my/app?q=3".parse()?,
             config: TrackerConfig {
                 revisions: 4,
                 ..tracker.config.clone()
@@ -1183,7 +1133,6 @@ mod tests {
             .await?;
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
-            url: "http://localhost:1234/my/app?q=3".parse()?,
             config: TrackerConfig {
                 revisions: 4,
                 ..tracker.config.clone()
@@ -1221,7 +1170,6 @@ mod tests {
             .await?;
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
-            url: "http://localhost:1234/my/app?q=3".parse()?,
             config: TrackerConfig {
                 revisions: 4,
                 job: Some(SchedulerJobConfig {
@@ -1260,7 +1208,6 @@ mod tests {
             .await?;
         let expected_tracker = Tracker {
             name: "name_two".to_string(),
-            url: "http://localhost:1234/my/app?q=3".parse()?,
             config: TrackerConfig {
                 revisions: 4,
                 job: None,
@@ -1297,14 +1244,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "@hourly".to_string(),
@@ -1332,7 +1279,7 @@ mod tests {
         assert_eq!(
             update_result.to_string(),
             format!(
-                "Either new name, url, target, config, or tags should be provided ({}).",
+                "Either new name, target, config, or tags should be provided ({}).",
                 tracker.id
             )
         );
@@ -1411,68 +1358,68 @@ mod tests {
             @r###""Tracker cannot have more than 10 tags.""###
         );
 
-        // Too long web page target delay.
-        assert_debug_snapshot!(
-            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_secs(61)),
-                    wait_for: Some("div".parse()?),
-                })),
-                ..Default::default()
-            }).await),
-            @r###""Tracker web page delay cannot be greater than 60000ms.""###
-        );
-
-        // Empty web page target wait-for selector.
-        assert_debug_snapshot!(
-            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    wait_for: Some("".parse()?),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            }).await),
-            @r###""Tracker web page wait-for selector cannot be empty.""###
-        );
-
-        // Very long web page target wait-for selector.
-        assert_debug_snapshot!(
-            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    wait_for: Some("a".repeat(101).parse()?),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            }).await),
-            @r###""Tracker web page wait-for selector cannot be longer than 100 characters.""###
-        );
-
-        // Too long web page target wait-for timeout.
-        assert_debug_snapshot!(
-            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    wait_for: Some(WebPageWaitFor {
-                        selector: "div".to_string(),
-                        state: Some(WebPageWaitForState::Attached),
-                        timeout: Some(Duration::from_secs(61)),
-                    }),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            }).await),
-            @r###""Tracker web page wait-for timeout cannot be greater than 60000ms.""###
-        );
-
-        // Empty extractor script
+        // Too long timeout.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 config: Some(TrackerConfig {
-                    extractor: Some("".to_string()),
-                   ..tracker.config.clone()
+                    timeout: Some(Duration::from_secs(61)),
+                    ..tracker.config.clone()
                 }),
                 ..Default::default()
             }).await),
-            @r###""Tracker extractor script cannot be empty.""###
+            @r###""Tracker timeout cannot be greater than 60000ms.""###
+        );
+
+        // Empty web page target extractor.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page extractor script cannot be empty.""###
+        );
+
+        // Very long web page target extractor.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "a".repeat(2049),
+                    user_agent: None,
+                    ignore_https_errors: false
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page extractor script cannot be longer than 2048 characters.""###
+        );
+
+        // Empty web page target user agent.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("".to_string()),
+                    ignore_https_errors: false,
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page user-agent header cannot be empty.""###
+        );
+
+        // Very long web page target user agent.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("a".repeat(201)),
+                    ignore_https_errors: false,
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker web page user-agent cannot be longer than 200 characters.""###
         );
 
         // Invalid schedule.
@@ -1631,13 +1578,15 @@ mod tests {
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
-        // Invalid URL schema.
+        // Invalid JSON API target URL schema.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                url: Some(Url::parse("ftp://retrack.dev")?),
+                target: Some(TrackerTarget::JsonApi(JsonApiTarget {
+                    url: Url::parse("ftp://retrack.dev")?,
+                })),
                 ..Default::default()
             }).await),
-            @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
+            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
         );
 
         let mut api_with_local_network = mock_api_with_network(
@@ -1658,10 +1607,12 @@ mod tests {
         let trackers = api_with_local_network.trackers();
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                url: Some(Url::parse("https://127.0.0.1")?),
+                target: Some(TrackerTarget::JsonApi(JsonApiTarget {
+                    url: Url::parse("https://127.0.0.1")?,
+                })),
                 ..Default::default()
             }).await),
-            @r###""Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
+            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
 
         Ok(())
@@ -1675,14 +1626,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -1773,14 +1724,14 @@ mod tests {
         let tracker_one = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -1794,7 +1745,6 @@ mod tests {
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
                 tags: tracker_one.tags.clone(),
@@ -1833,14 +1783,14 @@ mod tests {
         let tracker_one = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -1859,7 +1809,6 @@ mod tests {
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: tracker_one.target,
                 config: tracker_one.config.clone(),
                 tags: tracker_one.tags.clone(),
@@ -1884,14 +1833,14 @@ mod tests {
         let tracker_one = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -1909,7 +1858,6 @@ mod tests {
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
                 tags: vec!["tag:2".to_string(), "tag:common".to_string()],
@@ -2010,18 +1958,14 @@ mod tests {
         let tracker_one = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some(WebPageWaitFor {
-                        selector: "div".to_string(),
-                        state: Some(WebPageWaitForState::Attached),
-                        timeout: Some(Duration::from_millis(3000)),
-                    }),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2035,7 +1979,6 @@ mod tests {
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_two".to_string(),
-                url: Url::parse("https://retrack.dev/two")?,
                 target: tracker_one.target.clone(),
                 config: tracker_one.config.clone(),
                 tags: tracker_one.tags.clone(),
@@ -2208,14 +2151,16 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor:
+                        "export async function execute(p, r) { throw new Error('some error'); }"
+                            .to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2251,8 +2196,7 @@ mod tests {
             )
             .await
             .unwrap_err()
-            .downcast::<RetrackError>()
-            .unwrap();
+            .downcast::<RetrackError>()?;
         assert_eq!(scraper_error.status_code(), 400);
         assert_debug_snapshot!(
             scraper_error,
@@ -2280,14 +2224,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2362,14 +2306,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2445,14 +2389,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2514,14 +2458,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2568,100 +2512,6 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn properly_removes_revisions_when_tracker_url_changed(
-        pool: PgPool,
-    ) -> anyhow::Result<()> {
-        let server = MockServer::start();
-        let mut config = mock_config()?;
-        config.components.web_scraper_url = Url::parse(&server.base_url())?;
-
-        let api = mock_api_with_config(pool, config).await?;
-
-        let trackers = api.trackers();
-        let tracker = trackers
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    extractor: Default::default(),
-                    headers: Default::default(),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "0 0 * * * *".to_string(),
-                        retry_strategy: None,
-                        notifications: Some(true),
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-            })
-            .await?;
-
-        let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
-            .await?;
-        assert!(tracker_content.is_empty());
-
-        let content = get_content(946720800, "\"rev_1\"")?;
-        let content_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
-                .json_body(
-                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
-                        .unwrap(),
-                );
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .json_body_obj(&content);
-        });
-
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
-        assert!(revision.is_some());
-        let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
-            .await?;
-        assert_eq!(tracker_content.len(), 1);
-        content_mock.assert();
-
-        // Update name (content shouldn't be touched).
-        trackers
-            .update_tracker(
-                tracker.id,
-                TrackerUpdateParams {
-                    name: Some("name_one_new".to_string()),
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-        let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
-            .await?;
-        assert_eq!(tracker_content.len(), 1);
-
-        // Update URL.
-        trackers
-            .update_tracker(
-                tracker.id,
-                TrackerUpdateParams {
-                    url: Some("https://retrack.dev/two".parse()?),
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-        let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
-            .await?;
-        assert!(tracker_content.is_empty());
-
-        Ok(())
-    }
-
-    #[sqlx::test]
     async fn properly_resets_job_id_when_tracker_schedule_changed(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -2671,14 +2521,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2706,14 +2556,14 @@ mod tests {
                 tracker.id,
                 TrackerUpdateParams {
                     name: Some("name_one_new".to_string()),
-                    url: Some(Url::parse("https://retrack.dev/two")?),
                     target: Some(TrackerTarget::WebPage(WebPageTarget {
-                        delay: Some(Duration::from_millis(3000)),
-                        wait_for: Some("div".parse()?),
+                        extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/222'); return r.html(await p.content()); }".to_string(),
+                        user_agent: Some("Unknown/1.0.0".to_string()),
+                        ignore_https_errors: true,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
-                        extractor: Some("some".to_string()),
+                        timeout: Some(Duration::from_millis(3000)),
                         job: Some(SchedulerJobConfig {
                             schedule: "0 0 * * * *".to_string(),
                             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
@@ -2773,14 +2623,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev/one")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2808,14 +2658,14 @@ mod tests {
                 tracker.id,
                 TrackerUpdateParams {
                     name: Some("name_one_new".to_string()),
-                    url: Some(Url::parse("https://retrack.dev/two")?),
                     target: Some(TrackerTarget::WebPage(WebPageTarget {
-                        delay: Some(Duration::from_millis(3000)),
-                        wait_for: Some("div".parse()?),
+                        extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/222'); return r.html(await p.content()); }".to_string(),
+                        user_agent: Some("Unknown/1.0.0".to_string()),
+                        ignore_https_errors: true,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
-                        extractor: Some("some".to_string()),
+                        timeout: Some(Duration::from_millis(3000)),
                         job: Some(SchedulerJobConfig {
                             schedule: "0 0 * * * *".to_string(),
                             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
@@ -2872,14 +2722,14 @@ mod tests {
         let tracker = trackers
             .create_tracker(TrackerCreateParams {
                 name: "name_one".to_string(),
-                url: Url::parse("https://retrack.dev")?,
                 target: TrackerTarget::WebPage(WebPageTarget {
-                    delay: Some(Duration::from_millis(2000)),
-                    wait_for: Some("div".parse()?),
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_millis(2500)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * * *".to_string(),
@@ -2984,14 +2834,14 @@ mod tests {
             trackers
                 .create_tracker(TrackerCreateParams {
                     name: format!("name_{}", n),
-                    url: Url::parse("https://retrack.dev")?,
                     target: TrackerTarget::WebPage(WebPageTarget {
-                        delay: Some(Duration::from_millis(2000)),
-                        wait_for: Some("div".parse()?),
+                        extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                        user_agent: Some("Retrack/1.0.0".to_string()),
+                        ignore_https_errors: true,
                     }),
                     config: TrackerConfig {
                         revisions: 3,
-                        extractor: Default::default(),
+                        timeout: Some(Duration::from_millis(2500)),
                         headers: Default::default(),
                         job: Some(SchedulerJobConfig {
                             schedule: "0 0 * * * *".to_string(),

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT id, name, url, target, config, tags, created_at, updated_at, job_id, job_needed\nFROM trackers\nORDER BY updated_at\n                ",
+  "query": "\nSELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed\nFROM trackers\nORDER BY updated_at\n                ",
   "describe": {
     "columns": [
       {
@@ -15,41 +15,36 @@
       },
       {
         "ordinal": 2,
-        "name": "url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 3,
         "name": "target",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 4,
+        "ordinal": 3,
         "name": "config",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "tags",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "job_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "job_needed",
         "type_info": "Bool"
       }
@@ -65,10 +60,9 @@
       false,
       false,
       false,
-      false,
       true,
       false
     ]
   },
-  "hash": "c1f84531bb0cc200a05481aa7f750167271bda9582e5d991148f15e9784d2b8f"
+  "hash": "d1d54ac2c3994beb894559f2ca7803ad3ba8d14ba9f052a1909756771e8b5dba"
 }

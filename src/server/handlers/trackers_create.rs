@@ -62,10 +62,16 @@ mod tests {
             &app,
             TestRequest::with_uri("https://retrack.dev/api/trackers")
                 .method(Method::POST)
-                .set_json(json!({ "name": "my-minimal-tracker".to_string(), "url": "https://retrack.dev/app"}))
+                .set_json(json!({
+                    "name": "my-minimal-tracker".to_string(),
+                    "target": {
+                        "type": "web:page",
+                        "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }"
+                    },
+                }))
                 .to_request(),
         )
-            .await;
+        .await;
         assert_eq!(response.status(), 200);
 
         let trackers = server_state
@@ -75,11 +81,15 @@ mod tests {
             .await?;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
-        assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
         assert_eq!(trackers[0].config.revisions, 3);
+        assert!(trackers[0].config.timeout.is_none());
         assert_eq!(
             trackers[0].target,
-            TrackerTarget::WebPage(Default::default())
+            TrackerTarget::WebPage(WebPageTarget {
+                extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
+                user_agent: None,
+                ignore_https_errors: false,
+            })
         );
 
         assert_eq!(
@@ -106,15 +116,15 @@ mod tests {
                 .method(Method::POST)
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
-                    "url": "https://retrack.dev/app",
                     "target": {
                         "type": "web:page",
-                        "delay": 5000,
-                        "waitFor": "div"
+                        "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }",
+                        "userAgent": "Retrack/1.0.0",
+                        "ignoreHTTPSErrors": true
                     },
                     "config": {
                         "revisions": 5,
-                        "extractor": "return document.body.innerHTML;",
+                        "timeout": 5000,
                         "headers": {
                             "cookie": "my-cookie"
                         },
@@ -145,18 +155,18 @@ mod tests {
             .await?;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
-        assert_eq!(trackers[0].url, "https://retrack.dev/app".parse()?);
         assert_eq!(trackers[0].config.revisions, 5);
+        assert_eq!(
+            trackers[0].config.timeout,
+            Some(Duration::from_millis(5000))
+        );
         assert_eq!(
             trackers[0].target,
             TrackerTarget::WebPage(WebPageTarget {
-                delay: Some(Duration::from_millis(5000)),
-                wait_for: Some("div".parse()?),
+                extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
+                user_agent: Some("Retrack/1.0.0".to_string()),
+                ignore_https_errors: true,
             })
-        );
-        assert_eq!(
-            trackers[0].config.extractor,
-            Some("return document.body.innerHTML;".to_string())
         );
         assert_eq!(
             trackers[0].config.headers,
@@ -211,11 +221,13 @@ mod tests {
                 .method(Method::POST)
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
-                    "url": "https://127.0.0.1/app",
+                    "target": {
+                        "type": "api:json",
+                        "url": "https://127.0.0.1/app",
+                    },
                     "config": {
                         "revisions": 5,
-                        "delay": 5000
-
+                        "timeout": 5000
                     }
                 }))
                 .to_request(),
@@ -225,7 +237,7 @@ mod tests {
         assert_eq!(response.status(), 400);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            r###"{"message":"Tracker URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/app."}"###
+            r###"{"message":"Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/app."}"###
         );
         assert!(server_state
             .api

@@ -218,29 +218,28 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    pub use super::database_ext::tests::{
+        mock_get_scheduler_job, mock_upsert_scheduler_job, RawSchedulerJobStoredData,
+    };
     use crate::{
         config::{Config, DatabaseConfig},
         scheduler::{
             scheduler_job::SchedulerJob, Scheduler, SchedulerJobConfig, SchedulerJobMetadata,
         },
         tests::{mock_api_with_config, mock_config},
-        trackers::{TrackerConfig, TrackerCreateParams},
+        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
     };
     use anyhow::anyhow;
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
-    use std::{env, sync::Arc, vec::Vec};
+    use std::{env, sync::Arc, time::Duration, vec::Vec};
     use tokio::sync::RwLock;
     use tokio_cron_scheduler::{
         JobScheduler, PostgresMetadataStore, PostgresNotificationStore, PostgresStore,
         SimpleJobCode, SimpleNotificationCode,
     };
     use uuid::{uuid, Uuid};
-
-    pub use super::database_ext::tests::{
-        mock_get_scheduler_job, mock_upsert_scheduler_job, RawSchedulerJobStoredData,
-    };
 
     pub async fn mock_scheduler(pool: &PgPool) -> anyhow::Result<JobScheduler> {
         let connect_options = pool.connect_options();
@@ -335,11 +334,14 @@ pub mod tests {
             .trackers()
             .create_tracker(TrackerCreateParams {
                 name: "tracker-one".to_string(),
-                url: "https://localhost:1234/my/app?q=2".parse()?,
-                target: Default::default(),
+                target: TrackerTarget::WebPage(WebPageTarget {
+                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                    user_agent: None,
+                    ignore_https_errors: false,
+                }),
                 config: TrackerConfig {
                     revisions: 1,
-                    extractor: Default::default(),
+                    timeout: Some(Duration::from_secs(10)),
                     headers: Default::default(),
                     job: Some(SchedulerJobConfig {
                         schedule: "1 2 3 4 5 6 2030".to_string(),

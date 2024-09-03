@@ -1,12 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nUPDATE trackers\nSET name = $2, url = $3, target = $4, config = $5, tags = $6, updated_at = $7, job_needed = $8, job_id = $9\nWHERE id = $1\n        ",
+  "query": "\nUPDATE trackers\nSET name = $2, target = $3, config = $4, tags = $5, updated_at = $6, job_needed = $7, job_id = $8\nWHERE id = $1\n        ",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
         "Text",
         "Bytea",
         "Bytea",
@@ -18,5 +17,5 @@
     },
     "nullable": []
   },
-  "hash": "c4b6386f0a7f8e65ff621783e810d2924f076370025940f5f8c8c671db8f7dcf"
+  "hash": "b889d1133e624ae01a59d1a62b80dde1107977ad99966fc0a68fa31b28ee9c1b"
 }
