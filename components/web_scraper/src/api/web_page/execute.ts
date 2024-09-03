@@ -88,10 +88,12 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
           let errorResult: Error | undefined;
           let successfulResult: WorkerResultMessage['content'] | undefined;
 
+          // It's intentional that 0 is treated as a fallback to the default timeout value.
+          const timeout = request.body.timeout || DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS;
           const forcedWorkerTimeout = setTimeout(() => {
             errorResult = new Error(`The execution was terminated due to timeout ${timeout}ms.`);
             void worker.terminate();
-          }, request.body.timeout ?? DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS);
+          }, timeout);
 
           worker.on('message', (message: WorkerLogMessage | WorkerResultMessage) => {
             if (message.type === WorkerMessageType.LOG) {
