@@ -84,6 +84,11 @@ If you plan to interact with the web page trackers, you'll also need to have Chr
 npm run watch -w components/web_scraper
 ```
 
+To run with the debug output from Playwright, use the following command:
+```shell
+DEBUG=pw:protocol npm run watch -w components/web_scraper
+```
+
 You can also use `.env` file to configure Web Scraper:
 
 ```dotenv

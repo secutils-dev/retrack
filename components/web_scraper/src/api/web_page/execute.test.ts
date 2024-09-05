@@ -35,9 +35,9 @@ await test('[/api/web_page/execute] can run extractor scripts', async (t) => {
     url: '/api/web_page/execute',
     payload: {
       extractor: `
-export async function execute(page, result) {
+export async function execute(page) {
   await page.goto('https://retrack.dev');
-  return result.html(await page.content());
+  return await page.content();
 };
   `
         .replaceAll('\n', '')
@@ -53,14 +53,7 @@ export async function execute(page, result) {
 
   assert.strictEqual(
     response.body,
-    JSON.stringify({
-      timestamp: 123000,
-      content: JSON.stringify({
-        type: 'html',
-        value:
-          '<html lang="en"><head><title>Retrack.dev</title></head><body><div>Hello Retrack and world!</div></body></html>',
-      }),
-    }),
+    '<html lang="en"><head><title>Retrack.dev</title></head><body><div>Hello Retrack and world!</div></body></html>',
   );
   assert.strictEqual(response.statusCode, 200);
 });
@@ -74,7 +67,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
-      extractor: `export async function execute(page, result) { return result.text('success'); };`,
+      extractor: `export async function execute(page) { return 'success'; };`,
       userAgent: 'Retrack/1.0.0',
       ignoreHTTPSErrors: true,
     },
@@ -92,13 +85,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
   assert.ok(userAgentOverrideMessage);
   assert.equal((userAgentOverrideMessage.params as { userAgent: string }).userAgent, 'Retrack/1.0.0');
 
-  assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      timestamp: 123000,
-      content: JSON.stringify({ type: 'text', value: 'success' }),
-    }),
-  );
+  assert.strictEqual(response.body, 'success');
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -112,10 +99,10 @@ await test('[/api/web_page/execute] can provide previous content', async (t) => 
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
-      previousContent: { type: 'html', value: 'some previous content' },
+      previousContent: 'some previous content',
       extractor: `
-export async function execute(page, result, previousContent) {
-  return result.text(previousContent);
+export async function execute(page, previousContent) {
+  return previousContent;
 };
   `
         .replaceAll('\n', '')
@@ -123,22 +110,16 @@ export async function execute(page, result, previousContent) {
     },
   });
 
-  assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      timestamp: 123000,
-      content: JSON.stringify({ type: 'text', value: 'some previous content' }),
-    }),
-  );
+  assert.strictEqual(response.body, 'some previous content');
   assert.strictEqual(response.statusCode, 200);
 
   response = await mockRoute.inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
-      previousContent: { type: 'json', value: JSON.stringify({ a: 1 }) },
+      previousContent: { a: 1 },
       extractor: `
-export async function execute(page, result, previousContent) {
+export async function execute(page, previousContent) {
   return Object.entries(previousContent);
 };
   `
@@ -147,13 +128,7 @@ export async function execute(page, result, previousContent) {
     },
   });
 
-  assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      timestamp: 123000,
-      content: JSON.stringify({ type: 'json', value: JSON.stringify([['a', 1]]) }),
-    }),
-  );
+  assert.strictEqual(response.body, JSON.stringify([['a', 1]]));
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -167,8 +142,8 @@ await test('[/api/web_page/execute] allows extractor scripts to import selected 
     url: '/api/web_page/execute',
     payload: {
       extractor: `
-export async function execute(page, result) {
-  return result.text((await import('node:util')).inspect(new Map([['one', 1], ['two', 2]])));
+export async function execute(page) {
+  return (await import('node:util')).inspect(new Map([['one', 1], ['two', 2]]));
 };
   `
         .replaceAll('\n', '')
@@ -176,13 +151,7 @@ export async function execute(page, result) {
     },
   });
 
-  assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      timestamp: 123000,
-      content: JSON.stringify({ type: 'text', value: "Map(2) { 'one' => 1, 'two' => 2 }" }),
-    }),
-  );
+  assert.strictEqual(response.body, "Map(2) { 'one' => 1, 'two' => 2 }");
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -253,9 +222,9 @@ await test('[/api/web_page/execute] protects runtime from most common prototype 
     url: '/api/web_page/execute',
     payload: {
       extractor: `
-export async function execute(page, result) {
+export async function execute(page) {
   Object.getPrototypeOf({}).polluted = 'polluted';
-  return result.text(({}).polluted || 'Prototype pollution free!');
+  return ({}).polluted || 'Prototype pollution free!';
 };
   `
         .replaceAll('\n', '')
@@ -276,9 +245,9 @@ export async function execute(page, result) {
     url: '/api/web_page/execute',
     payload: {
       extractor: `
-export async function execute(page, result) {
+export async function execute(page) {
   ({}).__proto__.polluted = 'polluted';
-  return result.text(({}).polluted || 'Prototype pollution free!');
+  return ({}).polluted || 'Prototype pollution free!';
 };
     `
         .replaceAll('\n', '')
@@ -299,9 +268,9 @@ export async function execute(page, result) {
     url: '/api/web_page/execute',
     payload: {
       extractor: `
-export async function execute(page, result) {
+export async function execute(page) {
   ([]).__proto__.polluted = 'polluted';
-  return result.text(([]).polluted || 'Prototype pollution free!');
+  return ([]).polluted || 'Prototype pollution free!';
 };
     `
         .replaceAll('\n', '')
@@ -328,10 +297,10 @@ await test('[/api/web_page/execute] terminates extractor scripts if it takes too
     url: '/api/web_page/execute',
     payload: {
       extractor: `
-export async function execute(page, result) {
+export async function execute(page) {
   const delay = (time) => new Promise((resolve) => setTimeout(resolve, time));
   await delay(10000);
-  return result.text('some text');
+  return 'some text';
 };
   `
         .replaceAll('\n', '')

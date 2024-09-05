@@ -3,7 +3,7 @@ import * as process from 'node:process';
 import { Worker } from 'node:worker_threads';
 import type { ApiRouteParams } from '../api_route_params.js';
 import { Diagnostics } from '../diagnostics.js';
-import type { WorkerData, WorkerLogMessage, WorkerResultMessage, WorkerStringResultType } from './constants.js';
+import type { WorkerData, WorkerLogMessage, WorkerResultMessage } from './constants.js';
 import { DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS } from './constants.js';
 import { WorkerMessageType } from './constants.js';
 
@@ -22,7 +22,7 @@ interface RequestBodyType {
   /**
    * Optional web page content that has been extracted previously.
    */
-  previousContent?: { type: WorkerStringResultType; value: string };
+  previousContent?: unknown;
 
   /**
    * Number of milliseconds to wait until extractor script finishes processing. Default is 30000ms.
@@ -47,17 +47,10 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
       schema: {
         body: {
           extractor: { type: 'string' },
-          previousContent: {
-            type: 'object',
-            properties: { timestamp: { type: 'number' }, content: { type: 'string' } },
-            nullable: true,
-          },
+          previousContent: {},
           timeout: { type: 'number', nullable: true },
           userAgent: { type: 'string', nullable: true },
           ignoreHTTPSErrors: { type: 'boolean', nullable: true },
-        },
-        response: {
-          200: { type: 'object', properties: { timestamp: { type: 'number' }, content: { type: 'string' } } },
         },
       },
     },
@@ -85,7 +78,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
 
         return await new Promise((resolve, reject) => {
           let errorResult: Error | undefined;
-          let successfulResult: WorkerResultMessage['content'] | undefined;
+          let successfulResult: unknown = undefined;
 
           // It's intentional that 0 is treated as a fallback to the default timeout value.
           const timeout = request.body.timeout || DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS;
@@ -120,8 +113,8 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
 
             if (errorResult) {
               reject(errorResult);
-            } else if (successfulResult) {
-              resolve({ timestamp: Date.now(), content: JSON.stringify(successfulResult) });
+            } else if (successfulResult !== undefined) {
+              resolve(successfulResult);
             } else {
               reject(new Error(`Unexpected error occurred (${code}).`));
             }

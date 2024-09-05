@@ -32,10 +32,8 @@ export interface WorkerLogMessage {
  */
 export interface WorkerResultMessage {
   type: WorkerMessageType.RESULT;
-  content: { type: WorkerStringResultType; value: string };
+  content: unknown;
 }
-
-export type WorkerStringResultType = 'html' | 'text' | 'json';
 
 /**
  * Represents the data that is passed to the worker thread.
@@ -46,7 +44,7 @@ export interface WorkerData {
   // The extractor script that the worker should execute.
   extractor: string;
   // The previous content that the extractor script extracted previously.
-  previousContent?: { type: WorkerStringResultType; value: string };
+  previousContent?: unknown;
   // The user agent that should be used for all requests.
   userAgent?: string;
   // Whether to ignore HTTPS errors when sending network requests.

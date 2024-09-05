@@ -5,9 +5,8 @@ import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 
 import { Diagnostics } from '../diagnostics.js';
-import type { WorkerData, WorkerStringResultType } from './constants.js';
+import type { WorkerData } from './constants.js';
 import { EXTRACTOR_MODULE_PREFIX, WorkerMessageType } from './constants.js';
-import { ExecutionResult } from './execution_result.js';
 
 // We need parent port to communicate the errors and result of extractor script to the main thread.
 if (!parentPort) {
@@ -43,12 +42,8 @@ for (const Class of [
 // SECURITY: We load custom hooks to prevent extractor scripts from importing sensitive native and playwright modules.
 // See https://github.com/nodejs/node/issues/47747 for more details.
 register(resolve(import.meta.dirname, './extractor_module_hooks.js'), pathToFileURL('./'));
-const extractorModule = (await import(`${EXTRACTOR_MODULE_PREFIX}${extractor}`)) as {
-  execute: (
-    page: Page,
-    executionResult: typeof ExecutionResult,
-    previousContent?: { type: WorkerStringResultType; value: string },
-  ) => Promise<ExecutionResult | unknown>;
+const extractorModule = (await import(`${EXTRACTOR_MODULE_PREFIX}${encodeURIComponent(extractor)}`)) as {
+  execute: (page: Page, previousContent?: unknown) => Promise<unknown>;
 };
 if (typeof extractorModule?.execute !== 'function') {
   throw new Error('The extractor script must export a function named "execute".');
@@ -105,17 +100,9 @@ delete contextPrototype.constructor;
 
 const page = await context.newPage();
 try {
-  const executionResult = await extractorModule.execute(
-    page,
-    ExecutionResult,
-    previousContent?.type === 'json' ? JSON.parse(previousContent.value) : previousContent?.value,
-  );
   parentPort?.postMessage({
     type: WorkerMessageType.RESULT,
-    content: (executionResult instanceof ExecutionResult
-      ? executionResult
-      : ExecutionResult.json(executionResult)
-    ).toContent(),
+    content: await extractorModule.execute(page, previousContent),
   });
 } catch (err) {
   // Capture screenshots.

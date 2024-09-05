@@ -3,6 +3,26 @@ GET {{web-scraper}}/api/status
 Accept: application/json
 Content-Type: application/json
 
+### Execute extractor script (previous content).
+< {%
+  const extractor = `
+    export async function execute(page, previousContent) {
+      await page.goto('https://demo.webhooks.secutils.dev/dynamic?arg=1');
+      const increment = +((await page.locator('body').innerText()).trim()) || 0;
+      return (previousContent ?? 0) + increment;
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{web-scraper}}/api/web_page/execute
+Accept: application/json
+Content-Type: application/json
+
+{
+  "extractor": "{{extractor}}",
+  "previousContent": 1
+}
+
 ### Execute extractor script (complex, should fail).
 POST {{web-scraper}}/api/web_page/execute
 Accept: application/json
@@ -27,17 +47,17 @@ Accept: application/json
 Content-Type: application/json
 
 {
-  "extractor": "async function execute(page) { await page.goto('https://google.com'); return JSON.stringify(await (await page.context().newCDPSession(page)).send('Target.getTargets')); }; export { execute };"
+  "extractor": "export async function execute(page) { await page.goto('https://google.com'); return await (await page.context().newCDPSession(page)).send('Target.getTargets'); };"
 }
 
 ### Execute extractor script (cdp).
 < {%
   const extractor = `
-    export async function execute(page, result) {
+    export async function execute(page) {
       const delay = (time) => new Promise((resolve) => setTimeout(resolve, time));
-      await delay(5000);
+      await delay(1000);
       await page.goto('https://y5l3m6u-demo.webhooks.dev.secutils.dev/');
-      await delay(5000);
+      await delay(1000);
       /*return result.html(await page.locator('table.overview-table').innerHTML());*/
       return await page.content();
     };
@@ -70,4 +90,73 @@ Content-Type: application/json
   "extractor": "{{extractor}}",
   "userAgent": "Retrack/1.0.0",
   "ignoreHTTPSErrors": true
+}
+
+### Execute extractor script (GH icon).
+< {%
+  const extractor = `
+    export async function execute(page) {
+      await page.goto('https://github.com');
+      const iconLink = await page.getByRole('link', { name: 'Homepage', exact: true });
+      return await iconLink.locator('svg').innerHTML();
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{web-scraper}}/api/web_page/execute
+Accept: application/json
+Content-Type: application/json
+
+{
+  "extractor": "{{extractor}}"
+}
+
+### Execute extractor script (First Trust funds).
+< {%
+  const extractor = `
+    export async function execute(page) {
+      const locale = 'uk';
+      await page.goto(\`https://www.ftglobalportfolios.com/\$\{locale\}/professional/Products/\`);
+
+      await page.getByRole('button', { name: 'accept all cookies' }).click();
+
+      const actions = await page.locator('[class*=actions]:visible');
+      await actions.getByText('Accept', { exact: true }).click();
+
+      /*await page.waitForTimeout(600000);*/
+
+      const fundsTable = page.locator('.FundsTable__group');
+      await fundsTable.waitFor({ state: 'visible' });
+
+      const funds = await page.evaluate(() => {
+        const fundsProperties = [];
+        for (const fundEntry of Array.from(document.querySelectorAll('.FundsTable__group ul'))) {
+          const [linkCell, tickerCell,, distributionCell, , isinCell] = fundEntry.querySelectorAll('li');
+          const isin = isinCell.textContent.trim().toUpperCase() || '';
+          const ticker = tickerCell.textContent.trim().toUpperCase() || '';
+
+          fundsProperties.push([
+            isin,
+            linkCell.textContent.trim() || '',
+            (linkCell.querySelector('a')).href || '',
+            [ticker],
+            distributionCell.textContent.trim().toLowerCase() || '',
+          ]);
+        }
+
+        return fundsProperties;
+      });
+
+      return funds;
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{web-scraper}}/api/web_page/execute
+Accept: application/json
+Content-Type: application/json
+
+{
+  "extractor": "{{extractor}}",
+  "timeout": 600000
 }
