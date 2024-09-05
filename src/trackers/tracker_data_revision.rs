@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -13,7 +14,7 @@ pub struct TrackerDataRevision {
     #[serde(skip_serializing)]
     pub tracker_id: Uuid,
     /// Tracker data revision value.
-    pub data: String,
+    pub data: JsonValue,
     /// Timestamp indicating when data was fetched.
     #[serde(with = "time::serde::timestamp")]
     pub created_at: OffsetDateTime,
@@ -23,6 +24,7 @@ pub struct TrackerDataRevision {
 mod tests {
     use crate::trackers::TrackerDataRevision;
     use insta::assert_json_snapshot;
+    use serde_json::json;
     use time::OffsetDateTime;
     use uuid::uuid;
 
@@ -34,7 +36,7 @@ mod tests {
             created_at: OffsetDateTime::from_unix_timestamp(
                 946720800,
             )?,
-            data: "some-data".to_string(),
+            data: json!("some-data"),
         }, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",

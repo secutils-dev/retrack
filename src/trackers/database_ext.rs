@@ -426,6 +426,7 @@ mod tests {
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
+    use serde_json::json;
     use sqlx::PgPool;
     use std::{
         ops::{Add, Sub},
@@ -443,7 +444,7 @@ mod tests {
             id,
             tracker_id,
             created_at: OffsetDateTime::from_unix_timestamp(946720800 + time_shift)?,
-            data: "some-data".to_string(),
+            data: json!("some-data"),
         })
     }
 

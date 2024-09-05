@@ -169,7 +169,7 @@ impl TrackersFetchJob {
                     tracker,
                     NotificationContentTemplate::TrackerChanges {
                         tracker_name,
-                        content: Ok(revision.data),
+                        content: Ok(revision.data.to_string()),
                     },
                 )
                 .await;
@@ -267,7 +267,7 @@ mod tests {
         tests::{
             mock_api_with_config, mock_config, mock_get_scheduler_job, mock_schedule_in_sec,
             mock_schedule_in_secs, mock_scheduler, mock_scheduler_job, WebScraperContentRequest,
-            WebScraperContentResponse, WebScraperErrorResponse,
+            WebScraperErrorResponse,
         },
         trackers::{
             Tracker, TrackerConfig, TrackerCreateParams, TrackerDataRevision, TrackerTarget,
@@ -278,6 +278,7 @@ mod tests {
     use futures::StreamExt;
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
+    use serde_json::json;
     use sqlx::PgPool;
     use std::{default::Default, ops::Add, sync::Arc, time::Duration};
     use time::OffsetDateTime;
@@ -480,14 +481,10 @@ mod tests {
             .await?;
 
         // Create a mock
-        let content = WebScraperContentResponse {
-            timestamp: OffsetDateTime::from_unix_timestamp(946720800)?,
-            content: "some-content".to_string(),
-        };
-
+        let content = json!("some-content");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
                         .unwrap(),
@@ -519,12 +516,9 @@ mod tests {
                 .get_tracker_data(tracker.id, Default::default())
                 .await?
                 .into_iter()
-                .map(|rev| (rev.created_at, rev.data))
+                .map(|rev| rev.data)
                 .collect::<Vec<_>>(),
-            vec![(
-                OffsetDateTime::from_unix_timestamp(946720800)?,
-                content.content
-            )]
+            vec![content]
         );
 
         // Check that the tracker job was marked as NOT stopped.
@@ -603,7 +597,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: tracker.id,
                 created_at: OffsetDateTime::from_unix_timestamp(946720700)?,
-                data: "some-content".to_string(),
+                data: json!("some-content"),
             })
             .await?;
 
@@ -613,18 +607,15 @@ mod tests {
             .await?;
 
         // Create a mock
-        let content = WebScraperContentResponse {
-            timestamp: OffsetDateTime::from_unix_timestamp(946720800)?,
-            content: "other-content".to_string(),
-        };
+        let content = json!("other-content");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("some-content"),
+                            .set_previous_content(&json!("some-content")),
                     )
                     .unwrap(),
                 );
@@ -672,7 +663,7 @@ mod tests {
                     TrackerChanges {
                         tracker_name: "tracker-one",
                         content: Ok(
-                            "other-content",
+                            "\"other-content\"",
                         ),
                     },
                 ),
@@ -754,7 +745,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: tracker.id,
                 created_at: OffsetDateTime::from_unix_timestamp(946720700)?,
-                data: "some-content".to_string(),
+                data: json!("some-content"),
             })
             .await?;
 
@@ -765,12 +756,12 @@ mod tests {
 
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("some-content"),
+                            .set_previous_content(&json!("some-content")),
                     )
                     .unwrap(),
                 );
@@ -904,7 +895,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: tracker.id,
                 created_at: OffsetDateTime::from_unix_timestamp(946720700)?,
-                data: "some-content".to_string(),
+                data: json!("some-content"),
             })
             .await?;
 
@@ -915,12 +906,12 @@ mod tests {
 
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("some-content"),
+                            .set_previous_content(&json!("some-content")),
                     )
                     .unwrap(),
                 );
@@ -1088,7 +1079,7 @@ mod tests {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: tracker.id,
                 created_at: OffsetDateTime::from_unix_timestamp(946720700)?,
-                data: "some-content".to_string(),
+                data: json!("some-content"),
             })
             .await?;
 
@@ -1099,12 +1090,12 @@ mod tests {
 
         let mut content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("some-content"),
+                            .set_previous_content(&json!("some-content")),
                     )
                     .unwrap(),
                 );
@@ -1155,18 +1146,15 @@ mod tests {
             .unwrap_or_default());
 
         // Create a mock
-        let content = WebScraperContentResponse {
-            timestamp: OffsetDateTime::from_unix_timestamp(946720800)?,
-            content: "other-content".to_string(),
-        };
+        let content = json!("other-content");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("some-content"),
+                            .set_previous_content(&json!("some-content")),
                     )
                     .unwrap(),
                 );
@@ -1211,7 +1199,7 @@ mod tests {
                     TrackerChanges {
                         tracker_name: "tracker-one",
                         content: Ok(
-                            "other-content",
+                            "\"other-content\"",
                         ),
                     },
                 ),

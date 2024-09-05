@@ -1,6 +1,7 @@
 use crate::trackers::{Tracker, TrackerTarget};
 use anyhow::bail;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
 use std::time::Duration;
 
@@ -28,12 +29,12 @@ pub struct WebScraperContentRequest<'a> {
     pub timeout: Option<Duration>,
 
     /// Optional content of the web page that has been extracted previously.
-    pub previous_content: Option<&'a str>,
+    pub previous_content: Option<&'a JsonValue>,
 }
 
 impl<'a> WebScraperContentRequest<'a> {
     /// Sets the content that has been extracted from the page previously.
-    pub fn set_previous_content(self, previous_content: &'a str) -> Self {
+    pub fn set_previous_content(self, previous_content: &'a JsonValue) -> Self {
         Self {
             previous_content: Some(previous_content),
             ..self
@@ -74,6 +75,7 @@ mod tests {
         trackers::{TrackerTarget, WebPageTarget},
     };
     use insta::assert_json_snapshot;
+    use serde_json::json;
     use std::time::Duration;
     use uuid::uuid;
 
@@ -82,7 +84,7 @@ mod tests {
         assert_json_snapshot!(WebScraperContentRequest {
             extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }",
             timeout: Some(Duration::from_millis(100)),
-            previous_content: Some("some content"),
+            previous_content: Some(&json!("some content")),
             user_agent: Some("Retrack/1.0.0"),
             ignore_https_errors: true
         }, @r###"

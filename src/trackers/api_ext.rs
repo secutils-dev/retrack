@@ -17,9 +17,7 @@ use crate::{
     trackers::{
         database_ext::TrackersDatabaseExt,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
-        web_scraper::{
-            WebScraperContentRequest, WebScraperContentResponse, WebScraperErrorResponse,
-        },
+        web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
         JsonApiTarget, Tracker, TrackerDataRevision, TrackerTarget, WebPageTarget,
     },
 };
@@ -220,12 +218,11 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             }
         };
 
-        // Check if there is a revision with the same timestamp. If so, drop newly fetched revision.
-        if revisions
-            .iter()
-            .any(|revision| revision.created_at == new_revision.created_at)
-        {
-            return Ok(None);
+        // If the last revision has the same value, drop newly fetched revision.
+        if let Some(last_revision) = revisions.last() {
+            if last_revision.data == new_revision.data {
+                return Ok(None);
+            }
         }
 
         // Check if content has changed.
@@ -507,7 +504,7 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
 
         let scraper_response = reqwest::Client::new()
             .post(format!(
-                "{}api/web_page/content",
+                "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()
             ))
             .json(&scraper_request)
@@ -542,21 +539,19 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET> {
             }
         }
 
-        let scraper_response = scraper_response
-            .json::<WebScraperContentResponse>()
-            .await
-            .map_err(|err| {
+        Ok(TrackerDataRevision {
+            id: Uuid::now_v7(),
+            tracker_id: tracker.id,
+            data: scraper_response.json().await.map_err(|err| {
                 anyhow!(
                     "Could not deserialize scraper response for the tracker ('{}'): {err:?}",
                     tracker.id
                 )
-            })?;
-
-        Ok(TrackerDataRevision {
-            id: Uuid::now_v7(),
-            tracker_id: tracker.id,
-            data: scraper_response.content,
-            created_at: scraper_response.timestamp,
+            })?,
+            // Preserve timestamp only up to seconds.
+            created_at: OffsetDateTime::from_unix_timestamp(
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )?,
         })
     }
 
@@ -593,8 +588,7 @@ mod tests {
         tests::{
             mock_api, mock_api_with_config, mock_api_with_network, mock_config,
             mock_network_with_records, mock_scheduler_job, mock_upsert_scheduler_job,
-            RawSchedulerJobStoredData, WebScraperContentRequest, WebScraperContentResponse,
-            WebScraperErrorResponse,
+            RawSchedulerJobStoredData, WebScraperContentRequest, WebScraperErrorResponse,
         },
         trackers::{
             JsonApiTarget, Tracker, TrackerConfig, TrackerCreateParams, TrackerListRevisionsParams,
@@ -605,22 +599,15 @@ mod tests {
     use futures::StreamExt;
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
+    use serde_json::json;
     use sqlx::PgPool;
     use std::{net::Ipv4Addr, time::Duration};
-    use time::OffsetDateTime;
     use trust_dns_resolver::{
         proto::rr::{rdata::A, RData, Record},
         Name,
     };
     use url::Url;
     use uuid::{uuid, Uuid};
-
-    fn get_content(timestamp: i64, label: &str) -> anyhow::Result<WebScraperContentResponse> {
-        Ok(WebScraperContentResponse {
-            timestamp: OffsetDateTime::from_unix_timestamp(timestamp)?,
-            content: label.to_string(),
-        })
-    }
 
     #[sqlx::test]
     async fn properly_creates_new_tracker(pool: PgPool) -> anyhow::Result<()> {
@@ -1994,10 +1981,10 @@ mod tests {
         assert!(tracker_one_data.is_empty());
         assert!(tracker_two_data.is_empty());
 
-        let content_one = get_content(946720800, "\"rev_1\"")?;
+        let content_one = json!("\"rev_1\"");
         let mut content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker_one).unwrap())
                         .unwrap(),
@@ -2021,21 +2008,21 @@ mod tests {
             .await?;
         assert_eq!(tracker_one_data.len(), 1);
         assert_eq!(tracker_one_data[0].tracker_id, tracker_one.id);
-        assert_eq!(tracker_one_data[0].data, content_one.content);
+        assert_eq!(tracker_one_data[0].data, content_one);
         assert!(tracker_two_data.is_empty());
 
         content_mock.assert();
         content_mock.delete();
 
-        let content_two = get_content(946720900, "\"rev_2\"")?;
+        let content_two = json!("\"rev_2\"");
         let mut content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker_one)
                             .unwrap()
-                            .set_previous_content("\"rev_1\""),
+                            .set_previous_content(&json!("\"rev_1\"")),
                     )
                     .unwrap(),
                 );
@@ -2043,14 +2030,13 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&content_two);
         });
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
         let revision = trackers
             .create_tracker_data_revision(tracker_one.id)
             .await?
             .unwrap();
-        assert_eq!(
-            revision.created_at,
-            OffsetDateTime::from_unix_timestamp(946720900)?
-        );
         assert_eq!(revision.data, "\"rev_2\"");
         content_mock.assert();
         content_mock.delete();
@@ -2064,10 +2050,10 @@ mod tests {
         assert_eq!(tracker_one_data.len(), 2);
         assert!(tracker_two_data.is_empty());
 
-        let content_two = get_content(946720900, "\"rev_3\"")?;
+        let content_two = json!("\"rev_3\"");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker_two).unwrap())
                         .unwrap(),
@@ -2101,8 +2087,8 @@ mod tests {
             tracker_one_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
             @r###"
         [
-            "\"rev_1\"",
-            "@@ -1 +1 @@\n-rev_1\n+rev_2\n",
+            String("\"rev_1\""),
+            String("@@ -1 +1 @@\n-\"rev_1\"\n+\"rev_2\"\n"),
         ]
         "###
         );
@@ -2110,7 +2096,7 @@ mod tests {
             tracker_two_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
             @r###"
         [
-            "\"rev_3\"",
+            String("\"rev_3\""),
         ]
         "###
         );
@@ -2128,8 +2114,8 @@ mod tests {
             tracker_one_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
             @r###"
         [
-            "\"rev_1\"",
-            "\"rev_2\"",
+            String("\"rev_1\""),
+            String("\"rev_2\""),
         ]
         "###
         );
@@ -2174,7 +2160,7 @@ mod tests {
 
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
                         .unwrap(),
@@ -2248,10 +2234,10 @@ mod tests {
             .await?;
         assert!(tracker_content.is_empty());
 
-        let content_one = get_content(946720800, "\"rev_1\"")?;
+        let content_one = json!("\"rev_1\"");
         let mut content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
                         .unwrap(),
@@ -2268,12 +2254,12 @@ mod tests {
         content_mock.delete();
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("\"rev_1\""),
+                            .set_previous_content(&json!("\"rev_1\"")),
                     )
                     .unwrap(),
                 );
@@ -2330,10 +2316,10 @@ mod tests {
             .await?;
         assert!(tracker_content.is_empty());
 
-        let content_one = get_content(946720800, "\"rev_1\"")?;
+        let content_one = json!("\"rev_1\"");
         let mut content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
                         .unwrap(),
@@ -2348,15 +2334,15 @@ mod tests {
         content_mock.assert();
         content_mock.delete();
 
-        let content_two = get_content(946720900, "\"rev_1\"")?;
+        let content_two = json!("\"rev_1\"");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content("\"rev_1\""),
+                            .set_previous_content(&json!("\"rev_1\"")),
                     )
                     .unwrap(),
                 );
@@ -2413,10 +2399,10 @@ mod tests {
             .await?;
         assert!(tracker_content.is_empty());
 
-        let content = get_content(946720800, "\"rev_1\"")?;
+        let content = json!("\"rev_1\"");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
                         .unwrap(),
@@ -2482,10 +2468,10 @@ mod tests {
             .await?;
         assert!(tracker_content.is_empty());
 
-        let content = get_content(946720800, "\"rev_1\"")?;
+        let content = json!("\"rev_1\"");
         let content_mock = server.mock(|when, then| {
             when.method(httpmock::Method::POST)
-                .path("/api/web_page/content")
+                .path("/api/web_page/execute")
                 .json_body(
                     serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
                         .unwrap(),

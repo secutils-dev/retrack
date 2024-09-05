@@ -20,9 +20,7 @@ pub use self::{
 
 #[cfg(test)]
 pub mod tests {
-    pub use crate::trackers::web_scraper::{
-        WebScraperContentRequest, WebScraperContentResponse, WebScraperErrorResponse,
-    };
+    pub use crate::trackers::web_scraper::{WebScraperContentRequest, WebScraperErrorResponse};
     use crate::{
         scheduler::SchedulerJobConfig,
         trackers::{Tracker, TrackerConfig, TrackerTarget, WebPageTarget},

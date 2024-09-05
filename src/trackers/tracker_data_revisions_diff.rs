@@ -1,6 +1,6 @@
 use crate::trackers::TrackerDataRevision;
 use handlebars::JsonRender;
-use serde_json::Value as JSONValue;
+use serde_json::{json, Value as JSONValue};
 use similar::TextDiff;
 
 /// Pretty prints the web page content revision data.
@@ -27,15 +27,17 @@ pub fn tracker_data_revisions_diff(
     let mut peekable_revisions = revisions.into_iter().rev().peekable();
     while let Some(current_revision) = peekable_revisions.next() {
         if let Some(previous_revision) = peekable_revisions.peek() {
-            let current_value = tracker_data_revision_pretty_print(&current_revision.data)?;
-            let previous_value = tracker_data_revision_pretty_print(&previous_revision.data)?;
+            let current_value =
+                tracker_data_revision_pretty_print(&current_revision.data.to_string())?;
+            let previous_value =
+                tracker_data_revision_pretty_print(&previous_revision.data.to_string())?;
 
             revisions_diff.push(TrackerDataRevision {
-                data: TextDiff::from_lines(&previous_value, &current_value)
+                data: json!(TextDiff::from_lines(&previous_value, &current_value)
                     .unified_diff()
                     .context_radius(10000)
                     .missing_newline_hint(false)
-                    .to_string(),
+                    .to_string()),
                 ..current_revision
             });
         } else {
@@ -62,13 +64,13 @@ mod tests {
             TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: "\"Hello World\"".to_string(),
+                data: json!("\"Hello World\""),
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             },
             TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: "\"Hello New World\"".to_string(),
+                data: json!("\"Hello New World\""),
                 created_at: OffsetDateTime::from_unix_timestamp(946720801)?,
             },
         ];
@@ -79,13 +81,13 @@ mod tests {
             TrackerDataRevision {
                 id: 00000000-0000-0000-0000-000000000001,
                 tracker_id: 00000000-0000-0000-0000-000000000002,
-                data: "\"Hello World\"",
+                data: String("\"Hello World\""),
                 created_at: 2000-01-01 10:00:00.0 +00:00:00,
             },
             TrackerDataRevision {
                 id: 00000000-0000-0000-0000-000000000002,
                 tracker_id: 00000000-0000-0000-0000-000000000002,
-                data: "@@ -1 +1 @@\n-Hello World\n+Hello New World\n",
+                data: String("@@ -1 +1 @@\n-\"Hello World\"\n+\"Hello New World\"\n"),
                 created_at: 2000-01-01 10:00:01.0 +00:00:00,
             },
         ]
@@ -99,7 +101,7 @@ mod tests {
         let revisions = vec![TrackerDataRevision {
             id: uuid!("00000000-0000-0000-0000-000000000001"),
             tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-            data: json!({ "property": "one", "secondProperty": "two" }).to_string(),
+            data: json!({ "property": "one", "secondProperty": "two" }),
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
         }];
 
@@ -109,7 +111,10 @@ mod tests {
             TrackerDataRevision {
                 id: 00000000-0000-0000-0000-000000000001,
                 tracker_id: 00000000-0000-0000-0000-000000000002,
-                data: "{\"property\":\"one\",\"secondProperty\":\"two\"}",
+                data: Object {
+                    "property": String("one"),
+                    "secondProperty": String("two"),
+                },
                 created_at: 2000-01-01 10:00:00.0 +00:00:00,
             },
         ]
@@ -119,21 +124,19 @@ mod tests {
             TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: json!({ "property": "one", "secondProperty": "two" }).to_string(),
+                data: json!({ "property": "one", "secondProperty": "two" }),
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             },
             TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: json!({ "property": "one" }).to_string(),
+                data: json!({ "property": "one" }),
                 created_at: OffsetDateTime::from_unix_timestamp(946720801)?,
             },
             TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000003"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data:
-                    json!({ "property": "one", "secondProperty": "two", "thirdProperty": "three" })
-                        .to_string(),
+                data: json!({ "property": "one", "secondProperty": "two", "thirdProperty": "three" }),
                 created_at: OffsetDateTime::from_unix_timestamp(946720802)?,
             },
         ];
@@ -144,19 +147,22 @@ mod tests {
             TrackerDataRevision {
                 id: 00000000-0000-0000-0000-000000000001,
                 tracker_id: 00000000-0000-0000-0000-000000000002,
-                data: "{\"property\":\"one\",\"secondProperty\":\"two\"}",
+                data: Object {
+                    "property": String("one"),
+                    "secondProperty": String("two"),
+                },
                 created_at: 2000-01-01 10:00:00.0 +00:00:00,
             },
             TrackerDataRevision {
                 id: 00000000-0000-0000-0000-000000000002,
                 tracker_id: 00000000-0000-0000-0000-000000000002,
-                data: "@@ -1,4 +1,3 @@\n {\n-  \"property\": \"one\",\n-  \"secondProperty\": \"two\"\n+  \"property\": \"one\"\n }\n",
+                data: String("@@ -1,4 +1,3 @@\n {\n-  \"property\": \"one\",\n-  \"secondProperty\": \"two\"\n+  \"property\": \"one\"\n }\n"),
                 created_at: 2000-01-01 10:00:01.0 +00:00:00,
             },
             TrackerDataRevision {
                 id: 00000000-0000-0000-0000-000000000003,
                 tracker_id: 00000000-0000-0000-0000-000000000002,
-                data: "@@ -1,3 +1,5 @@\n {\n-  \"property\": \"one\"\n+  \"property\": \"one\",\n+  \"secondProperty\": \"two\",\n+  \"thirdProperty\": \"three\"\n }\n",
+                data: String("@@ -1,3 +1,5 @@\n {\n-  \"property\": \"one\"\n+  \"property\": \"one\",\n+  \"secondProperty\": \"two\",\n+  \"thirdProperty\": \"three\"\n }\n"),
                 created_at: 2000-01-01 10:00:02.0 +00:00:00,
             },
         ]

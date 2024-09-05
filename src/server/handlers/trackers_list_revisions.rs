@@ -53,6 +53,7 @@ mod tests {
         web, App,
     };
     use insta::assert_debug_snapshot;
+    use serde_json::json;
     use sqlx::PgPool;
     use std::{str::from_utf8, time::Duration};
     use time::OffsetDateTime;
@@ -111,7 +112,7 @@ mod tests {
             id: uuid!("00000000-0000-0000-0000-000000000001"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-            data: "\"some-data\"".to_string(),
+            data: json!("\"some-data\""),
         };
         trackers_db
             .insert_tracker_data_revision(&data_revision_one)
@@ -133,7 +134,7 @@ mod tests {
             id: uuid!("00000000-0000-0000-0000-000000000002"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720900)?,
-            data: "\"some-new-data\"".to_string(),
+            data: json!("\"some-new-data\""),
         };
         trackers_db
             .insert_tracker_data_revision(&data_revision_two)
@@ -173,7 +174,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":\"\\\"some-data\\\"\",\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":\"@@ -1 +1 @@\\n-some-data\\n+some-new-data\\n\",\"createdAt\":946720900}]""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":\"\\\"some-data\\\"\",\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":\"@@ -1 +1 @@\\n-\\\"some-data\\\"\\n+\\\"some-new-data\\\"\\n\",\"createdAt\":946720900}]""###);
 
         Ok(())
     }

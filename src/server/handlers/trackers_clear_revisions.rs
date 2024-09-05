@@ -44,6 +44,7 @@ mod tests {
         test::{call_service, init_service, TestRequest},
         web, App,
     };
+    use serde_json::json;
     use sqlx::PgPool;
     use std::time::Duration;
     use time::OffsetDateTime;
@@ -111,13 +112,13 @@ mod tests {
             id: uuid!("00000000-0000-0000-0000-000000000001"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-            data: "\"some-data\"".to_string(),
+            data: json!("\"some-data\""),
         };
         let data_revision_two = TrackerDataRevision {
             id: uuid!("00000000-0000-0000-0000-000000000002"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720900)?,
-            data: "\"some-data\"".to_string(),
+            data: json!("\"some-data\""),
         };
         trackers_db
             .insert_tracker_data_revision(&data_revision_one)

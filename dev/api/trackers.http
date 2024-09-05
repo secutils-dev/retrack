@@ -7,11 +7,11 @@ GET {{host}}/api/trackers?tag=app:retrack
 Accept: application/json
 
 ### Get tracker
-GET {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4
+GET {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592
 Accept: application/json
 
 ### Get tracker revisions
-GET {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4/revisions
+GET {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592/revisions?calculateDiff=true
 Accept: application/json
 
 ### Create tracker (minimal)
@@ -23,27 +23,33 @@ Accept: application/json
   "name": "GitHub Icon",
   "target": {
     "type": "web:page",
-    "extractor": "export async function execute(page, result) { await page.goto('https://retrack.dev'); return result.html(await page.content()); };"
+    "extractor": "export async function execute(page) { await page.goto('https://retrack.dev'); return await page.content(); };"
   }
 }
 
 ### Create tracker
+< {%
+  const extractor = `
+    export async function execute(page) {
+      await page.goto('https://github.com');
+      const iconLink = await page.getByRole('link', { name: 'Homepage', exact: true });
+      return await iconLink.locator('svg').innerHTML();
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
 POST {{host}}/api/trackers
 Content-Type: application/json
 Accept: application/json
 
 {
   "name": "GitHub Icon",
-  "url": "https://github.com",
   "target": {
     "type": "web:page",
-    "waitFor": {
-      "selector": ".octicon-mark-github"
-    }
+    "extractor": "{{extractor}}"
   },
   "config": {
     "revisions": 3,
-    "extractor": "return document.querySelector('.octicon-mark-github')?.textContent;",
     "job": {
       "schedule": "0 */2 * * * * *"
     }
@@ -51,8 +57,38 @@ Accept: application/json
   "tags": ["app:retrack"]
 }
 
+### Create tracker #2
+< {%
+  const extractor = `
+    export async function execute(page, previousContent) {
+      await page.goto('https://demo.webhooks.secutils.dev/dynamic?arg=1');
+      const increment = +((await page.locator('body').innerText()).trim()) || 0;
+      return (previousContent ?? 0) + increment;
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[Test] Counter",
+  "target": {
+    "type": "web:page",
+    "extractor": "{{extractor}}"
+  },
+  "config": {
+    "revisions": 10,
+    "job": {
+      "schedule": "0 */2 * * * * *"
+    }
+  },
+  "tags": ["app:test"]
+}
+
 ### Update tracker
-PUT {{host}}/api/trackers/0190acf7-1821-74c0-8f63-ab3b58a70bd4
+PUT {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592
 Content-Type: application/json
 Accept: application/json
 
@@ -63,6 +99,28 @@ Accept: application/json
     "job": {
       "schedule": "0 */2 * * * * *"
     }
+  }
+}
+
+### Update tracker #2
+< {%
+  const extractor = `
+    export async function execute(page, previousContent) {
+      await page.goto('https://demo.webhooks.secutils.dev/dynamic?arg=1');
+      const increment = +((await page.locator('body').innerText()).trim()) || 0;
+      return { counter: (+previousContent?.counter ?? 0) + increment };
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+PUT {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592
+Content-Type: application/json
+Accept: application/json
+
+{
+  "target": {
+    "type": "web:page",
+    "extractor": "{{extractor}}"
   }
 }
 

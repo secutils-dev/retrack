@@ -17,7 +17,7 @@ impl TryFrom<RawTrackerDataRevision> for TrackerDataRevision {
         Ok(Self {
             id: raw.id,
             tracker_id: raw.tracker_id,
-            data: postcard::from_bytes(&raw.data)?,
+            data: serde_json::from_str(&postcard::from_bytes::<String>(&raw.data)?)?,
             created_at: raw.created_at,
         })
     }
@@ -30,7 +30,7 @@ impl TryFrom<&TrackerDataRevision> for RawTrackerDataRevision {
         Ok(Self {
             id: item.id,
             tracker_id: item.tracker_id,
-            data: postcard::to_stdvec(&item.data)?,
+            data: postcard::to_stdvec(&item.data.to_string())?,
             created_at: item.created_at,
         })
     }
@@ -40,6 +40,7 @@ impl TryFrom<&TrackerDataRevision> for RawTrackerDataRevision {
 mod tests {
     use super::RawTrackerDataRevision;
     use crate::trackers::TrackerDataRevision;
+    use serde_json::json;
     use time::OffsetDateTime;
     use uuid::uuid;
 
@@ -49,14 +50,14 @@ mod tests {
             TrackerDataRevision::try_from(RawTrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: vec![9, 115, 111, 109, 101, 45, 100, 97, 116, 97],
+                data: vec![11, 34, 115, 111, 109, 101, 45, 100, 97, 116, 97, 34],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             })?,
             TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: "some-data".to_string(),
+                data: json!("some-data"),
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             }
         );
@@ -70,13 +71,13 @@ mod tests {
             RawTrackerDataRevision::try_from(&TrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: "some-data".to_string(),
+                data: json!("some-data"),
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             })?,
             RawTrackerDataRevision {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_id: uuid!("00000000-0000-0000-0000-000000000002"),
-                data: vec![9, 115, 111, 109, 101, 45, 100, 97, 116, 97],
+                data: vec![11, 34, 115, 111, 109, 101, 45, 100, 97, 116, 97, 34],
                 // January 1, 2000 10:00:00
                 created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             }
