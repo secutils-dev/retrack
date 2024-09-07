@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS trackers
 (
     id          UUID PRIMARY KEY NOT NULL,
     name        TEXT             NOT NULL UNIQUE COLLATE case_insensitive,
-    target      BYTEA            NOT NULL,
+    enabled     BOOL             NOT NULL DEFAULT TRUE,
     config      BYTEA            NOT NULL,
     tags        TEXT[]           NOT NULL COLLATE case_insensitive DEFAULT '{}',
     created_at  TIMESTAMPTZ      NOT NULL,
@@ -27,13 +27,12 @@ CREATE TABLE IF NOT EXISTS trackers_data
     UNIQUE (created_at, tracker_id)
 );
 
--- Table to store notifications.
-CREATE TABLE IF NOT EXISTS notifications
+-- Table to store tasks.
+CREATE TABLE IF NOT EXISTS tasks
 (
-    id           SERIAL PRIMARY KEY NOT NULL,
-    destination  BYTEA              NOT NULL,
-    content      BYTEA              NOT NULL,
-    scheduled_at TIMESTAMPTZ        NOT NULL
+    id           UUID PRIMARY KEY NOT NULL,
+    task_type    BYTEA            NOT NULL,
+    scheduled_at TIMESTAMPTZ      NOT NULL
 );
 
 -- Table to store scheduler jobs.

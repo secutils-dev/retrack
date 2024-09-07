@@ -29,7 +29,7 @@ use crate::{
     api::Api,
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::scheduler_jobs::{
-        NotificationsSendJob, TrackersFetchJob, TrackersScheduleJob, TrackersTriggerJob,
+        TasksRunJob, TrackersRunJob, TrackersScheduleJob, TrackersTriggerJob,
     },
     server::SchedulerStatus,
 };
@@ -102,17 +102,17 @@ where
                 .await?;
         }
 
-        if !resumed_unique_jobs.contains(&SchedulerJob::TrackersFetch) {
+        if !resumed_unique_jobs.contains(&SchedulerJob::TrackersRun) {
             scheduler
                 .inner_scheduler
-                .add(TrackersFetchJob::create(scheduler.api.clone()).await?)
+                .add(TrackersRunJob::create(scheduler.api.clone()).await?)
                 .await?;
         }
 
-        if !resumed_unique_jobs.contains(&SchedulerJob::NotificationsSend) {
+        if !resumed_unique_jobs.contains(&SchedulerJob::TasksRun) {
             scheduler
                 .inner_scheduler
-                .add(NotificationsSendJob::create(scheduler.api.clone()).await?)
+                .add(TasksRunJob::create(scheduler.api.clone()).await?)
                 .await?;
         }
 
@@ -167,11 +167,11 @@ where
                 SchedulerJob::TrackersSchedule => {
                     TrackersScheduleJob::try_resume(self.api.clone(), job_data).await?
                 }
-                SchedulerJob::TrackersFetch => {
-                    TrackersFetchJob::try_resume(self.api.clone(), job_data).await?
+                SchedulerJob::TrackersRun => {
+                    TrackersRunJob::try_resume(self.api.clone(), job_data).await?
                 }
-                SchedulerJob::NotificationsSend => {
-                    NotificationsSendJob::try_resume(self.api.clone(), job_data).await?
+                SchedulerJob::TasksRun => {
+                    TasksRunJob::try_resume(self.api.clone(), job_data).await?
                 }
             };
 
@@ -223,17 +223,15 @@ pub mod tests {
     };
     use crate::{
         config::{Config, DatabaseConfig},
-        scheduler::{
-            scheduler_job::SchedulerJob, Scheduler, SchedulerJobConfig, SchedulerJobMetadata,
-        },
+        scheduler::{scheduler_job::SchedulerJob, Scheduler, SchedulerJobMetadata},
         tests::{mock_api_with_config, mock_config},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::TrackerCreateParams,
     };
     use anyhow::anyhow;
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
-    use std::{env, sync::Arc, time::Duration, vec::Vec};
+    use std::{env, sync::Arc, vec::Vec};
     use tokio::sync::RwLock;
     use tokio_cron_scheduler::{
         JobScheduler, PostgresMetadataStore, PostgresNotificationStore, PostgresStore,
@@ -325,42 +323,26 @@ pub mod tests {
         let mock_config = mock_scheduler_config(&pool).await?;
         let api = Arc::new(mock_api_with_config(pool, mock_config).await?);
 
-        let trigger_job_id = uuid!("00000000-0000-0000-0000-000000000001");
-        let schedule_job_id = uuid!("00000000-0000-0000-0000-000000000002");
-        let notifications_send_job_id = uuid!("00000000-0000-0000-0000-000000000003");
+        let trackers_trigger_job_id = uuid!("00000000-0000-0000-0000-000000000001");
+        let trackers_schedule_job_id = uuid!("00000000-0000-0000-0000-000000000002");
+        let tasks_run_job_id = uuid!("00000000-0000-0000-0000-000000000003");
 
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "tracker-one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: None,
-                    ignore_https_errors: false,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_secs(10)),
-                    headers: Default::default(),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "1 2 3 4 5 6 2030".to_string(),
-                        retry_strategy: None,
-                        notifications: Some(true),
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 6 2030"),
+            )
             .await?;
         api.trackers()
-            .update_tracker_job(tracker.id, Some(trigger_job_id))
+            .update_tracker_job(tracker.id, Some(trackers_trigger_job_id))
             .await?;
 
         // Add job registration.
         mock_upsert_scheduler_job(
             &api.db,
             &mock_scheduler_job(
-                trigger_job_id,
+                trackers_trigger_job_id,
                 SchedulerJob::TrackersTrigger,
                 "1 2 3 4 5 6 2030",
             ),
@@ -369,7 +351,7 @@ pub mod tests {
         mock_upsert_scheduler_job(
             &api.db,
             &mock_scheduler_job(
-                schedule_job_id,
+                trackers_schedule_job_id,
                 SchedulerJob::TrackersSchedule,
                 "0 * 0 * * * *",
             ),
@@ -377,11 +359,7 @@ pub mod tests {
         .await?;
         mock_upsert_scheduler_job(
             &api.db,
-            &mock_scheduler_job(
-                notifications_send_job_id,
-                SchedulerJob::NotificationsSend,
-                "0 * 2 * * * *",
-            ),
+            &mock_scheduler_job(tasks_run_job_id, SchedulerJob::TasksRun, "0 * 2 * * * *"),
         )
         .await?;
 
@@ -389,19 +367,19 @@ pub mod tests {
 
         assert!(scheduler
             .inner_scheduler
-            .next_tick_for_job(trigger_job_id)
+            .next_tick_for_job(trackers_trigger_job_id)
             .await?
             .is_some());
 
         assert!(scheduler
             .inner_scheduler
-            .next_tick_for_job(schedule_job_id)
+            .next_tick_for_job(trackers_schedule_job_id)
             .await?
             .is_some());
 
         assert!(scheduler
             .inner_scheduler
-            .next_tick_for_job(notifications_send_job_id)
+            .next_tick_for_job(tasks_run_job_id)
             .await?
             .is_some());
 
@@ -472,15 +450,15 @@ pub mod tests {
         let mock_config = mock_scheduler_config(&pool).await?;
         let api = Arc::new(mock_api_with_config(pool, mock_config).await?);
 
-        let schedule_job_id = uuid!("00000000-0000-0000-0000-000000000001");
-        let fetch_job_id = uuid!("00000000-0000-0000-0000-000000000002");
-        let notifications_send_job_id = uuid!("00000000-0000-0000-0000-000000000003");
+        let trackers_schedule_job_id = uuid!("00000000-0000-0000-0000-000000000001");
+        let trackers_run_job_id = uuid!("00000000-0000-0000-0000-000000000002");
+        let tasks_run_job_id = uuid!("00000000-0000-0000-0000-000000000003");
 
         // Add job registration.
         mock_upsert_scheduler_job(
             &api.db,
             &mock_scheduler_job(
-                schedule_job_id,
+                trackers_schedule_job_id,
                 SchedulerJob::TrackersSchedule,
                 // Different schedule - every hour, not every minute.
                 "0 0 * * * * *",
@@ -490,8 +468,8 @@ pub mod tests {
         mock_upsert_scheduler_job(
             &api.db,
             &mock_scheduler_job(
-                fetch_job_id,
-                SchedulerJob::TrackersFetch,
+                trackers_run_job_id,
+                SchedulerJob::TrackersRun,
                 // Different schedule - every day, not every minute.
                 "0 0 0 * * * *",
             ),
@@ -500,8 +478,8 @@ pub mod tests {
         mock_upsert_scheduler_job(
             &api.db,
             &mock_scheduler_job(
-                notifications_send_job_id,
-                SchedulerJob::NotificationsSend,
+                tasks_run_job_id,
+                SchedulerJob::TasksRun,
                 // Different schedule - every day, not every minute.
                 "0 0 0 * * * *",
             ),
@@ -511,13 +489,13 @@ pub mod tests {
         Scheduler::start(api.clone()).await?;
 
         // Old jobs should have been removed.
-        assert!(mock_get_scheduler_job(&api.db, schedule_job_id)
+        assert!(mock_get_scheduler_job(&api.db, trackers_schedule_job_id)
             .await?
             .is_none());
-        assert!(mock_get_scheduler_job(&api.db, fetch_job_id)
+        assert!(mock_get_scheduler_job(&api.db, trackers_run_job_id)
             .await?
             .is_none());
-        assert!(mock_get_scheduler_job(&api.db, notifications_send_job_id)
+        assert!(mock_get_scheduler_job(&api.db, tasks_run_job_id)
             .await?
             .is_none());
 

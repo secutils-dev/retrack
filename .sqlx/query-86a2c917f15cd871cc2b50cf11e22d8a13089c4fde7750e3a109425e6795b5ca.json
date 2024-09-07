@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    INSERT INTO trackers (id, name, enabled, config, tags, created_at, updated_at, job_needed, job_id)\n    VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Bytea",
+        "TextArray",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86a2c917f15cd871cc2b50cf11e22d8a13089c4fde7750e3a109425e6795b5ca"
+}

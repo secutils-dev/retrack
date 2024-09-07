@@ -46,7 +46,7 @@ impl<'t> TryFrom<&'t Tracker> for WebScraperContentRequest<'t> {
     type Error = anyhow::Error;
 
     fn try_from(tracker: &'t Tracker) -> Result<Self, Self::Error> {
-        let TrackerTarget::WebPage(ref target) = tracker.target else {
+        let TrackerTarget::Page(ref target) = tracker.target else {
             bail!(
                 "Tracker ('{}') target is not web page, instead got: {:?}",
                 tracker.id,
@@ -71,8 +71,8 @@ impl<'t> TryFrom<&'t Tracker> for WebScraperContentRequest<'t> {
 mod tests {
     use super::WebScraperContentRequest;
     use crate::{
-        tests::MockWebPageTrackerBuilder,
-        trackers::{TrackerTarget, WebPageTarget},
+        tests::MockTrackerBuilder,
+        trackers::{PageTarget, TrackerTarget},
     };
     use insta::assert_json_snapshot;
     use serde_json::json;
@@ -82,14 +82,14 @@ mod tests {
     #[test]
     fn serialization() -> anyhow::Result<()> {
         assert_json_snapshot!(WebScraperContentRequest {
-            extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }",
+            extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
             timeout: Some(Duration::from_millis(100)),
             previous_content: Some(&json!("some content")),
             user_agent: Some("Retrack/1.0.0"),
             ignore_https_errors: true
         }, @r###"
         {
-          "extractor": "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }",
+          "extractor": "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
           "userAgent": "Retrack/1.0.0",
           "ignoreHTTPSErrors": true,
           "timeout": 100,
@@ -102,17 +102,17 @@ mod tests {
 
     #[test]
     fn from_tracker() -> anyhow::Result<()> {
-        let target = WebPageTarget {
-            extractor: "export async function execute(p, r) { await p.goto('http://localhost:1234/my/app?q=2'); return r.html(await p.content()); }".to_string(),
+        let target = PageTarget {
+            extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         };
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(target.clone()))
+        .with_target(TrackerTarget::Page(target.clone()))
         .with_timeout(Duration::from_millis(2500))
         .build();
 

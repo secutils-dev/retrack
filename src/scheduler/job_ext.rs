@@ -81,12 +81,12 @@ mod tests {
             SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule)
         );
 
-        job.set_job_type(SchedulerJob::NotificationsSend)?;
+        job.set_job_type(SchedulerJob::TasksRun)?;
 
         let mut job_data = job.job_data()?;
         assert_eq!(
             SchedulerJobMetadata::try_from(job_data.extra.as_slice())?,
-            SchedulerJobMetadata::new(SchedulerJob::NotificationsSend)
+            SchedulerJobMetadata::new(SchedulerJob::TasksRun)
         );
 
         // Other fields should not be affected.

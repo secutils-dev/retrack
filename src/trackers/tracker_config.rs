@@ -58,7 +58,6 @@ mod tests {
             job: Some(SchedulerJobConfig {
                 schedule: "1 2 3 4 5 6 2035".to_string(),
                 retry_strategy: None,
-                notifications: Some(true),
             }),
         };
         assert_json_snapshot!(config, @r###"
@@ -69,8 +68,7 @@ mod tests {
             "cookie": "my-cookie"
           },
           "job": {
-            "schedule": "1 2 3 4 5 6 2035",
-            "notifications": true
+            "schedule": "1 2 3 4 5 6 2035"
           }
         }
         "###);
@@ -102,7 +100,6 @@ mod tests {
             job: Some(SchedulerJobConfig {
                 schedule: "1 2 3 4 5 6 2035".to_string(),
                 retry_strategy: None,
-                notifications: Some(true),
             }),
         };
         assert_eq!(
@@ -111,7 +108,7 @@ mod tests {
                     "revisions": 3,
                     "timeout": 2500,
                     "headers": { "cookie": "my-cookie" },
-                    "job": { "schedule": "1 2 3 4 5 6 2035", "notifications": true }
+                    "job": { "schedule": "1 2 3 4 5 6 2035" }
                 })
                 .to_string()
             )?,

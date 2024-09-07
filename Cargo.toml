@@ -23,9 +23,12 @@ dotenvy = "0.15.7"
 figment = "0.10.19"
 futures = "0.3.30"
 handlebars = "6.1.0"
+http = "1.1.0"
+http-serde = "2.1.1"
 humantime = "2.1.0"
 itertools = "0.13.0"
 lettre = { version = "0.11.8", default-features = false }
+mediatype = "0.19.18"
 postcard = { version = "1.0.10", default-features = false }
 regex = "1.10.6"
 reqwest = { version = "0.12.7", default-features = false }
@@ -77,6 +80,7 @@ default = [
     "lettre/builder",
     "lettre/smtp-transport",
     "lettre/tokio1-rustls-tls",
+    "mediatype/serde",
     "postcard/use-std",
     "reqwest/json",
     "reqwest/rustls-tls-native-roots",

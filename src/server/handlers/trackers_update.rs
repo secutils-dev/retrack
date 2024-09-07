@@ -43,7 +43,7 @@ mod tests {
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
         tests::mock_config,
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::TrackerCreateParams,
     };
     use actix_web::{
         body::MessageBody,
@@ -54,7 +54,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use serde_json::json;
     use sqlx::PgPool;
-    use std::{str::from_utf8, time::Duration};
+    use std::str::from_utf8;
 
     #[sqlx::test]
     async fn can_update_tracker(pool: PgPool) -> anyhow::Result<()> {
@@ -70,21 +70,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
         let trackers = server_state
             .api
@@ -99,6 +85,7 @@ mod tests {
                 .method(Method::PUT)
                 .set_json(json!({
                     "name": "new_name_one".to_string(),
+                    "enabled": false,
                     "config": {
                         "revisions": 5,
                         "timeout": 5000,
@@ -111,11 +98,11 @@ mod tests {
                                 "type": "constant",
                                 "interval": 500000,
                                 "maxAttempts": 5
-                            },
-                            "notifications": true
+                            }
                         }
                     },
-                    "tags": ["tag_two"]
+                    "tags": ["tag_two"],
+                    "actions": [{ "type": "log" }, { "type": "webhook", "url": "https://retrack.dev" }],
                 }))
                 .to_request(),
         )
@@ -129,6 +116,7 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(tracker.name, "new_name_one");
+        assert!(!tracker.enabled);
         assert_eq!(tracker.tags, vec!["tag_two".to_string()]);
         assert_debug_snapshot!(tracker.config, @r###"
         TrackerConfig {
@@ -150,12 +138,35 @@ mod tests {
                             max_attempts: 5,
                         },
                     ),
-                    notifications: Some(
-                        true,
-                    ),
                 },
             ),
         }
+        "###);
+        assert_debug_snapshot!(tracker.actions, @r###"
+        [
+            ServerLog,
+            Webhook(
+                WebhookAction {
+                    url: Url {
+                        scheme: "https",
+                        cannot_be_a_base: false,
+                        username: "",
+                        password: None,
+                        host: Some(
+                            Domain(
+                                "retrack.dev",
+                            ),
+                        ),
+                        port: None,
+                        path: "/",
+                        query: None,
+                        fragment: None,
+                    },
+                    method: None,
+                    headers: None,
+                },
+            ),
+        ]
         "###);
 
         Ok(())
@@ -168,21 +179,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
         let trackers = server_state
             .api
@@ -214,9 +211,7 @@ mod tests {
             &app,
             TestRequest::with_uri(&format!("https://retrack.dev/api/trackers/{}", tracker.id))
                 .method(Method::PUT)
-                .set_json(
-                    json!({ "target": { "type": "api:json", "url": "https://localhost/app" } }),
-                )
+                .set_json(json!({ "target": { "type": "api", "url": "https://localhost/app" } }))
                 .to_request(),
         )
         .await;

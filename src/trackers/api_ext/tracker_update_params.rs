@@ -1,4 +1,4 @@
-use crate::trackers::{TrackerConfig, TrackerTarget};
+use crate::trackers::{TrackerAction, TrackerConfig, TrackerTarget};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -10,6 +10,8 @@ pub struct TrackerUpdateParams {
     /// Arbitrary name of the tracker.
     #[schema(min_length = 1, max_length = 100)]
     pub name: Option<String>,
+    /// Whether the tracker is enabled.
+    pub enabled: Option<bool>,
     /// Target of the tracker (web page, API, or file).
     pub target: Option<TrackerTarget>,
     /// Tracker config.
@@ -17,13 +19,19 @@ pub struct TrackerUpdateParams {
     /// Tracker tags.
     #[schema(max_items = 10, min_length = 1, max_length = 50)]
     pub tags: Option<Vec<String>>,
+    /// Tracker actions.
+    #[schema(max_items = 10)]
+    pub actions: Option<Vec<TrackerAction>>,
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{TrackerConfig, TrackerTarget, TrackerUpdateParams, WebPageTarget},
+        trackers::{
+            PageTarget, TrackerAction, TrackerConfig, TrackerTarget, TrackerUpdateParams,
+            WebhookAction,
+        },
     };
     use std::time::Duration;
 
@@ -39,9 +47,29 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: Some("tck".to_string()),
+                enabled: None,
                 target: None,
                 config: None,
-                tags: None
+                tags: None,
+                actions: None
+            }
+        );
+
+        assert_eq!(
+            serde_json::from_str::<TrackerUpdateParams>(
+                r#"
+    {
+        "enabled": true
+    }
+              "#
+            )?,
+            TrackerUpdateParams {
+                name: None,
+                enabled: Some(true),
+                target: None,
+                config: None,
+                tags: None,
+                actions: None
             }
         );
 
@@ -50,8 +78,8 @@ mod tests {
                 r#"
     {
         "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         }
@@ -60,13 +88,15 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: None,
-                target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                enabled: None,
+                target: Some(TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 })),
                 config: None,
-                tags: None
+                tags: None,
+                actions: None
             }
         );
         assert_eq!(
@@ -85,6 +115,7 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: None,
+                enabled: None,
                 target: None,
                 config: Some(TrackerConfig {
                     revisions: 3,
@@ -96,7 +127,8 @@ mod tests {
                     ),
                     job: None
                 }),
-                tags: None
+                tags: None,
+                actions: None
             }
         );
 
@@ -105,9 +137,10 @@ mod tests {
                 r#"
     {
         "name": "tck",
+        "enabled": false,
         "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         },
@@ -125,8 +158,7 @@ mod tests {
                     "multiplier": 2,
                     "maxInterval": 120000,
                     "maxAttempts": 5
-                },
-                "notifications": true
+                }
             }
         },
         "tags": ["tag1", "tag2"]
@@ -135,8 +167,9 @@ mod tests {
             )?,
             TrackerUpdateParams {
                 name: Some("tck".to_string()),
-                target: Some(TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                enabled: Some(false),
+                target: Some(TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 })),
@@ -155,11 +188,80 @@ mod tests {
                             multiplier: 2,
                             max_interval: Duration::from_secs(120),
                             max_attempts: 5,
-                        }),
-                        notifications: Some(true),
+                        })
                     }),
                 }),
-                tags: Some(vec!["tag1".to_string(), "tag2".to_string()])
+                tags: Some(vec!["tag1".to_string(), "tag2".to_string()]),
+                actions: None
+            }
+        );
+
+        assert_eq!(
+            serde_json::from_str::<TrackerUpdateParams>(
+                r#"
+    {
+        "name": "tck",
+        "enabled": true,
+        "target": {
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "userAgent": "Retrack/1.0.0",
+            "ignoreHTTPSErrors": true
+        },
+        "config": {
+            "revisions": 3,
+            "timeout": 2000,
+            "headers": {
+                "cookie": "my-cookie"
+            },
+            "job": {
+                "schedule": "0 0 * * *",
+                "retryStrategy": {
+                    "type": "exponential",
+                    "initialInterval": 1234,
+                    "multiplier": 2,
+                    "maxInterval": 120000,
+                    "maxAttempts": 5
+                }
+            }
+        },
+        "tags": ["tag1", "tag2"],
+        "actions": [{ "type": "log" }, { "type": "webhook", "url": "https://retrack.dev" }]
+    }
+              "#
+            )?,
+            TrackerUpdateParams {
+                name: Some("tck".to_string()),
+                enabled: Some(true),
+                target: Some(TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    user_agent: Some("Retrack/1.0.0".to_string()),
+                    ignore_https_errors: true,
+                })),
+                config: Some(TrackerConfig {
+                    revisions: 3,
+                    timeout: Some(Duration::from_millis(2000)),
+                    headers: Some(
+                        [("cookie".to_string(), "my-cookie".to_string())]
+                            .into_iter()
+                            .collect(),
+                    ),
+                    job: Some(SchedulerJobConfig {
+                        schedule: "0 0 * * *".to_string(),
+                        retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
+                            initial_interval: Duration::from_millis(1234),
+                            multiplier: 2,
+                            max_interval: Duration::from_secs(120),
+                            max_attempts: 5,
+                        })
+                    }),
+                }),
+                tags: Some(vec!["tag1".to_string(), "tag2".to_string()]),
+                actions: Some(vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+                    url: url::Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                })])
             }
         );
 

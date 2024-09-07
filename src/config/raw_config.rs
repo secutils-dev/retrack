@@ -84,9 +84,9 @@ mod tests {
         web_scraper_url = 'http://localhost:7272/'
 
         [scheduler]
-        trackers_schedule = '0 * * * * * *'
-        trackers_fetch = '0 * * * * * *'
-        notifications_send = '0/30 * * * * * *'
+        trackers_schedule = '0/10 * * * * * *'
+        trackers_run = '0/10 * * * * * *'
+        tasks_run = '0/30 * * * * * *'
 
         [trackers]
         max_revisions = 30
@@ -115,8 +115,8 @@ mod tests {
 
         [scheduler]
         trackers_schedule = '0 * * * * * *'
-        trackers_fetch = '0 * * * * * *'
-        notifications_send = '0/30 * * * * * *'
+        trackers_run = '0 * * * * * *'
+        tasks_run = '0/30 * * * * * *'
 
         [trackers]
         schedules = ['@hourly']
@@ -206,7 +206,7 @@ mod tests {
                         },
                     },
                 },
-                trackers_fetch: Schedule {
+                trackers_run: Schedule {
                     source: "0 * * * * * *",
                     fields: ScheduleFields {
                         years: Years {
@@ -236,7 +236,7 @@ mod tests {
                         },
                     },
                 },
-                notifications_send: Schedule {
+                tasks_run: Schedule {
                     source: "0/30 * * * * * *",
                     fields: ScheduleFields {
                         years: Years {

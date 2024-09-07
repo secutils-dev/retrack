@@ -34,7 +34,7 @@ impl<'pool> TrackersDatabaseExt<'pool> {
             query_as!(
                 RawTracker,
                 r#"
-SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed
+SELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed
 FROM trackers
 ORDER BY updated_at
                 "#
@@ -45,7 +45,7 @@ ORDER BY updated_at
             query_as!(
                 RawTracker,
                 r#"
-SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed
+SELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed
 FROM trackers
 WHERE tags @> $1
 ORDER BY updated_at
@@ -69,7 +69,7 @@ ORDER BY updated_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, target, config, tags, created_at, updated_at, job_id, job_needed
+    SELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed
     FROM trackers
     WHERE id = $1
                     "#,
@@ -86,12 +86,12 @@ ORDER BY updated_at
         let raw_tracker = RawTracker::try_from(tracker)?;
         let result = query!(
             r#"
-    INSERT INTO trackers (id, name, target, config, tags, created_at, updated_at, job_needed, job_id)
+    INSERT INTO trackers (id, name, enabled, config, tags, created_at, updated_at, job_needed, job_id)
     VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )
             "#,
             raw_tracker.id,
             raw_tracker.name,
-            raw_tracker.target,
+            raw_tracker.enabled,
             raw_tracker.config,
             &raw_tracker.tags,
             raw_tracker.created_at,
@@ -99,8 +99,8 @@ ORDER BY updated_at
             raw_tracker.job_needed,
             raw_tracker.job_id,
         )
-            .execute(self.pool)
-            .await;
+        .execute(self.pool)
+        .await;
 
         if let Err(err) = result {
             bail!(match err.as_database_error() {
@@ -126,12 +126,12 @@ ORDER BY updated_at
         let result = query!(
             r#"
 UPDATE trackers
-SET name = $2, target = $3, config = $4, tags = $5, updated_at = $6, job_needed = $7, job_id = $8
+SET name = $2, enabled = $3, config = $4, tags = $5, updated_at = $6, job_needed = $7, job_id = $8
 WHERE id = $1
         "#,
             raw_tracker.id,
             raw_tracker.name,
-            raw_tracker.target,
+            raw_tracker.enabled,
             raw_tracker.config,
             &raw_tracker.tags,
             raw_tracker.updated_at,
@@ -280,33 +280,27 @@ ORDER BY data.created_at
     }
 
     /// Retrieves all trackers that need to be scheduled.
-    pub async fn get_unscheduled_trackers(&self) -> anyhow::Result<Vec<Tracker>> {
+    pub async fn get_trackers_to_schedule(&self) -> anyhow::Result<Vec<Tracker>> {
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, target, config, tags, created_at, updated_at, job_needed, job_id
+SELECT id, name, enabled, config, tags, created_at, updated_at, job_needed, job_id
 FROM trackers
-WHERE job_needed = TRUE AND job_id IS NULL
+WHERE job_needed = TRUE AND enabled = TRUE AND job_id IS NULL
 ORDER BY updated_at
                 "#
         )
         .fetch_all(self.pool)
         .await?;
 
-        let mut trackers = vec![];
-        for raw_tracker in raw_trackers {
-            let tracker = Tracker::try_from(raw_tracker)?;
-            // Tracker without revisions shouldn't be scheduled.
-            if tracker.config.revisions > 0 {
-                trackers.push(tracker);
-            }
-        }
-
-        Ok(trackers)
+        raw_trackers
+            .into_iter()
+            .map(Tracker::try_from)
+            .collect::<Result<_, _>>()
     }
 
     /// Retrieves all scheduled jobs from `scheduler_jobs` table that are in a `stopped` state.
-    pub fn get_pending_trackers(
+    pub fn get_trackers_to_run(
         &self,
         page_size: usize,
     ) -> impl Stream<Item = anyhow::Result<Tracker>> + '_ {
@@ -317,7 +311,7 @@ ORDER BY updated_at
             loop {
                  let records = query!(
 r#"
-SELECT trackers.id, trackers.name, trackers.target, trackers.config, trackers.tags,
+SELECT trackers.id, trackers.name, trackers.enabled, trackers.config, trackers.tags,
        trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra
 FROM trackers
 INNER JOIN scheduler_jobs as jobs
@@ -347,7 +341,7 @@ LIMIT $2;
                     yield Tracker::try_from(RawTracker {
                         id: record.id,
                         name: record.name,
-                        target: record.target,
+                        enabled: record.enabled,
                         config: record.config,
                         tags: record.tags,
                         created_at: record.created_at,
@@ -369,7 +363,7 @@ LIMIT $2;
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, target, config, tags, created_at, updated_at, job_needed, job_id
+    SELECT id, name, enabled, config, tags, created_at, updated_at, job_needed, job_id
     FROM trackers
     WHERE job_id = $1
                     "#,
@@ -419,10 +413,10 @@ mod tests {
         error::Error as RetrackError,
         scheduler::{SchedulerJob, SchedulerJobMetadata, SchedulerJobRetryState},
         tests::{
-            mock_scheduler_job, mock_upsert_scheduler_job, to_database_error,
-            MockWebPageTrackerBuilder, RawSchedulerJobStoredData,
+            mock_scheduler_job, mock_upsert_scheduler_job, to_database_error, MockTrackerBuilder,
+            RawSchedulerJobStoredData,
         },
-        trackers::{Tracker, TrackerDataRevision},
+        trackers::{Tracker, TrackerDataRevision, TrackerDataValue},
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
@@ -444,7 +438,7 @@ mod tests {
             id,
             tracker_id,
             created_at: OffsetDateTime::from_unix_timestamp(946720800 + time_shift)?,
-            data: json!("some-data"),
+            data: TrackerDataValue::new(json!("some-data")),
         })
     }
 
@@ -452,13 +446,13 @@ mod tests {
     async fn can_add_and_retrieve_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let mut trackers_list: Vec<Tracker> = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000004"),
                 "some-name-2",
                 3,
@@ -489,7 +483,7 @@ mod tests {
     async fn correctly_handles_duplicated_trackers_on_insert(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
@@ -501,7 +495,7 @@ mod tests {
 
         let insert_error = trackers
             .insert_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-other-name",
                     3,
@@ -524,7 +518,7 @@ mod tests {
         // Tracker with the same name, but different ID should not be allowed.
         let insert_error = trackers
             .insert_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-name",
                     3,
@@ -547,7 +541,7 @@ mod tests {
         // Tracker with different name should be allowed.
         let insert_result = trackers
             .insert_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000003"),
                     "some-other-name",
                     3,
@@ -567,7 +561,7 @@ mod tests {
         let trackers = db.trackers();
         trackers
             .insert_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-name",
                     3,
@@ -577,7 +571,7 @@ mod tests {
             .await?;
         trackers
             .insert_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-other-name",
                     3,
@@ -588,7 +582,7 @@ mod tests {
 
         trackers
             .update_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-name-2",
                     5,
@@ -598,7 +592,7 @@ mod tests {
             .await?;
         trackers
             .update_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-other-name-2",
                     5,
@@ -613,7 +607,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             tracker,
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name-2",
                 5,
@@ -627,7 +621,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             tracker,
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-other-name-2",
                 5,
@@ -644,7 +638,7 @@ mod tests {
         let update_error = db
             .trackers()
             .update_tracker(
-                &MockWebPageTrackerBuilder::create(
+                &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000001"),
                     "some-name-2",
                     5,
@@ -667,13 +661,13 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let mut trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
                 3,
@@ -735,13 +729,13 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000004"),
                 "some-name-2",
                 3,
@@ -764,21 +758,21 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
                 3,
             )?
             .with_tags(vec!["tag:1".to_string()])
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
                 3,
             )?
             .with_tags(vec!["tag:1".to_string(), "tag:2".to_string()])
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name-3",
                 3,
@@ -823,13 +817,13 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
                 3,
@@ -890,13 +884,13 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
                 3,
@@ -975,13 +969,13 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
                 3,
@@ -1045,34 +1039,34 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let mut trackers_list: Vec<Tracker> = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000006"),
                 "some-name",
                 3,
             )?
             .with_schedule("* * * * *")
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000007"),
                 "some-name-2",
                 3,
             )?
             .with_schedule("* * * * *")
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000008"),
                 "some-name-3",
                 3,
             )?
             .with_schedule("* * * * *")
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000009"),
                 "some-name-4",
                 3,
             )?
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000010"),
                 "some-name-5",
                 0,
@@ -1094,7 +1088,7 @@ mod tests {
 
         let trackers = db.trackers();
         assert_eq!(
-            trackers.get_unscheduled_trackers().await?,
+            trackers.get_trackers_to_schedule().await?,
             vec![
                 trackers_list[0].clone(),
                 trackers_list[1].clone(),
@@ -1122,7 +1116,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            trackers.get_unscheduled_trackers().await?,
+            trackers.get_trackers_to_schedule().await?,
             vec![trackers_list[0].clone(), trackers_list[2].clone()]
         );
 
@@ -1134,7 +1128,7 @@ mod tests {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
                 3,
@@ -1142,7 +1136,7 @@ mod tests {
             .with_schedule("* * * * *")
             .with_job_id(uuid!("00000000-0000-0000-0000-000000000011"))
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000002"),
                 "some-name-2",
                 3,
@@ -1150,7 +1144,7 @@ mod tests {
             .with_schedule("* * * * *")
             .with_job_id(uuid!("00000000-0000-0000-0000-000000000022"))
             .build(),
-            MockWebPageTrackerBuilder::create(
+            MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name-3",
                 3,
@@ -1185,7 +1179,7 @@ mod tests {
     async fn can_update_trackers_job_id(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
@@ -1231,7 +1225,7 @@ mod tests {
     async fn fails_to_update_trackers_job_id_if_needed(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
@@ -1265,7 +1259,7 @@ mod tests {
 
         let pending_trackers = db
             .trackers()
-            .get_pending_trackers(10)
+            .get_trackers_to_run(10)
             .collect::<Vec<_>>()
             .await;
         assert!(pending_trackers.is_empty());
@@ -1291,7 +1285,7 @@ mod tests {
         for n in 0..=2 {
             db.trackers()
                 .insert_tracker(
-                    &MockWebPageTrackerBuilder::create(
+                    &MockTrackerBuilder::create(
                         Uuid::parse_str(&format!("78e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
                         format!("name_{}", n),
                         3,
@@ -1308,7 +1302,7 @@ mod tests {
 
         let pending_trackers = db
             .trackers()
-            .get_pending_trackers(10)
+            .get_trackers_to_run(10)
             .collect::<Vec<_>>()
             .await;
         assert_eq!(pending_trackers.len(), 2);
@@ -1322,7 +1316,7 @@ mod tests {
 
         let pending_trackers = db
             .trackers()
-            .get_pending_trackers(10)
+            .get_trackers_to_run(10)
             .collect::<Vec<_>>()
             .await;
         assert!(pending_trackers.is_empty());
@@ -1362,7 +1356,7 @@ mod tests {
         for n in 0..=2 {
             db.trackers()
                 .insert_tracker(
-                    &MockWebPageTrackerBuilder::create(
+                    &MockTrackerBuilder::create(
                         Uuid::parse_str(&format!("77e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
                         format!("name_{}", n),
                         3,
@@ -1379,7 +1373,7 @@ mod tests {
 
         let mut pending_trackers = db
             .trackers()
-            .get_pending_trackers(10)
+            .get_trackers_to_run(10)
             .collect::<Vec<_>>()
             .await;
         assert_eq!(pending_trackers.len(), 1);
@@ -1405,7 +1399,7 @@ mod tests {
 
         let mut pending_trackers = db
             .trackers()
-            .get_pending_trackers(10)
+            .get_trackers_to_run(10)
             .collect::<Vec<_>>()
             .await;
         assert_eq!(pending_trackers.len(), 2);

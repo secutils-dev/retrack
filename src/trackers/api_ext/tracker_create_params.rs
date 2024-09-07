@@ -1,4 +1,4 @@
-use crate::trackers::{TrackerConfig, TrackerTarget};
+use crate::trackers::{TrackerAction, TrackerConfig, TrackerTarget};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -9,6 +9,9 @@ pub struct TrackerCreateParams {
     /// Arbitrary name of the tracker.
     #[schema(min_length = 1, max_length = 100)]
     pub name: String,
+    /// Whether the tracker is enabled.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// Target of the tracker (web page, API, or file).
     pub target: TrackerTarget,
     /// Tracker config.
@@ -18,29 +21,42 @@ pub struct TrackerCreateParams {
     #[schema(max_items = 10, min_length = 1, max_length = 50)]
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Tracker actions.
+    #[schema(max_items = 10)]
+    #[serde(default)]
+    pub actions: Vec<TrackerAction>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::{
+            PageTarget, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerTarget,
+            WebhookAction,
+        },
     };
     use std::time::Duration;
 
     #[test]
     fn deserialization() -> anyhow::Result<()> {
         assert_eq!(
-            serde_json::from_str::<TrackerCreateParams>(r#"{ "name": "tck", "target": { "type": "web:page", "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }" } }"#)?,
+            serde_json::from_str::<TrackerCreateParams>(r#"{ "name": "tck", "target": { "type": "page", "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }" } }"#)?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                enabled: true,
+                target: TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     user_agent: None,
                     ignore_https_errors: false,
                 }),
                 config: Default::default(),
-                tags: vec![]
+                tags: vec![],
+                actions: vec![],
             }
         );
 
@@ -49,9 +65,10 @@ mod tests {
                 r#"
     {
         "name": "tck",
+        "enabled": false,
         "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }"
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }"
         },
         "config": {
             "revisions": 10
@@ -61,8 +78,9 @@ mod tests {
             )?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                enabled: false,
+                target: TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     user_agent: None,
                     ignore_https_errors: false,
                 }),
@@ -70,7 +88,8 @@ mod tests {
                     revisions: 10,
                     ..Default::default()
                 },
-                tags: vec![]
+                tags: vec![],
+                actions: vec![],
             }
         );
 
@@ -79,9 +98,10 @@ mod tests {
                 r#"
     {
         "name": "tck",
+        "enabled": true,
         "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }"
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }"
         },
         "config": {
             "revisions": 3,
@@ -92,8 +112,9 @@ mod tests {
             )?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                enabled: true,
+                target: TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     user_agent: None,
                     ignore_https_errors: false,
                 }),
@@ -102,7 +123,8 @@ mod tests {
                     timeout: Some(Duration::from_millis(2000)),
                     ..Default::default()
                 },
-                tags: vec![]
+                tags: vec![],
+                actions: vec![],
             }
         );
 
@@ -112,8 +134,8 @@ mod tests {
     {
         "name": "tck",
         "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         },
@@ -131,18 +153,19 @@ mod tests {
                     "multiplier": 2,
                     "maxInterval": 120000,
                     "maxAttempts": 5
-                },
-                "notifications": true
+                }
             }
         },
-        "tags": ["tag"]
+        "tags": ["tag"],
+        "actions": [{ "type": "log" }, { "type": "webhook", "url": "https://retrack.dev" }]
     }
               "#
             )?,
             TrackerCreateParams {
                 name: "tck".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+                enabled: true,
+                target: TrackerTarget::Page(PageTarget {
+                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 }),
@@ -161,11 +184,15 @@ mod tests {
                             multiplier: 2,
                             max_interval: Duration::from_secs(120),
                             max_attempts: 5,
-                        }),
-                        notifications: Some(true),
+                        })
                     }),
                 },
-                tags: vec!["tag".to_string()]
+                tags: vec!["tag".to_string()],
+                actions: vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+                    url: "https://retrack.dev".parse()?,
+                    method: None,
+                    headers: None,
+                })],
             }
         );
 

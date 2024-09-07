@@ -101,7 +101,7 @@ mod tests {
             next_tick: Some(946720900),
             count: Some(3),
             job_type: 3,
-            extra: Some(SchedulerJobMetadata::new(SchedulerJob::NotificationsSend).try_into()?),
+            extra: Some(SchedulerJobMetadata::new(SchedulerJob::TasksRun).try_into()?),
             ran: Some(true),
             stopped: Some(false),
             schedule: None,

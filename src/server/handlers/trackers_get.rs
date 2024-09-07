@@ -33,7 +33,7 @@ pub async fn trackers_get(
 mod tests {
     use crate::{
         server::{handlers::trackers_get::trackers_get, server_state::tests::mock_server_state},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::TrackerCreateParams,
     };
     use actix_web::{
         body::MessageBody,
@@ -41,7 +41,7 @@ mod tests {
         web, App,
     };
     use sqlx::PgPool;
-    use std::{str::from_utf8, time::Duration};
+    use std::str::from_utf8;
     use uuid::uuid;
 
     #[sqlx::test]
@@ -52,21 +52,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
 
         let app = init_service(
@@ -100,21 +86,7 @@ mod tests {
         server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
 
         let app = init_service(

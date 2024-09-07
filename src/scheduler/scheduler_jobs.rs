@@ -1,9 +1,9 @@
-mod notifications_send_job;
-mod trackers_fetch_job;
+mod tasks_run_job;
+mod trackers_run_job;
 mod trackers_schedule_job;
 mod trackers_trigger_job;
 
-pub(crate) use notifications_send_job::NotificationsSendJob;
-pub(crate) use trackers_fetch_job::TrackersFetchJob;
+pub(crate) use tasks_run_job::TasksRunJob;
+pub(crate) use trackers_run_job::TrackersRunJob;
 pub(crate) use trackers_schedule_job::TrackersScheduleJob;
 pub(crate) use trackers_trigger_job::TrackersTriggerJob;

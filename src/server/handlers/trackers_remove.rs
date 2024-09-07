@@ -33,7 +33,7 @@ mod tests {
         server::{
             handlers::trackers_remove::trackers_remove, server_state::tests::mock_server_state,
         },
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::TrackerCreateParams,
     };
     use actix_web::{
         http::Method,
@@ -41,7 +41,6 @@ mod tests {
         web, App,
     };
     use sqlx::PgPool;
-    use std::time::Duration;
     use uuid::uuid;
 
     #[sqlx::test]
@@ -70,21 +69,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
         let trackers = server_state
             .api

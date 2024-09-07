@@ -133,7 +133,7 @@ pub mod tests {
             },
             scheduler: SchedulerJobsConfig {
                 trackers_schedule: Schedule {
-                    source: "0 * * * * * *",
+                    source: "0/10 * * * * * *",
                     fields: ScheduleFields {
                         years: Years {
                             ordinals: None,
@@ -157,13 +157,18 @@ pub mod tests {
                             ordinals: Some(
                                 {
                                     0,
+                                    10,
+                                    20,
+                                    30,
+                                    40,
+                                    50,
                                 },
                             ),
                         },
                     },
                 },
-                trackers_fetch: Schedule {
-                    source: "0 * * * * * *",
+                trackers_run: Schedule {
+                    source: "0/10 * * * * * *",
                     fields: ScheduleFields {
                         years: Years {
                             ordinals: None,
@@ -187,12 +192,17 @@ pub mod tests {
                             ordinals: Some(
                                 {
                                     0,
+                                    10,
+                                    20,
+                                    30,
+                                    40,
+                                    50,
                                 },
                             ),
                         },
                     },
                 },
-                notifications_send: Schedule {
+                tasks_run: Schedule {
                     source: "0/30 * * * * * *",
                     fields: ScheduleFields {
                         years: Years {

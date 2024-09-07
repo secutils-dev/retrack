@@ -29,7 +29,7 @@ pub async fn trackers_list(
 mod tests {
     use crate::{
         server::{handlers::trackers_list::trackers_list, server_state::tests::mock_server_state},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::{EmailAction, TrackerAction, TrackerCreateParams},
     };
     use actix_web::{
         body::MessageBody,
@@ -37,7 +37,7 @@ mod tests {
         web, App,
     };
     use sqlx::PgPool;
-    use std::{str::from_utf8, time::Duration};
+    use std::str::from_utf8;
 
     #[sqlx::test]
     async fn can_list_trackers(pool: PgPool) -> anyhow::Result<()> {
@@ -64,21 +64,7 @@ mod tests {
         let tracker_1 = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
 
         let response = call_service(
@@ -96,21 +82,13 @@ mod tests {
         let tracker_2 = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_two".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/2.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2500)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag_two".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("name_two")
+                    .with_tags(vec!["tag_two".to_string()])
+                    .with_actions(vec![TrackerAction::Email(EmailAction {
+                        to: vec!["dev@retrack.dev".to_string()],
+                    })]),
+            )
             .await?;
 
         let response = call_service(
@@ -152,42 +130,20 @@ mod tests {
         let tracker_1 = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["app:retrack".to_string(), "User:1".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_tags(vec!["app:retrack".to_string(), "User:1".to_string()]),
+            )
             .await?;
 
         // Create another tracker.
         let tracker_2 = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "name_two".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/2.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["app:retrack".to_string(), "User:2".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("name_two")
+                    .with_tags(vec!["app:retrack".to_string(), "User:2".to_string()]),
+            )
             .await?;
 
         let response = call_service(

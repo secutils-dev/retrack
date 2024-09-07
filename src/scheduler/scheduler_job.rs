@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 pub enum SchedulerJob {
     TrackersTrigger,
     TrackersSchedule,
-    TrackersFetch,
-    NotificationsSend,
+    TrackersRun,
+    TasksRun,
 }
 
 impl SchedulerJob {
@@ -15,8 +15,8 @@ impl SchedulerJob {
         match self {
             Self::TrackersSchedule => true,
             Self::TrackersTrigger => false,
-            Self::TrackersFetch => true,
-            Self::NotificationsSend => true,
+            Self::TrackersRun => true,
+            Self::TasksRun => true,
         }
     }
 }
@@ -29,8 +29,8 @@ mod tests {
     fn properly_determines_unique_jobs() -> anyhow::Result<()> {
         assert!(!SchedulerJob::TrackersTrigger.is_unique());
         assert!(SchedulerJob::TrackersSchedule.is_unique());
-        assert!(SchedulerJob::TrackersFetch.is_unique());
-        assert!(SchedulerJob::NotificationsSend.is_unique());
+        assert!(SchedulerJob::TrackersRun.is_unique());
+        assert!(SchedulerJob::TasksRun.is_unique());
 
         Ok(())
     }

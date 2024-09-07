@@ -10,23 +10,23 @@ pub struct SchedulerJobsConfig {
     /// The schedule to use for the `TrackersSchedule` job.
     #[serde_as(as = "DisplayFromStr")]
     pub trackers_schedule: Schedule,
-    /// The schedule to use for the `TrackersFetch` job.
+    /// The schedule to use for the `TrackersRun` job.
     #[serde_as(as = "DisplayFromStr")]
-    pub trackers_fetch: Schedule,
-    /// The schedule to use for the `NotificationsSend` job.
+    pub trackers_run: Schedule,
+    /// The schedule to use for the `TasksRun` job.
     #[serde_as(as = "DisplayFromStr")]
-    pub notifications_send: Schedule,
+    pub tasks_run: Schedule,
 }
 
 impl Default for SchedulerJobsConfig {
     fn default() -> Self {
         Self {
-            trackers_schedule: Schedule::from_str("0 * * * * * *")
+            trackers_schedule: Schedule::from_str("0/10 * * * * * *")
                 .expect("Cannot parse trackers schedule job schedule."),
-            trackers_fetch: Schedule::from_str("0 * * * * * *")
-                .expect("Cannot parse trackers fetch job schedule."),
-            notifications_send: Schedule::from_str("0/30 * * * * * *")
-                .expect("Cannot parse notifications send job schedule."),
+            trackers_run: Schedule::from_str("0/10 * * * * * *")
+                .expect("Cannot parse trackers run job schedule."),
+            tasks_run: Schedule::from_str("0/30 * * * * * *")
+                .expect("Cannot parse tasks run job schedule."),
         }
     }
 }
@@ -39,9 +39,9 @@ mod tests {
     #[test]
     fn serialization_and_default() {
         assert_toml_snapshot!(SchedulerJobsConfig::default(), @r###"
-        trackers_schedule = '0 * * * * * *'
-        trackers_fetch = '0 * * * * * *'
-        notifications_send = '0/30 * * * * * *'
+        trackers_schedule = '0/10 * * * * * *'
+        trackers_run = '0/10 * * * * * *'
+        tasks_run = '0/30 * * * * * *'
         "###);
     }
 
@@ -49,9 +49,9 @@ mod tests {
     fn deserialization() {
         let config: SchedulerJobsConfig = toml::from_str(
             r#"
-        trackers_schedule = '0 * * * * * *'
-        trackers_fetch = '0 * * * * * *'
-        notifications_send = '0/30 * * * * * *'
+        trackers_schedule = '0/10 * * * * * *'
+        trackers_run = '0/10 * * * * * *'
+        tasks_run = '0/30 * * * * * *'
     "#,
         )
         .unwrap();

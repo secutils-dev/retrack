@@ -36,7 +36,7 @@ mod tests {
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
         tests::mock_config,
-        trackers::{TrackerTarget, WebPageTarget},
+        trackers::{PageTarget, TrackerTarget},
     };
     use actix_web::{
         body::MessageBody,
@@ -65,8 +65,8 @@ mod tests {
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
                     "target": {
-                        "type": "web:page",
-                        "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }"
+                        "type": "page",
+                        "extractor": "export async function execute(p) { await p.goto('https://retrack.dev'); return await p.content(); }"
                     },
                 }))
                 .to_request(),
@@ -81,12 +81,13 @@ mod tests {
             .await?;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
+        assert!(trackers[0].enabled);
         assert_eq!(trackers[0].config.revisions, 3);
         assert!(trackers[0].config.timeout.is_none());
         assert_eq!(
             trackers[0].target,
-            TrackerTarget::WebPage(WebPageTarget {
-                extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
+            TrackerTarget::Page(PageTarget {
+                extractor: "export async function execute(p) { await p.goto('https://retrack.dev'); return await p.content(); }".to_string(),
                 user_agent: None,
                 ignore_https_errors: false,
             })
@@ -116,9 +117,10 @@ mod tests {
                 .method(Method::POST)
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
+                    "enabled": false,
                     "target": {
-                        "type": "web:page",
-                        "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }",
+                        "type": "page",
+                        "extractor": "export async function execute(p) { await p.goto('https://retrack.dev'); return await p.content(); }",
                         "userAgent": "Retrack/1.0.0",
                         "ignoreHTTPSErrors": true
                     },
@@ -134,8 +136,7 @@ mod tests {
                                 "type": "constant",
                                 "interval": 500000,
                                 "maxAttempts": 5
-                            },
-                            "notifications": true
+                            }
                         }
                     }
                 }))
@@ -155,6 +156,7 @@ mod tests {
             .await?;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
+        assert!(!trackers[0].enabled);
         assert_eq!(trackers[0].config.revisions, 5);
         assert_eq!(
             trackers[0].config.timeout,
@@ -162,8 +164,8 @@ mod tests {
         );
         assert_eq!(
             trackers[0].target,
-            TrackerTarget::WebPage(WebPageTarget {
-                extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev'); return r.html(await p.content()); }".to_string(),
+            TrackerTarget::Page(PageTarget {
+                extractor: "export async function execute(p) { await p.goto('https://retrack.dev'); return await p.content(); }".to_string(),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 ignore_https_errors: true,
             })
@@ -184,8 +186,7 @@ mod tests {
                 retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
                     interval: Duration::from_secs(500),
                     max_attempts: 5
-                }),
-                notifications: Some(true),
+                })
             })
         );
         assert_eq!(serde_json::to_string(&trackers[0])?, from_utf8(&body)?);
@@ -222,7 +223,7 @@ mod tests {
                 .set_json(json!({
                     "name": "my-minimal-tracker".to_string(),
                     "target": {
-                        "type": "api:json",
+                        "type": "api",
                         "url": "https://127.0.0.1/app",
                     },
                     "config": {

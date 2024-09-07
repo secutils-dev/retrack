@@ -5,9 +5,9 @@ mod config;
 mod database;
 mod error;
 mod network;
-mod notifications;
 mod scheduler;
 mod server;
+mod tasks;
 mod templates;
 mod trackers;
 
@@ -107,8 +107,8 @@ mod tests {
             components: ComponentsConfig::default(),
             scheduler: SchedulerJobsConfig {
                 trackers_schedule: Schedule::try_from("0 * 0 * * * *")?,
-                trackers_fetch: Schedule::try_from("0 * 1 * * * *")?,
-                notifications_send: Schedule::try_from("0 * 2 * * * *")?,
+                trackers_run: Schedule::try_from("0 * 1 * * * *")?,
+                tasks_run: Schedule::try_from("0 * 2 * * * *")?,
             },
             trackers: TrackersConfig {
                 restrict_to_public_urls: false,

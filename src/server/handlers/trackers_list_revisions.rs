@@ -43,9 +43,7 @@ mod tests {
             handlers::trackers_list_revisions::trackers_list_revisions,
             server_state::tests::mock_server_state,
         },
-        trackers::{
-            TrackerConfig, TrackerCreateParams, TrackerDataRevision, TrackerTarget, WebPageTarget,
-        },
+        trackers::{TrackerCreateParams, TrackerDataRevision, TrackerDataValue},
     };
     use actix_web::{
         body::MessageBody,
@@ -55,7 +53,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use serde_json::json;
     use sqlx::PgPool;
-    use std::{str::from_utf8, time::Duration};
+    use std::str::from_utf8;
     use time::OffsetDateTime;
     use uuid::uuid;
 
@@ -66,21 +64,7 @@ mod tests {
         // Create tracker.
         let trackers_api = server_state.api.trackers();
         let tracker = trackers_api
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
 
         let app = init_service(
@@ -112,7 +96,7 @@ mod tests {
             id: uuid!("00000000-0000-0000-0000-000000000001"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-            data: json!("\"some-data\""),
+            data: TrackerDataValue::new(json!("\"some-data\"")),
         };
         trackers_db
             .insert_tracker_data_revision(&data_revision_one)
@@ -127,14 +111,16 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":\"\\\"some-data\\\"\",\"createdAt\":946720800}]""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800}]""###);
 
         // Add another revision
+        let mut data = TrackerDataValue::new(json!("\"some-new-data\""));
+        data.add_mod(json!("\"some-other-data\""));
         let data_revision_two = TrackerDataRevision {
             id: uuid!("00000000-0000-0000-0000-000000000002"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720900)?,
-            data: json!("\"some-new-data\""),
+            data,
         };
         trackers_db
             .insert_tracker_data_revision(&data_revision_two)
@@ -149,7 +135,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":\"\\\"some-data\\\"\",\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":\"\\\"some-new-data\\\"\",\"createdAt\":946720900}]""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":{\"original\":\"\\\"some-new-data\\\"\",\"mods\":[\"\\\"some-other-data\\\"\"]},\"createdAt\":946720900}]""###);
 
         let response = call_service(
             &app,
@@ -161,7 +147,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":\"\\\"some-data\\\"\",\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":\"\\\"some-new-data\\\"\",\"createdAt\":946720900}]""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":{\"original\":\"\\\"some-new-data\\\"\",\"mods\":[\"\\\"some-other-data\\\"\"]},\"createdAt\":946720900}]""###);
 
         // Calculate the difference between the two revisions
         let response = call_service(
@@ -174,7 +160,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":\"\\\"some-data\\\"\",\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":\"@@ -1 +1 @@\\n-\\\"some-data\\\"\\n+\\\"some-new-data\\\"\\n\",\"createdAt\":946720900}]""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":{\"original\":\"@@ -1 +1 @@\\n-\\\"some-data\\\"\\n+\\\"some-other-data\\\"\\n\"},\"createdAt\":946720900}]""###);
 
         Ok(())
     }

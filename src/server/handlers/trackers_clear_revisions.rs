@@ -35,9 +35,7 @@ mod tests {
             handlers::trackers_clear_revisions::trackers_clear_revisions,
             server_state::tests::mock_server_state,
         },
-        trackers::{
-            TrackerConfig, TrackerCreateParams, TrackerDataRevision, TrackerTarget, WebPageTarget,
-        },
+        trackers::{TrackerCreateParams, TrackerDataRevision, TrackerDataValue},
     };
     use actix_web::{
         http::Method,
@@ -46,7 +44,6 @@ mod tests {
     };
     use serde_json::json;
     use sqlx::PgPool;
-    use std::time::Duration;
     use time::OffsetDateTime;
     use uuid::uuid;
 
@@ -76,21 +73,7 @@ mod tests {
         // Create tracker.
         let trackers_api = server_state.api.trackers();
         let tracker = trackers_api
-            .create_tracker(TrackerCreateParams {
-                name: "name_one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 3,
-                    timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("name_one"))
             .await?;
 
         // Tracker without revisions.
@@ -112,13 +95,13 @@ mod tests {
             id: uuid!("00000000-0000-0000-0000-000000000001"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-            data: json!("\"some-data\""),
+            data: TrackerDataValue::new(json!("\"some-data\"")),
         };
         let data_revision_two = TrackerDataRevision {
             id: uuid!("00000000-0000-0000-0000-000000000002"),
             tracker_id: tracker.id,
             created_at: OffsetDateTime::from_unix_timestamp(946720900)?,
-            data: json!("\"some-data\""),
+            data: TrackerDataValue::new(json!("\"some-data\"")),
         };
         trackers_db
             .insert_tracker_data_revision(&data_revision_one)

@@ -54,9 +54,9 @@ mod tests {
         );
 
         assert_eq!(
-            SchedulerJobMetadata::new(SchedulerJob::NotificationsSend),
+            SchedulerJobMetadata::new(SchedulerJob::TasksRun),
             SchedulerJobMetadata {
-                job_type: SchedulerJob::NotificationsSend,
+                job_type: SchedulerJob::TasksRun,
                 retry: None
             }
         );
@@ -82,12 +82,12 @@ mod tests {
         );
 
         assert_eq!(
-            Vec::try_from(SchedulerJobMetadata::new(SchedulerJob::NotificationsSend))?,
+            Vec::try_from(SchedulerJobMetadata::new(SchedulerJob::TasksRun))?,
             vec![3, 0]
         );
         assert_eq!(
             Vec::try_from(SchedulerJobMetadata {
-                job_type: SchedulerJob::NotificationsSend,
+                job_type: SchedulerJob::TasksRun,
                 retry: Some(SchedulerJobRetryState {
                     attempts: 10,
                     next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
@@ -119,13 +119,13 @@ mod tests {
 
         assert_eq!(
             SchedulerJobMetadata::try_from([3, 0].as_ref())?,
-            SchedulerJobMetadata::new(SchedulerJob::NotificationsSend)
+            SchedulerJobMetadata::new(SchedulerJob::TasksRun)
         );
 
         assert_eq!(
             SchedulerJobMetadata::try_from([3, 1, 10, 160, 31, 1, 10, 0, 0, 0, 0, 0, 0].as_ref())?,
             SchedulerJobMetadata {
-                job_type: SchedulerJob::NotificationsSend,
+                job_type: SchedulerJob::TasksRun,
                 retry: Some(SchedulerJobRetryState {
                     attempts: 10,
                     next_at: OffsetDateTime::from_unix_timestamp(946720800)?,

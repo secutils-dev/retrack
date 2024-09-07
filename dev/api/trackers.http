@@ -22,7 +22,7 @@ Accept: application/json
 {
   "name": "GitHub Icon",
   "target": {
-    "type": "web:page",
+    "type": "page",
     "extractor": "export async function execute(page) { await page.goto('https://retrack.dev'); return await page.content(); };"
   }
 }
@@ -45,7 +45,7 @@ Accept: application/json
 {
   "name": "GitHub Icon",
   "target": {
-    "type": "web:page",
+    "type": "page",
     "extractor": "{{extractor}}"
   },
   "config": {
@@ -75,16 +75,29 @@ Accept: application/json
 {
   "name": "[Test] Counter",
   "target": {
-    "type": "web:page",
+    "type": "page",
     "extractor": "{{extractor}}"
   },
+  "actions": [
+    { "type": "log" },
+    { "type": "webhook", "url": "https://retrack.dev" }
+  ],
   "config": {
     "revisions": 10,
     "job": {
-      "schedule": "0 */2 * * * * *"
+      "schedule": "0 */1 * * * * *"
     }
   },
   "tags": ["app:test"]
+}
+
+### Disable tracker
+PUT {{host}}/api/trackers/01921a88-53de-79c1-b7f7-a5f6316ee461
+Content-Type: application/json
+Accept: application/json
+
+{
+  "enabled": false
 }
 
 ### Update tracker
@@ -119,7 +132,7 @@ Accept: application/json
 
 {
   "target": {
-    "type": "web:page",
+    "type": "page",
     "extractor": "{{extractor}}"
   }
 }

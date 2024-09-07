@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport},
+    network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
         scheduler_jobs::TrackersTriggerJob,
@@ -18,7 +18,10 @@ impl TrackersScheduleJob {
     pub async fn try_resume<DR: DnsResolver, ET: EmailTransport>(
         api: Arc<Api<DR, ET>>,
         existing_job_data: RawSchedulerJobStoredData,
-    ) -> anyhow::Result<Option<Job>> {
+    ) -> anyhow::Result<Option<Job>>
+    where
+        ET::Error: EmailTransportError,
+    {
         // If the schedule has changed, remove existing job and create a new one.
         let mut new_job = Self::create(api).await?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
@@ -32,7 +35,10 @@ impl TrackersScheduleJob {
     /// Creates a new `TrackersSchedule` job.
     pub async fn create<DR: DnsResolver, ET: EmailTransport>(
         api: Arc<Api<DR, ET>>,
-    ) -> anyhow::Result<Job> {
+    ) -> anyhow::Result<Job>
+    where
+        ET::Error: EmailTransportError,
+    {
         let mut job = Job::new_async(
             api.config.scheduler.trackers_schedule.clone(),
             move |_, scheduler| {
@@ -54,12 +60,15 @@ impl TrackersScheduleJob {
     async fn execute<DR: DnsResolver, ET: EmailTransport>(
         api: Arc<Api<DR, ET>>,
         scheduler: JobScheduler,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<()>
+    where
+        ET::Error: EmailTransportError,
+    {
         let trackers = api.trackers();
         Self::schedule_trackers(
             api.clone(),
             &scheduler,
-            trackers.get_unscheduled_trackers().await?,
+            trackers.get_trackers_to_schedule().await?,
         )
         .await?;
 
@@ -70,21 +79,15 @@ impl TrackersScheduleJob {
         api: Arc<Api<DR, ET>>,
         scheduler: &JobScheduler,
         unscheduled_trackers: Vec<Tracker>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<()>
+    where
+        ET::Error: EmailTransportError,
+    {
         if !unscheduled_trackers.is_empty() {
             debug!("Found {} unscheduled trackers.", unscheduled_trackers.len());
         }
 
         for tracker in unscheduled_trackers {
-            if tracker.config.revisions == 0 {
-                error!(
-                    tracker.id = %tracker.id,
-                    tracker.name = tracker.name,
-                    "Found an unscheduled tracker that doesn't support tracking, skipping…"
-                );
-                continue;
-            }
-
             let schedule = if let Some(job_config) = tracker.config.job {
                 job_config.schedule
             } else {
@@ -119,9 +122,9 @@ impl TrackersScheduleJob {
 mod tests {
     use super::TrackersScheduleJob;
     use crate::{
-        scheduler::{scheduler_job::SchedulerJob, SchedulerJobConfig, SchedulerJobMetadata},
+        scheduler::{scheduler_job::SchedulerJob, SchedulerJobMetadata},
         tests::{mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job},
-        trackers::{TrackerConfig, TrackerCreateParams, TrackerTarget, WebPageTarget},
+        trackers::{TrackerConfig, TrackerCreateParams},
     };
     use cron::Schedule;
     use futures::StreamExt;
@@ -227,72 +230,22 @@ mod tests {
         // Create trackers and tracker jobs.
         let trackers = api.trackers();
         let tracker_one = trackers
-            .create_tracker(TrackerCreateParams {
-                name: "tracker-one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_secs(10)),
-                    headers: Default::default(),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "1 2 3 4 5 6 2030".to_string(),
-                        retry_strategy: None,
-                        notifications: Some(true),
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 6 2030"),
+            )
             .await?;
-
         let tracker_two = trackers
-            .create_tracker(TrackerCreateParams {
-                name: "tracker-two".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_secs(2)),
-                    headers: Default::default(),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "1 2 3 4 5 6 2035".to_string(),
-                        retry_strategy: None,
-                        notifications: Some(true),
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("tracker-two").with_schedule("1 2 3 4 5 6 2035"),
+            )
             .await?;
-
         let tracker_three = trackers
-            .create_tracker(TrackerCreateParams {
-                name: "tracker-three".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_secs(2)),
-                    headers: Default::default(),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "1 2 3 4 5 6 2040".to_string(),
-                        retry_strategy: None,
-                        notifications: Some(true),
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("tracker-three").with_schedule("1 2 3 4 5 6 2040"),
+            )
             .await?;
 
-        let unscheduled_trackers = api.trackers().get_unscheduled_trackers().await?;
+        let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert_eq!(unscheduled_trackers.len(), 3);
         assert_eq!(unscheduled_trackers[0].id, tracker_one.id);
         assert_eq!(unscheduled_trackers[1].id, tracker_two.id);
@@ -304,13 +257,13 @@ mod tests {
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
-        while !api.trackers().get_unscheduled_trackers().await?.is_empty() {
+        while !api.trackers().get_trackers_to_schedule().await?.is_empty() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         scheduler.shutdown().await?;
 
         // All pending jobs should be scheduled now.
-        let unscheduled_trackers = api.trackers().get_unscheduled_trackers().await?;
+        let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
 
         let jobs = api
@@ -356,24 +309,10 @@ mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "tracker-one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_secs(10)),
-                    headers: Default::default(),
-                    job: Default::default(),
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(TrackerCreateParams::new("tracker-one"))
             .await?;
 
-        assert!(api.trackers().get_unscheduled_trackers().await?.is_empty());
+        assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
 
         let schedule_job_id = scheduler
             .add(TrackersScheduleJob::create(api.clone()).await?)
@@ -412,28 +351,63 @@ mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams {
-                name: "tracker-one".to_string(),
-                target: TrackerTarget::WebPage(WebPageTarget {
-                    extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 0,
-                    timeout: Some(Duration::from_secs(10)),
-                    headers: Default::default(),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "1 2 3 4 5 6 2030".to_string(),
-                        retry_strategy: None,
-                        notifications: Some(true),
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-            })
+            .create_tracker(
+                TrackerCreateParams::new("tracker-one")
+                    .with_config(TrackerConfig {
+                        revisions: 0,
+                        ..Default::default()
+                    })
+                    .with_schedule("1 2 3 4 5 6 2030"),
+            )
             .await?;
 
-        assert!(api.trackers().get_unscheduled_trackers().await?.is_empty());
+        assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
+
+        let schedule_job_id = scheduler
+            .add(TrackersScheduleJob::create(api.clone()).await?)
+            .await?;
+
+        // Start scheduler and wait for a few seconds, then stop it.
+        scheduler.start().await?;
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        scheduler.shutdown().await?;
+
+        // Tracker has not been assigned job ID.
+        assert!(api
+            .trackers()
+            .get_tracker(tracker.id)
+            .await?
+            .unwrap()
+            .job_id
+            .is_none());
+
+        let mut jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs.remove(0)?.id, schedule_job_id);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn does_not_schedule_trackers_if_disabled(pool: PgPool) -> anyhow::Result<()> {
+        let mut scheduler = mock_scheduler(&pool).await?;
+
+        let mut config = mock_config()?;
+        config.scheduler.trackers_schedule = Schedule::try_from("1/1 * * * * *")?;
+
+        let api = Arc::new(mock_api_with_config(pool, config).await?);
+
+        // Create tracker and tracker job.
+        let tracker = api
+            .trackers()
+            .create_tracker(
+                TrackerCreateParams::new("tracker-one")
+                    .with_schedule("1 2 3 4 5 6 2030")
+                    .disable(),
+            )
+            .await?;
+
+        assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
 
         let schedule_job_id = scheduler
             .add(TrackersScheduleJob::create(api.clone()).await?)

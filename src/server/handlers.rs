@@ -10,7 +10,11 @@ pub mod trackers_update;
 use crate::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     server::Status,
-    trackers::{Tracker, TrackerConfig, TrackerCreateParams, TrackerUpdateParams},
+    trackers::{
+        ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
+        TrackerCreateParams, TrackerDataRevision, TrackerDataValue, TrackerTarget,
+        TrackerUpdateParams, WebhookAction,
+    },
 };
 use utoipa::OpenApi;
 
@@ -34,13 +38,21 @@ use utoipa::OpenApi;
         trackers_clear_revisions::trackers_clear_revisions
     ),
     components(schemas(
+        ApiTarget,
+        EmailAction,
+        SchedulerJobConfig,
+        SchedulerJobRetryStrategy,
         Status,
         Tracker,
+        TrackerAction,
         TrackerConfig,
         TrackerCreateParams,
+        TrackerDataRevision,
+        TrackerDataValue,
+        TrackerTarget,
         TrackerUpdateParams,
-        SchedulerJobConfig,
-        SchedulerJobRetryStrategy
+        PageTarget,
+        WebhookAction
     ))
 )]
 pub(super) struct RetrackOpenApi;

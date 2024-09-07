@@ -1,4 +1,4 @@
-use crate::trackers::{TrackerConfig, TrackerTarget};
+use crate::trackers::{TrackerAction, TrackerConfig, TrackerTarget};
 use serde::Serialize;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -12,6 +12,8 @@ pub struct Tracker {
     pub id: Uuid,
     /// Arbitrary name of the tracker.
     pub name: String,
+    /// Whether the tracker is enabled. Disabled trackers are not scheduled.
+    pub enabled: bool,
     /// Target of the tracker (web page, API, file).
     pub target: TrackerTarget,
     /// ID of the optional job that triggers tracker. If not set,then the job is not scheduled yet.
@@ -21,6 +23,8 @@ pub struct Tracker {
     pub config: TrackerConfig,
     /// Case-insensitive tags to categorize the tracker.
     pub tags: Vec<String>,
+    /// List of actions to execute when the tracker fetches new data.
+    pub actions: Vec<TrackerAction>,
     /// Date and time when the tracker was created.
     #[serde(with = "time::serde::timestamp")]
     pub created_at: OffsetDateTime,
@@ -33,22 +37,24 @@ pub struct Tracker {
 mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        tests::MockWebPageTrackerBuilder,
-        trackers::{TrackerTarget, WebPageTarget},
+        tests::MockTrackerBuilder,
+        trackers::{PageTarget, TrackerAction, TrackerTarget, WebhookAction},
     };
+    use http::{header::CONTENT_TYPE, Method};
     use insta::assert_json_snapshot;
-    use std::time::Duration;
+    use std::{collections::HashMap, time::Duration};
+    use url::Url;
     use uuid::uuid;
 
     #[test]
     fn serialization() -> anyhow::Result<()> {
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(WebPageTarget {
-            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+        .with_target(TrackerTarget::Page(PageTarget {
+            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -57,9 +63,10 @@ mod tests {
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
+          "enabled": true,
           "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -68,18 +75,23 @@ mod tests {
             "timeout": 2000
           },
           "tags": [],
+          "actions": [
+            {
+              "type": "log"
+            }
+          ],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
         "###);
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(WebPageTarget {
-            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+        .with_target(TrackerTarget::Page(PageTarget {
+            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -89,9 +101,10 @@ mod tests {
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
+          "enabled": true,
           "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -103,18 +116,23 @@ mod tests {
             }
           },
           "tags": [],
+          "actions": [
+            {
+              "type": "log"
+            }
+          ],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
         "###);
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(WebPageTarget {
-            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+        .with_target(TrackerTarget::Page(PageTarget {
+            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -124,9 +142,10 @@ mod tests {
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
+          "enabled": true,
           "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -138,18 +157,23 @@ mod tests {
             }
           },
           "tags": [],
+          "actions": [
+            {
+              "type": "log"
+            }
+          ],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
         "###);
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(WebPageTarget {
-            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+        .with_target(TrackerTarget::Page(PageTarget {
+            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -159,9 +183,10 @@ mod tests {
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
+          "enabled": true,
           "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -173,39 +198,54 @@ mod tests {
             }
           },
           "tags": [],
+          "actions": [
+            {
+              "type": "log"
+            }
+          ],
           "createdAt": 946720800,
           "updatedAt": 946720810
         }
         "###);
 
-        let tracker = MockWebPageTrackerBuilder::create(
+        let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
             "some-name",
             3,
         )?
-        .with_target(TrackerTarget::WebPage(WebPageTarget {
-            extractor: "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }".to_string(),
+        .with_target(TrackerTarget::Page(PageTarget {
+            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
         .with_schedule("0 0 * * *")
         .with_job_config(SchedulerJobConfig {
             schedule: "0 0 * * *".to_string(),
-            notifications: None,
             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
                 interval: Duration::from_secs(1000),
                 max_attempts: 10,
             }),
         })
         .with_tags(vec!["tag".to_string()])
+        .with_actions(vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+            url: Url::parse("https://retrack.dev/")?,
+            method: Some(Method::PUT),
+            headers: Some(
+                (&[(CONTENT_TYPE, "application/json".to_string())]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>())
+                    .try_into()?,
+            ),
+        })])
         .build();
         assert_json_snapshot!(tracker, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
           "name": "some-name",
+          "enabled": true,
           "target": {
-            "type": "web:page",
-            "extractor": "export async function execute(p, r) { await p.goto('https://retrack.dev/'); return r.html(await p.content()); }",
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -223,6 +263,19 @@ mod tests {
           },
           "tags": [
             "tag"
+          ],
+          "actions": [
+            {
+              "type": "log"
+            },
+            {
+              "type": "webhook",
+              "url": "https://retrack.dev/",
+              "method": "PUT",
+              "headers": {
+                "content-type": "application/json"
+              }
+            }
           ],
           "createdAt": 946720800,
           "updatedAt": 946720810

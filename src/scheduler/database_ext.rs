@@ -403,7 +403,7 @@ pub mod tests {
                 count: Some(3),
                 job_type: 3,
                 extra: Some(Vec::try_from(SchedulerJobMetadata::new(
-                    SchedulerJob::NotificationsSend,
+                    SchedulerJob::TasksRun,
                 ))?),
                 ran: Some(true),
                 stopped: Some(false),
@@ -443,7 +443,7 @@ pub mod tests {
             db.get_scheduler_job_meta(uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8"))
                 .await?
                 .unwrap(),
-            SchedulerJobMetadata::new(SchedulerJob::NotificationsSend)
+            SchedulerJobMetadata::new(SchedulerJob::TasksRun)
         );
         assert_eq!(
             db.get_scheduler_job_meta(uuid!("00e55044-10b1-426f-9247-bb680e5fe0c8"))
@@ -471,7 +471,7 @@ pub mod tests {
         .await?;
         db.update_scheduler_job_meta(
             uuid!("00e55044-10b1-426f-9247-bb680e5fe0c8"),
-            SchedulerJobMetadata::new(SchedulerJob::NotificationsSend),
+            SchedulerJobMetadata::new(SchedulerJob::TasksRun),
         )
         .await?;
 
@@ -491,7 +491,7 @@ pub mod tests {
             db.get_scheduler_job_meta(uuid!("00e55044-10b1-426f-9247-bb680e5fe0c8"))
                 .await?
                 .unwrap(),
-            SchedulerJobMetadata::new(SchedulerJob::NotificationsSend)
+            SchedulerJobMetadata::new(SchedulerJob::TasksRun)
         );
 
         Ok(())

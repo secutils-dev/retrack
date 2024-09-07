@@ -1,5 +1,5 @@
+use crate::trackers::TrackerDataValue;
 use serde::Serialize;
-use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -13,8 +13,9 @@ pub struct TrackerDataRevision {
     /// ID of the tracker captured data belongs to.
     #[serde(skip_serializing)]
     pub tracker_id: Uuid,
-    /// Tracker data revision value.
-    pub data: JsonValue,
+    /// Array of tracker data revision values including the original one and the those potentially
+    /// transformed by the tracker actions, if any.
+    pub data: TrackerDataValue,
     /// Timestamp indicating when data was fetched.
     #[serde(with = "time::serde::timestamp")]
     pub created_at: OffsetDateTime,
@@ -22,7 +23,7 @@ pub struct TrackerDataRevision {
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::TrackerDataRevision;
+    use crate::trackers::{TrackerDataRevision, TrackerDataValue};
     use insta::assert_json_snapshot;
     use serde_json::json;
     use time::OffsetDateTime;
@@ -36,11 +37,13 @@ mod tests {
             created_at: OffsetDateTime::from_unix_timestamp(
                 946720800,
             )?,
-            data: json!("some-data"),
+            data: TrackerDataValue::new(json!("some-data")),
         }, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
-          "data": "some-data",
+          "data": {
+            "original": "some-data"
+          },
           "createdAt": 946720800
         }
         "###);
