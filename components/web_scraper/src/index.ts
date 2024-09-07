@@ -1,6 +1,5 @@
 import * as process from 'process';
 
-import { fastifyCompress } from '@fastify/compress';
 import { fastify } from 'fastify';
 import NodeCache from 'node-cache';
 import type { BrowserServer } from 'playwright-core';
@@ -22,9 +21,9 @@ const server = fastify({
           level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug',
           transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname' } },
         },
-})
-  .register(fastifyCompress)
-  .addHook('onClose', () => stopBrowserServer());
+}).addHook('onClose', () => stopBrowserServer());
+
+await server.register(import('@fastify/compress'));
 
 const browserServer: {
   cachedEndpoint: BrowserEndpoint;
