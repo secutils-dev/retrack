@@ -23,19 +23,16 @@
   "dependencies": {
     "@fastify/compress": "^7.0.3",
     "dotenv": "^16.4.5",
-    "fast-json-stable-stringify": "^2.1.0",
     "fastify": "^4.28.1",
-    "js-beautify": "^1.15.1",
     "node-cache": "^5.1.2",
-    "playwright-core": "1.45.1"
+    "playwright-core": "1.46.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
-    "@eslint/js": "^9.9.1",
-    "@types/js-beautify": "^1.14.3",
-    "@types/node": "^22.5.1",
+    "@eslint/js": "^9.10.0",
+    "@types/node": "^22.5.4",
     "@types/ws": "^8.5.12",
-    "eslint": "^9.9.1",
+    "eslint": "^9.10.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "globals": "^15.9.0",
@@ -44,7 +41,7 @@
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4",
-    "typescript-eslint": "^8.3.0",
+    "typescript-eslint": "^8.4.0",
     "ws": "^8.18.0"
   }
 }
