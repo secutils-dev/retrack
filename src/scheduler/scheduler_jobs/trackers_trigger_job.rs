@@ -3,8 +3,11 @@ use crate::{
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
+        CronExt,
     },
 };
+use anyhow::Context;
+use croner::Cron;
 use std::sync::Arc;
 use tokio_cron_scheduler::Job;
 use tracing::{debug, error, warn};
@@ -73,23 +76,29 @@ impl TrackersTriggerJob {
         schedule: impl AsRef<str>,
     ) -> anyhow::Result<Job> {
         // Now, create and schedule new job.
-        let mut job = Job::new_async(schedule.as_ref(), move |uuid, _| {
-            let db = api.db.clone();
-            Box::pin(async move {
-                // Mark job as stopped to indicate that it needs processing. Run job only picks
-                // up stopped jobs, processes them, and then un-stops. Stopped flag is basically
-                // serving as a pending processing flag. Eventually we might need to add a separate
-                // table for pending jobs.
-                if let Err(err) = db.reset_scheduler_job_state(uuid, true).await {
-                    error!(
-                        job.id = %uuid,
-                        "Error marking tracker trigger job as pending: {err:?}"
-                    );
-                } else {
-                    debug!(job.id = %uuid, "Successfully run the job.");
-                }
-            })
-        })?;
+        let mut job = Job::new_async(
+            Cron::parse_pattern(schedule.as_ref())
+                .with_context(|| format!("Cannot parse tracker's schedule: {}", schedule.as_ref()))?
+                .pattern
+                .to_string(),
+            move |uuid, _| {
+                let db = api.db.clone();
+                Box::pin(async move {
+                    // Mark job as stopped to indicate that it needs processing. Run job only picks
+                    // up stopped jobs, processes them, and then un-stops. Stopped flag is basically
+                    // serving as a pending processing flag. Eventually we might need to add a separate
+                    // table for pending jobs.
+                    if let Err(err) = db.reset_scheduler_job_state(uuid, true).await {
+                        error!(
+                            job.id = %uuid,
+                            "Error marking tracker trigger job as pending: {err:?}"
+                        );
+                    } else {
+                        debug!(job.id = %uuid, "Successfully run the job.");
+                    }
+                })
+            },
+        )?;
 
         job.set_job_type(SchedulerJob::TrackersTrigger)?;
 

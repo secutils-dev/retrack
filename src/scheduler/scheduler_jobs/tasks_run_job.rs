@@ -3,8 +3,11 @@ use crate::{
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
+        CronExt,
     },
 };
+use anyhow::Context;
+use croner::Cron;
 use std::{sync::Arc, time::Instant};
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info, trace};
@@ -41,7 +44,15 @@ impl TasksRunJob {
         ET::Error: EmailTransportError,
     {
         let mut job = Job::new_async(
-            api.config.scheduler.tasks_run.clone(),
+            Cron::parse_pattern(&api.config.scheduler.tasks_run)
+                .with_context(|| {
+                    format!(
+                        "Cannot parse `tasks_run` schedule: {}",
+                        api.config.scheduler.tasks_run
+                    )
+                })?
+                .pattern
+                .to_string(),
             move |_, scheduler| {
                 let api = api.clone();
                 Box::pin(async move {
@@ -102,7 +113,6 @@ mod tests {
             mock_scheduler_job,
         },
     };
-    use cron::Schedule;
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
@@ -113,7 +123,7 @@ mod tests {
     #[sqlx::test]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.tasks_run = Schedule::try_from("1/5 * * * * *")?;
+        config.scheduler.tasks_run = "1/5 * * * * *".to_string();
 
         let api = mock_api_with_config(pool, config).await?;
 
@@ -144,7 +154,7 @@ mod tests {
     #[sqlx::test]
     async fn can_resume_job(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.tasks_run = Schedule::try_from("0 0 * * * *")?;
+        config.scheduler.tasks_run = "0 0 * * * *".to_string();
 
         let api = mock_api_with_config(pool, config).await?;
 
@@ -185,7 +195,7 @@ mod tests {
         let mut scheduler = mock_scheduler(&pool).await?;
 
         let mut config = mock_config()?;
-        config.scheduler.tasks_run = Schedule::try_from(mock_schedule_in_sec(2).as_str())?;
+        config.scheduler.tasks_run = mock_schedule_in_sec(2);
 
         let api = Arc::new(mock_api_with_config(pool, config).await?);
         for n in 0..=(MAX_TASKS_TO_SEND as i64) {

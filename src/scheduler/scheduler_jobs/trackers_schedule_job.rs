@@ -3,10 +3,12 @@ use crate::{
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
-        scheduler_jobs::TrackersTriggerJob,
+        scheduler_jobs::TrackersTriggerJob, CronExt,
     },
     trackers::Tracker,
 };
+use anyhow::Context;
+use croner::Cron;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error};
@@ -40,7 +42,15 @@ impl TrackersScheduleJob {
         ET::Error: EmailTransportError,
     {
         let mut job = Job::new_async(
-            api.config.scheduler.trackers_schedule.clone(),
+            Cron::parse_pattern(&api.config.scheduler.trackers_schedule)
+                .with_context(|| {
+                    format!(
+                        "Cannot parse `trackers_schedule` schedule: {}",
+                        api.config.scheduler.tasks_run
+                    )
+                })?
+                .pattern
+                .to_string(),
             move |_, scheduler| {
                 let api = api.clone();
                 Box::pin(async move {
@@ -126,7 +136,6 @@ mod tests {
         tests::{mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job},
         trackers::{TrackerConfig, TrackerCreateParams},
     };
-    use cron::Schedule;
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
@@ -136,7 +145,7 @@ mod tests {
     #[sqlx::test]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_schedule = Schedule::try_from("1/5 * * * * *")?;
+        config.scheduler.trackers_schedule = "1/5 * * * * *".to_string();
 
         let api = mock_api_with_config(pool, config).await?;
 
@@ -167,7 +176,7 @@ mod tests {
     #[sqlx::test]
     async fn can_resume_job(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_schedule = Schedule::try_from("0 0 * * * *")?;
+        config.scheduler.trackers_schedule = "0 0 * * * *".to_string();
 
         let api = mock_api_with_config(pool, config).await?;
 
@@ -224,25 +233,19 @@ mod tests {
         let mut scheduler = mock_scheduler(&pool).await?;
 
         let mut config = mock_config()?;
-        config.scheduler.trackers_schedule = Schedule::try_from("1/1 * * * * *")?;
+        config.scheduler.trackers_schedule = "1/1 * * * * *".to_string();
         let api = Arc::new(mock_api_with_config(pool, config).await?);
 
         // Create trackers and tracker jobs.
         let trackers = api.trackers();
         let tracker_one = trackers
-            .create_tracker(
-                TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 6 2030"),
-            )
+            .create_tracker(TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 4"))
             .await?;
         let tracker_two = trackers
-            .create_tracker(
-                TrackerCreateParams::new("tracker-two").with_schedule("1 2 3 4 5 6 2035"),
-            )
+            .create_tracker(TrackerCreateParams::new("tracker-two").with_schedule("1 2 3 4 5 5"))
             .await?;
         let tracker_three = trackers
-            .create_tracker(
-                TrackerCreateParams::new("tracker-three").with_schedule("1 2 3 4 5 6 2040"),
-            )
+            .create_tracker(TrackerCreateParams::new("tracker-three").with_schedule("1 2 3 4 5 6"))
             .await?;
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
@@ -302,7 +305,7 @@ mod tests {
         let mut scheduler = mock_scheduler(&pool).await?;
 
         let mut config = mock_config()?;
-        config.scheduler.trackers_schedule = Schedule::try_from("1/1 * * * * *")?;
+        config.scheduler.trackers_schedule = "1/1 * * * * *".to_string();
 
         let api = Arc::new(mock_api_with_config(pool, config).await?);
 
@@ -344,7 +347,7 @@ mod tests {
         let mut scheduler = mock_scheduler(&pool).await?;
 
         let mut config = mock_config()?;
-        config.scheduler.trackers_schedule = Schedule::try_from("1/1 * * * * *")?;
+        config.scheduler.trackers_schedule = "1/1 * * * * *".to_string();
 
         let api = Arc::new(mock_api_with_config(pool, config).await?);
 
@@ -357,7 +360,7 @@ mod tests {
                         revisions: 0,
                         ..Default::default()
                     })
-                    .with_schedule("1 2 3 4 5 6 2030"),
+                    .with_schedule("1 2 3 4 5 6"),
             )
             .await?;
 
@@ -393,7 +396,7 @@ mod tests {
         let mut scheduler = mock_scheduler(&pool).await?;
 
         let mut config = mock_config()?;
-        config.scheduler.trackers_schedule = Schedule::try_from("1/1 * * * * *")?;
+        config.scheduler.trackers_schedule = "1/1 * * * * *".to_string();
 
         let api = Arc::new(mock_api_with_config(pool, config).await?);
 
@@ -402,7 +405,7 @@ mod tests {
             .trackers()
             .create_tracker(
                 TrackerCreateParams::new("tracker-one")
-                    .with_schedule("1 2 3 4 5 6 2030")
+                    .with_schedule("1 2 3 4 5 6")
                     .disable(),
             )
             .await?;

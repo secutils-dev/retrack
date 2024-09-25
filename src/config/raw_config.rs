@@ -84,9 +84,9 @@ mod tests {
         web_scraper_url = 'http://localhost:7272/'
 
         [scheduler]
-        trackers_schedule = '0/10 * * * * * *'
-        trackers_run = '0/10 * * * * * *'
-        tasks_run = '0/30 * * * * * *'
+        trackers_schedule = '0/10 * * * * *'
+        trackers_run = '0/10 * * * * *'
+        tasks_run = '0/30 * * * * *'
 
         [trackers]
         max_revisions = 30
@@ -176,97 +176,9 @@ mod tests {
                 },
             },
             scheduler: SchedulerJobsConfig {
-                trackers_schedule: Schedule {
-                    source: "0 * * * * * *",
-                    fields: ScheduleFields {
-                        years: Years {
-                            ordinals: None,
-                        },
-                        days_of_week: DaysOfWeek {
-                            ordinals: None,
-                        },
-                        months: Months {
-                            ordinals: None,
-                        },
-                        days_of_month: DaysOfMonth {
-                            ordinals: None,
-                        },
-                        hours: Hours {
-                            ordinals: None,
-                        },
-                        minutes: Minutes {
-                            ordinals: None,
-                        },
-                        seconds: Seconds {
-                            ordinals: Some(
-                                {
-                                    0,
-                                },
-                            ),
-                        },
-                    },
-                },
-                trackers_run: Schedule {
-                    source: "0 * * * * * *",
-                    fields: ScheduleFields {
-                        years: Years {
-                            ordinals: None,
-                        },
-                        days_of_week: DaysOfWeek {
-                            ordinals: None,
-                        },
-                        months: Months {
-                            ordinals: None,
-                        },
-                        days_of_month: DaysOfMonth {
-                            ordinals: None,
-                        },
-                        hours: Hours {
-                            ordinals: None,
-                        },
-                        minutes: Minutes {
-                            ordinals: None,
-                        },
-                        seconds: Seconds {
-                            ordinals: Some(
-                                {
-                                    0,
-                                },
-                            ),
-                        },
-                    },
-                },
-                tasks_run: Schedule {
-                    source: "0/30 * * * * * *",
-                    fields: ScheduleFields {
-                        years: Years {
-                            ordinals: None,
-                        },
-                        days_of_week: DaysOfWeek {
-                            ordinals: None,
-                        },
-                        months: Months {
-                            ordinals: None,
-                        },
-                        days_of_month: DaysOfMonth {
-                            ordinals: None,
-                        },
-                        hours: Hours {
-                            ordinals: None,
-                        },
-                        minutes: Minutes {
-                            ordinals: None,
-                        },
-                        seconds: Seconds {
-                            ordinals: Some(
-                                {
-                                    0,
-                                    30,
-                                },
-                            ),
-                        },
-                    },
-                },
+                trackers_schedule: "0 * * * * * *",
+                trackers_run: "0 * * * * * *",
+                tasks_run: "0/30 * * * * * *",
             },
             trackers: TrackersConfig {
                 max_revisions: 11,

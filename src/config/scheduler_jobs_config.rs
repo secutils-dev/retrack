@@ -1,32 +1,22 @@
-use cron::Schedule;
 use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
-use std::str::FromStr;
 
 /// Configuration for the Retrack scheduler jobs.
-#[serde_as]
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct SchedulerJobsConfig {
     /// The schedule to use for the `TrackersSchedule` job.
-    #[serde_as(as = "DisplayFromStr")]
-    pub trackers_schedule: Schedule,
+    pub trackers_schedule: String,
     /// The schedule to use for the `TrackersRun` job.
-    #[serde_as(as = "DisplayFromStr")]
-    pub trackers_run: Schedule,
+    pub trackers_run: String,
     /// The schedule to use for the `TasksRun` job.
-    #[serde_as(as = "DisplayFromStr")]
-    pub tasks_run: Schedule,
+    pub tasks_run: String,
 }
 
 impl Default for SchedulerJobsConfig {
     fn default() -> Self {
         Self {
-            trackers_schedule: Schedule::from_str("0/10 * * * * * *")
-                .expect("Cannot parse trackers schedule job schedule."),
-            trackers_run: Schedule::from_str("0/10 * * * * * *")
-                .expect("Cannot parse trackers run job schedule."),
-            tasks_run: Schedule::from_str("0/30 * * * * * *")
-                .expect("Cannot parse tasks run job schedule."),
+            trackers_schedule: "0/10 * * * * *".to_string(),
+            trackers_run: "0/10 * * * * *".to_string(),
+            tasks_run: "0/30 * * * * *".to_string(),
         }
     }
 }
@@ -39,9 +29,9 @@ mod tests {
     #[test]
     fn serialization_and_default() {
         assert_toml_snapshot!(SchedulerJobsConfig::default(), @r###"
-        trackers_schedule = '0/10 * * * * * *'
-        trackers_run = '0/10 * * * * * *'
-        tasks_run = '0/30 * * * * * *'
+        trackers_schedule = '0/10 * * * * *'
+        trackers_run = '0/10 * * * * *'
+        tasks_run = '0/30 * * * * *'
         "###);
     }
 
@@ -49,9 +39,9 @@ mod tests {
     fn deserialization() {
         let config: SchedulerJobsConfig = toml::from_str(
             r#"
-        trackers_schedule = '0/10 * * * * * *'
-        trackers_run = '0/10 * * * * * *'
-        tasks_run = '0/30 * * * * * *'
+        trackers_schedule = '0/10 * * * * *'
+        trackers_run = '0/10 * * * * *'
+        tasks_run = '0/30 * * * * *'
     "#,
         )
         .unwrap();

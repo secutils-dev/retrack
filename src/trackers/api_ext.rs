@@ -13,7 +13,7 @@ use crate::{
     config::TrackersConfig,
     error::Error as RetrackError,
     network::{DnsResolver, EmailTransport, EmailTransportError},
-    scheduler::{ScheduleExt, SchedulerJobRetryStrategy},
+    scheduler::{CronExt, SchedulerJobRetryStrategy},
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
     trackers::{
         database_ext::TrackersDatabaseExt,
@@ -24,7 +24,7 @@ use crate::{
     },
 };
 use anyhow::{anyhow, bail};
-use cron::Schedule;
+use croner::Cron;
 use futures::Stream;
 use http::Method;
 use lettre::message::Mailbox;
@@ -481,7 +481,7 @@ where
 
         if let Some(job_config) = &tracker.config.job {
             // Validate that the schedule is a valid cron expression.
-            let schedule = match Schedule::try_from(job_config.schedule.as_str()) {
+            let schedule = match Cron::parse_pattern(job_config.schedule.as_str()) {
                 Ok(schedule) => schedule,
                 Err(err) => {
                     bail!(RetrackError::client_with_root_cause(
@@ -1160,7 +1160,7 @@ mod tests {
             @r###"
         Error {
             context: "Tracker schedule must be a valid cron expression.",
-            source: "Failed to parse schedule `-`: Error { kind: Expression(\"Invalid cron expression.\") }",
+            source: "Failed to parse schedule `-`: Invalid pattern: Pattern must consist of five or six fields (minute, hour, day, month, day of week, and optional second).",
         }
         "###
         );
@@ -1875,7 +1875,7 @@ mod tests {
             @r###"
         Error {
             context: "Tracker schedule must be a valid cron expression.",
-            source: "Failed to parse schedule `-`: Error { kind: Expression(\"Invalid cron expression.\") }",
+            source: "Failed to parse schedule `-`: Invalid pattern: Pattern must consist of five or six fields (minute, hour, day, month, day of week, and optional second).",
         }
         "###
         );

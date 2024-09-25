@@ -4,10 +4,13 @@ use crate::{
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
+        CronExt,
     },
     tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
     trackers::Tracker,
 };
+use anyhow::Context;
+use croner::Cron;
 use futures::{pin_mut, StreamExt};
 use std::{sync::Arc, time::Instant};
 use time::OffsetDateTime;
@@ -44,7 +47,15 @@ impl TrackersRunJob {
         ET::Error: EmailTransportError,
     {
         let mut job = Job::new_async(
-            api.config.scheduler.trackers_run.clone(),
+            Cron::parse_pattern(&api.config.scheduler.trackers_run)
+                .with_context(|| {
+                    format!(
+                        "Cannot parse `trackers_run` schedule: {}",
+                        api.config.scheduler.trackers_run
+                    )
+                })?
+                .pattern
+                .to_string(),
             move |_, scheduler| {
                 let api = api.clone();
                 Box::pin(async move {
@@ -270,7 +281,6 @@ mod tests {
             TrackerDataRevision, TrackerDataValue, TrackerTarget,
         },
     };
-    use cron::Schedule;
     use futures::StreamExt;
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
@@ -285,7 +295,7 @@ mod tests {
     #[sqlx::test]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from("1/5 * * * * *")?;
+        config.scheduler.trackers_run = "1/5 * * * * *".to_string();
 
         let api = mock_api_with_config(pool, config).await?;
 
@@ -316,7 +326,7 @@ mod tests {
     #[sqlx::test]
     async fn can_resume_job(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from("0 0 * * * *")?;
+        config.scheduler.trackers_run = "0 0 * * * *".to_string();
 
         let api = mock_api_with_config(pool, config).await?;
 
@@ -355,7 +365,7 @@ mod tests {
     #[sqlx::test]
     async fn remove_pending_trackers_jobs_if_zero_revisions(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from(mock_schedule_in_sec(2).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_sec(2);
 
         let mut scheduler = mock_scheduler(&pool).await?;
 
@@ -409,7 +419,7 @@ mod tests {
     #[sqlx::test]
     async fn remove_pending_trackers_jobs_if_disabled(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from(mock_schedule_in_sec(2).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_sec(2);
 
         let mut scheduler = mock_scheduler(&pool).await?;
 
@@ -456,7 +466,7 @@ mod tests {
     #[sqlx::test]
     async fn can_run(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from(mock_schedule_in_sec(3).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_sec(3);
 
         let server = MockServer::start();
         config.components.web_scraper_url = Url::parse(&server.base_url())?;
@@ -568,7 +578,7 @@ mod tests {
     #[sqlx::test]
     async fn schedules_task_when_content_change(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from(mock_schedule_in_sec(3).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_sec(3);
 
         let server = MockServer::start();
         config.components.web_scraper_url = Url::parse(&server.base_url())?;
@@ -721,7 +731,7 @@ mod tests {
     #[sqlx::test]
     async fn schedules_task_when_content_change_check_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run = Schedule::try_from(mock_schedule_in_sec(3).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_sec(3);
         config.smtp = config.smtp.map(|config| SmtpConfig {
             catch_all: Some(SmtpCatchAllConfig {
                 recipient: "dev@retrack.dev".to_string(),
@@ -879,8 +889,7 @@ mod tests {
     #[sqlx::test]
     async fn retries_when_content_change_check_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run =
-            Schedule::try_from(mock_schedule_in_secs(&[3, 6]).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_secs(&[3, 6]);
         config.smtp = config.smtp.map(|config| SmtpConfig {
             catch_all: Some(SmtpCatchAllConfig {
                 recipient: "dev@retrack.dev".to_string(),
@@ -1076,8 +1085,7 @@ mod tests {
         pool: PgPool,
     ) -> anyhow::Result<()> {
         let mut config = mock_config()?;
-        config.scheduler.trackers_run =
-            Schedule::try_from(mock_schedule_in_secs(&[3, 6]).as_str())?;
+        config.scheduler.trackers_run = mock_schedule_in_secs(&[3, 6]);
 
         let server = MockServer::start();
         config.components.web_scraper_url = Url::parse(&server.base_url())?;

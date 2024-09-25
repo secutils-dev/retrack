@@ -1,7 +1,7 @@
 mod api_ext;
+mod cron_ext;
 mod database_ext;
 mod job_ext;
-mod schedule_ext;
 mod scheduler_job;
 mod scheduler_job_config;
 mod scheduler_job_metadata;
@@ -20,8 +20,8 @@ use tokio_cron_scheduler::{
 use tracing::{debug, error, warn};
 
 pub use self::{
-    schedule_ext::ScheduleExt, scheduler_job::SchedulerJob,
-    scheduler_job_config::SchedulerJobConfig, scheduler_job_metadata::SchedulerJobMetadata,
+    cron_ext::CronExt, scheduler_job::SchedulerJob, scheduler_job_config::SchedulerJobConfig,
+    scheduler_job_metadata::SchedulerJobMetadata,
     scheduler_job_retry_state::SchedulerJobRetryState,
     scheduler_job_retry_strategy::SchedulerJobRetryStrategy,
 };
@@ -330,9 +330,7 @@ pub mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(
-                TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 6 2030"),
-            )
+            .create_tracker(TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 6"))
             .await?;
         api.trackers()
             .update_tracker_job(tracker.id, Some(trackers_trigger_job_id))
@@ -344,7 +342,7 @@ pub mod tests {
             &mock_scheduler_job(
                 trackers_trigger_job_id,
                 SchedulerJob::TrackersTrigger,
-                "1 2 3 4 5 6 2030",
+                "1 2 3 4 5 6",
             ),
         )
         .await?;
@@ -353,13 +351,13 @@ pub mod tests {
             &mock_scheduler_job(
                 trackers_schedule_job_id,
                 SchedulerJob::TrackersSchedule,
-                "0 * 0 * * * *",
+                "0 * 0 * * *",
             ),
         )
         .await?;
         mock_upsert_scheduler_job(
             &api.db,
-            &mock_scheduler_job(tasks_run_job_id, SchedulerJob::TasksRun, "0 * 2 * * * *"),
+            &mock_scheduler_job(tasks_run_job_id, SchedulerJob::TasksRun, "0 * 2 * * *"),
         )
         .await?;
 
@@ -412,7 +410,7 @@ pub mod tests {
                     ],
                 ),
                 Some(
-                    "0 * 0 * * * *",
+                    "0 * 0 * * *",
                 ),
             ),
             (
@@ -424,7 +422,7 @@ pub mod tests {
                     ],
                 ),
                 Some(
-                    "0 * 1 * * * *",
+                    "0 * 1 * * *",
                 ),
             ),
             (
@@ -436,7 +434,7 @@ pub mod tests {
                     ],
                 ),
                 Some(
-                    "0 * 2 * * * *",
+                    "0 * 2 * * *",
                 ),
             ),
         ]
@@ -519,7 +517,7 @@ pub mod tests {
                     ],
                 ),
                 Some(
-                    "0 * 0 * * * *",
+                    "0 * 0 * * *",
                 ),
             ),
             (
@@ -531,7 +529,7 @@ pub mod tests {
                     ],
                 ),
                 Some(
-                    "0 * 1 * * * *",
+                    "0 * 1 * * *",
                 ),
             ),
             (
@@ -543,7 +541,7 @@ pub mod tests {
                     ],
                 ),
                 Some(
-                    "0 * 2 * * * *",
+                    "0 * 2 * * *",
                 ),
             ),
         ]

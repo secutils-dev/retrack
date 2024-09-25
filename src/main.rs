@@ -72,7 +72,6 @@ mod tests {
         database::Database,
         network::{DnsResolver, Network},
     };
-    use cron::Schedule;
     use lettre::transport::stub::AsyncStubTransport;
     use std::{ops::Add, time::Duration};
     use time::OffsetDateTime;
@@ -106,9 +105,9 @@ mod tests {
             }),
             components: ComponentsConfig::default(),
             scheduler: SchedulerJobsConfig {
-                trackers_schedule: Schedule::try_from("0 * 0 * * * *")?,
-                trackers_run: Schedule::try_from("0 * 1 * * * *")?,
-                tasks_run: Schedule::try_from("0 * 2 * * * *")?,
+                trackers_schedule: "0 * 0 * * *".to_string(),
+                trackers_run: "0 * 1 * * *".to_string(),
+                tasks_run: "0 * 2 * * *".to_string(),
             },
             trackers: TrackersConfig {
                 restrict_to_public_urls: false,
