@@ -9,6 +9,8 @@ use lettre::{
     message::{header::ContentType, Attachment, MultiPart, SinglePart},
     Message,
 };
+use reqwest_middleware::ClientBuilder;
+use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use std::cmp;
 use time::OffsetDateTime;
 use tracing::{debug, error};
@@ -176,7 +178,9 @@ where
     /// Send HTTP request with the specified parameters.
     async fn send_http_request(&self, task: HttpTaskType, _: OffsetDateTime) -> anyhow::Result<()> {
         // Start building request.
-        let client = reqwest::Client::new();
+        let client = ClientBuilder::new(reqwest::Client::new())
+            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
+            .build();
         let request_builder = client.request(task.method, task.url);
 
         // Add headers, if any.

@@ -28,6 +28,8 @@ use cron::Schedule;
 use futures::Stream;
 use http::Method;
 use lettre::message::Mailbox;
+use reqwest_middleware::ClientBuilder;
+use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use std::{collections::HashSet, str::FromStr, time::Duration};
 use time::OffsetDateTime;
 use tracing::{debug, info};
@@ -680,7 +682,10 @@ where
             scraper_request
         };
 
-        let scraper_response = reqwest::Client::new()
+        let client = ClientBuilder::new(reqwest::Client::new())
+            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
+            .build();
+        let scraper_response = client
             .post(format!(
                 "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()

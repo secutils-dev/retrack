@@ -80,7 +80,11 @@ Accept: application/json
   },
   "actions": [
     { "type": "log" },
-    { "type": "webhook", "url": "https://retrack.dev" }
+    {
+      "type": "webhook",
+      "url": "https://retrack.dev",
+      "headers": { "x-cool-header":  "x-cool-value" }
+    }
   ],
   "config": {
     "revisions": 10,

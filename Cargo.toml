@@ -32,6 +32,8 @@ mediatype = "0.19.18"
 postcard = { version = "1.0.10", default-features = false }
 regex = "1.10.6"
 reqwest = { version = "0.12.7", default-features = false }
+reqwest-middleware = "0.3.3"
+reqwest-tracing = "0.5.3"
 rust-embed = "8.5.0"
 serde = "1.0.210"
 serde_bytes = "0.11.15"
@@ -84,6 +86,7 @@ default = [
     "postcard/use-std",
     "reqwest/json",
     "reqwest/rustls-tls-native-roots",
+    "reqwest-middleware/json",
     "serde_json/arbitrary_precision",
     "serde_with/time_0_3",
     "sqlx/json",
