@@ -4225,8 +4225,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-cron-scheduler"
-version = "0.11.0"
-source = "git+https://github.com/azasypkin/tokio-cron-scheduler.git?branch=fix-time-till-next-job#d804fe9a64973ee65c471d466d18bda98167fdd1"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2594dd7c2abbbafbb1c78d167fd10860dc7bd75f814cb051a1e0d3e796b9702"
 dependencies = [
  "chrono",
  "cron",
