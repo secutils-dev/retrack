@@ -11,6 +11,7 @@ pub use self::{
 use crate::{
     api::Api,
     config::TrackersConfig,
+    database::Database,
     error::Error as RetrackError,
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{CronExt, SchedulerJobRetryStrategy},
@@ -31,7 +32,6 @@ use lettre::message::Mailbox;
 use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use std::{collections::HashSet, str::FromStr, time::Duration};
-use time::OffsetDateTime;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -114,7 +114,7 @@ where
 
     /// Creates a new web page content tracker.
     pub async fn create_tracker(&self, params: TrackerCreateParams) -> anyhow::Result<Tracker> {
-        let created_at = OffsetDateTime::now_utc();
+        let created_at = Database::utc_now()?;
         let tracker = Tracker {
             id: Uuid::now_v7(),
             name: params.name,
@@ -193,7 +193,7 @@ where
                 .map(Self::normalize_tracker_tags)
                 .unwrap_or(existing_tracker.tags),
             actions: params.actions.unwrap_or(existing_tracker.actions),
-            updated_at: OffsetDateTime::now_utc(),
+            updated_at: Database::utc_now()?,
             job_id,
             ..existing_tracker
         };
@@ -367,7 +367,7 @@ where
                                 content: Ok(latest_value.to_string()),
                             }),
                         }),
-                        OffsetDateTime::now_utc(),
+                        Database::utc_now()?,
                     )
                     .await?;
                 info!(
@@ -386,7 +386,7 @@ where
                             headers: action.headers.clone(),
                             body: Some(serde_json::to_vec(&latest_value)?),
                         }),
-                        OffsetDateTime::now_utc(),
+                        Database::utc_now()?,
                     )
                     .await?;
                 info!(
@@ -731,7 +731,7 @@ where
                     tracker.id
                 )
             })?),
-            created_at: OffsetDateTime::now_utc(),
+            created_at: Database::utc_now()?,
         })
     }
 

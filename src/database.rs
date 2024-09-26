@@ -1,5 +1,6 @@
 use anyhow::Context;
 use sqlx::{PgPool, Pool, Postgres};
+use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct Database {
@@ -16,6 +17,12 @@ impl Database {
             .with_context(|| "Failed to migrate database")?;
 
         Ok(Database { pool })
+    }
+
+    /// Returns current UTC time, truncated to microseconds to match the database precision.
+    pub fn utc_now() -> anyhow::Result<OffsetDateTime> {
+        let now = OffsetDateTime::now_utc();
+        Ok(now.replace_nanosecond(now.microsecond() * 1000)?)
     }
 }
 
