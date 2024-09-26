@@ -21,27 +21,27 @@
     "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test --watch ./src/tests.ts"
   },
   "dependencies": {
-    "@fastify/compress": "^7.0.3",
+    "@fastify/compress": "^8.0.1",
     "dotenv": "^16.4.5",
-    "fastify": "^4.28.1",
+    "fastify": "^5.0.0",
     "node-cache": "^5.1.2",
     "playwright-core": "1.46.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
-    "@eslint/js": "^9.10.0",
-    "@types/node": "^22.5.4",
+    "@eslint/js": "^9.11.1",
+    "@types/node": "^22.7.2",
     "@types/ws": "^8.5.12",
-    "eslint": "^9.10.0",
+    "eslint": "^9.11.1",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "globals": "^15.9.0",
-    "nodemon": "^3.1.4",
+    "nodemon": "^3.1.7",
     "pino-pretty": "^11.2.2",
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4",
-    "typescript-eslint": "^8.4.0",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.7.0",
     "ws": "^8.18.0"
   }
 }

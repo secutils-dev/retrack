@@ -46,11 +46,15 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
     {
       schema: {
         body: {
-          extractor: { type: 'string' },
-          previousContent: {},
-          timeout: { type: 'number', nullable: true },
-          userAgent: { type: 'string', nullable: true },
-          ignoreHTTPSErrors: { type: 'boolean', nullable: true },
+          type: 'object',
+          properties: {
+            extractor: { type: 'string' },
+            previousContent: {},
+            timeout: { type: 'number' },
+            userAgent: { type: 'string' },
+            ignoreHTTPSErrors: { type: 'boolean' },
+          },
+          required: ['extractor'],
         },
       },
     },

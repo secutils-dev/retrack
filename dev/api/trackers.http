@@ -89,7 +89,7 @@ Accept: application/json
   "config": {
     "revisions": 10,
     "job": {
-      "schedule": "0 */1 * * * * *"
+      "schedule": "0 */1 * * * *"
     }
   },
   "tags": ["app:test"]
