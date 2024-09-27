@@ -37,7 +37,6 @@ pub struct RawTrackerConfig<'s> {
     #[serde(borrow)]
     target: RawTrackerTarget<'s>,
     actions: Vec<RawTrackerAction<'s>>,
-    headers: Option<Cow<'s, HashMap<String, String>>>,
     job: Option<RawSchedulerJobConfig<'s>>,
 }
 
@@ -169,7 +168,6 @@ impl TryFrom<RawTracker> for Tracker {
             config: TrackerConfig {
                 revisions: raw_config.revisions,
                 timeout: raw_config.timeout,
-                headers: raw_config.headers.map(Cow::into_owned),
                 job: job_config,
             },
             tags: raw.tags,
@@ -264,7 +262,6 @@ impl TryFrom<&Tracker> for RawTracker {
                     }),
                 },
                 actions: item.actions.iter().map(|action| action.into()).collect(),
-                headers: item.config.headers.as_ref().map(Cow::Borrowed),
                 job: job_config,
             })?,
             tags: item.tags.clone(),
@@ -355,7 +352,7 @@ mod tests {
             32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116,
             116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39,
             41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 97, 119, 97, 105, 116, 32, 112, 46, 99,
-            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 0, 0, 0, 0, 0,
+            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 0, 0, 0, 0,
         ];
         assert_eq!(
             Tracker::try_from(RawTracker {
@@ -383,7 +380,6 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 1,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
                     job: None,
                 },
                 tags: vec!["tag".to_string()],
@@ -405,8 +401,7 @@ mod tests {
             114, 97, 99, 107, 46, 100, 101, 118, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114,
             101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 1, 3, 71, 69, 84, 1, 1, 12, 99, 111,
             110, 116, 101, 110, 116, 45, 116, 121, 112, 101, 10, 116, 101, 120, 116, 47, 112, 108,
-            97, 105, 110, 1, 1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107,
-            105, 101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
+            97, 105, 110, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
             120, 0, 5,
         ];
         assert_eq!(
@@ -435,11 +430,6 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 1,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Some(
-                        [("cookie".to_string(), "my-cookie".to_string())]
-                            .into_iter()
-                            .collect()
-                    ),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * *".to_string(),
                         retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
@@ -474,7 +464,7 @@ mod tests {
             100, 101, 118, 47, 1, 4, 80, 79, 83, 84, 1, 1, 12, 99, 111, 110, 116, 101, 110, 116,
             45, 116, 121, 112, 101, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47,
             106, 115, 111, 110, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106,
-            115, 111, 110, 1, 2, 0, 0,
+            115, 111, 110, 1, 2, 0,
         ];
         assert_eq!(
             Tracker::try_from(RawTracker {
@@ -525,7 +515,7 @@ mod tests {
             32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116,
             116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39,
             41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 97, 119, 97, 105, 116, 32, 112, 46, 99,
-            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 0, 0, 0, 0, 0,
+            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 0, 0, 0, 0,
         ];
         assert_eq!(
             RawTracker::try_from(&Tracker {
@@ -540,7 +530,6 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 1,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Default::default(),
                     job: None,
                 },
                 tags: vec!["tag".to_string()],
@@ -575,8 +564,7 @@ mod tests {
             114, 97, 99, 107, 46, 100, 101, 118, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114,
             101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 1, 3, 71, 69, 84, 1, 1, 12, 99, 111,
             110, 116, 101, 110, 116, 45, 116, 121, 112, 101, 10, 116, 101, 120, 116, 47, 112, 108,
-            97, 105, 110, 1, 1, 6, 99, 111, 111, 107, 105, 101, 9, 109, 121, 45, 99, 111, 111, 107,
-            105, 101, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
+            97, 105, 110, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
             120, 0, 5,
         ];
         assert_eq!(
@@ -592,11 +580,6 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 1,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Some(
-                        [("cookie".to_string(), "my-cookie".to_string())]
-                            .into_iter()
-                            .collect()
-                    ),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * *".to_string(),
                         retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
@@ -652,11 +635,6 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 1,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Some(
-                        [("cookie".to_string(), "my-cookie".to_string())]
-                            .into_iter()
-                            .collect()
-                    ),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * *".to_string(),
                         retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
@@ -704,7 +682,7 @@ mod tests {
             100, 101, 118, 47, 1, 4, 80, 79, 83, 84, 1, 1, 12, 99, 111, 110, 116, 101, 110, 116,
             45, 116, 121, 112, 101, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47,
             106, 115, 111, 110, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106,
-            115, 111, 110, 1, 2, 0, 0,
+            115, 111, 110, 1, 2, 0,
         ];
         assert_eq!(
             RawTracker::try_from(&Tracker {

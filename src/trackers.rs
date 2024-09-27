@@ -109,7 +109,6 @@ pub mod tests {
                     config: TrackerConfig {
                         revisions,
                         timeout: Some(Duration::from_millis(2000)),
-                        headers: Default::default(),
                         job: None,
                     },
                     tags: vec![],

@@ -233,11 +233,11 @@ where
         let revisions = self.trackers.get_tracker_data(tracker.id).await?;
         let mut new_revision = match tracker.target {
             TrackerTarget::Page(_) => {
-                self.fetch_tracker_page_data_revision(&tracker, &revisions)
+                self.create_tracker_page_data_revision(&tracker, &revisions)
                     .await?
             }
             TrackerTarget::Api(_) => {
-                self.fetch_tracker_api_data_revision(&tracker, &revisions)
+                self.create_tracker_api_data_revision(&tracker, &revisions)
                     .await?
             }
         };
@@ -669,8 +669,8 @@ where
         Ok(())
     }
 
-    /// Fetches data revision for a tracker with `Page` target
-    async fn fetch_tracker_page_data_revision(
+    /// Creates data revision for a tracker with `Page` target
+    async fn create_tracker_page_data_revision(
         &self,
         tracker: &Tracker,
         revisions: &[TrackerDataRevision],
@@ -735,8 +735,8 @@ where
         })
     }
 
-    /// Fetches data revision for a tracker with `Api` target
-    async fn fetch_tracker_api_data_revision(
+    /// Creates data revision for a tracker with `Api` target
+    async fn create_tracker_api_data_revision(
         &self,
         tracker: &Tracker,
         _revisions: &[TrackerDataRevision],
@@ -807,7 +807,6 @@ mod tests {
                     .with_config(TrackerConfig {
                         revisions: 3,
                         timeout: Some(Duration::from_millis(2500)),
-                        headers: Default::default(),
                         job: Some(SchedulerJobConfig {
                             schedule: "@hourly".to_string(),
                             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
@@ -872,7 +871,6 @@ mod tests {
         let config = TrackerConfig {
             revisions: 3,
             timeout: Some(Duration::from_millis(2500)),
-            headers: Default::default(),
             job: None,
         };
         let tags = vec!["tag".to_string()];
@@ -1391,7 +1389,6 @@ mod tests {
                 config: TrackerConfig {
                     revisions: 3,
                     timeout: Some(Duration::from_millis(2500)),
-                    headers: Default::default(),
                     job: None,
                 },
                 tags: vec!["tag".to_string()],
@@ -2975,8 +2972,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             })
-                        }),
-                        ..tracker.config.clone()
+                        })
                     }),
                     tags: Some(vec!["tag".to_string()]),
                     actions: Some(vec![TrackerAction::ServerLog]),
@@ -3059,8 +3055,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             })
-                        }),
-                        ..tracker.config.clone()
+                        })
                     }),
                     tags: Some(vec!["tag_two".to_string()]),
                     actions: Some(vec![TrackerAction::Email(EmailAction {
@@ -3137,8 +3132,7 @@ mod tests {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
                             })
-                        }),
-                        ..tracker.config.clone()
+                        })
                     }),
                     tags: Some(vec!["tag_two".to_string()]),
                     actions: Some(vec![TrackerAction::Email(EmailAction {

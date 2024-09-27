@@ -120,11 +120,6 @@ mod tests {
                 config: Some(TrackerConfig {
                     revisions: 3,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Some(
-                        [("cookie".to_string(), "my-cookie".to_string())]
-                            .into_iter()
-                            .collect(),
-                    ),
                     job: None
                 }),
                 tags: None,
@@ -176,11 +171,6 @@ mod tests {
                 config: Some(TrackerConfig {
                     revisions: 3,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Some(
-                        [("cookie".to_string(), "my-cookie".to_string())]
-                            .into_iter()
-                            .collect(),
-                    ),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * *".to_string(),
                         retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
@@ -241,11 +231,6 @@ mod tests {
                 config: Some(TrackerConfig {
                     revisions: 3,
                     timeout: Some(Duration::from_millis(2000)),
-                    headers: Some(
-                        [("cookie".to_string(), "my-cookie".to_string())]
-                            .into_iter()
-                            .collect(),
-                    ),
                     job: Some(SchedulerJobConfig {
                         schedule: "0 0 * * *".to_string(),
                         retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {

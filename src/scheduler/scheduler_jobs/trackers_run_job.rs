@@ -494,11 +494,6 @@ mod tests {
             config: TrackerConfig {
                 revisions: 1,
                 timeout: None,
-                headers: Some(
-                    [("cookie".to_string(), "my-cookie".to_string())]
-                        .into_iter()
-                        .collect(),
-                ),
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: None
@@ -606,7 +601,6 @@ mod tests {
             config: TrackerConfig {
                 revisions: 2,
                 timeout: Some(Duration::from_secs(2)),
-                headers: Default::default(),
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: None
@@ -767,7 +761,6 @@ mod tests {
             config: TrackerConfig {
                 revisions: 2,
                 timeout: Some(Duration::from_secs(2)),
-                headers: Default::default(),
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: None
@@ -924,7 +917,6 @@ mod tests {
             config: TrackerConfig {
                 revisions: 2,
                 timeout: Some(Duration::from_secs(2)),
-                headers: Default::default(),
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
@@ -1113,7 +1105,6 @@ mod tests {
             config: TrackerConfig {
                 revisions: 2,
                 timeout: Some(Duration::from_secs(2)),
-                headers: Default::default(),
                 job: Some(SchedulerJobConfig {
                     schedule: tracker_schedule,
                     retry_strategy: Some(SchedulerJobRetryStrategy::Constant {

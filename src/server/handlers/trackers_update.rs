@@ -124,11 +124,6 @@ mod tests {
             timeout: Some(
                 5s,
             ),
-            headers: Some(
-                {
-                    "cookie": "my-cookie",
-                },
-            ),
             job: Some(
                 SchedulerJobConfig {
                     schedule: "@daily",

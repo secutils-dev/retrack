@@ -171,15 +171,6 @@ mod tests {
             })
         );
         assert_eq!(
-            trackers[0].config.headers,
-            Some(
-                [("cookie".to_string(), "my-cookie".to_string())]
-                    .iter()
-                    .cloned()
-                    .collect()
-            )
-        );
-        assert_eq!(
             trackers[0].config.job,
             Some(SchedulerJobConfig {
                 schedule: "@daily".to_string(),
