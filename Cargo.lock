@@ -781,9 +781,6 @@ name = "bytes"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bytestring"
@@ -3215,7 +3212,6 @@ dependencies = [
  "actix-web-lab",
  "anyhow",
  "async-stream",
- "bytes",
  "chrono",
  "clap",
  "croner",

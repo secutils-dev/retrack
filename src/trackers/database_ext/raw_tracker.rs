@@ -70,6 +70,7 @@ struct RawApiTarget<'s> {
     #[serde(with = "http_serde::option::method", default)]
     method: Option<Method>,
     headers: Option<HashMap<Cow<'s, str>, Cow<'s, str>>>,
+    body: Option<Vec<u8>>,
     #[serde(borrow)]
     media_type: Option<MediaType<'s>>,
 }
@@ -156,6 +157,10 @@ impl TryFrom<RawTracker> for Tracker {
                     } else {
                         None
                     },
+                    body: target
+                        .body
+                        .map(|body| serde_json::from_slice(&body))
+                        .transpose()?,
                     media_type: target.media_type.map(|media_type| media_type.into()),
                 }),
             },
@@ -255,6 +260,7 @@ impl TryFrom<&Tracker> for RawTracker {
                                 })
                                 .collect()
                         }),
+                        body: target.body.as_ref().map(serde_json::to_vec).transpose()?,
                         media_type: target
                             .media_type
                             .as_ref()
@@ -340,6 +346,7 @@ mod tests {
         },
     };
     use http::{header::CONTENT_TYPE, Method};
+    use serde_json::json;
     use std::{collections::HashMap, time::Duration};
     use time::OffsetDateTime;
     use uuid::uuid;
@@ -463,8 +470,9 @@ mod tests {
             3, 0, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46,
             100, 101, 118, 47, 1, 4, 80, 79, 83, 84, 1, 1, 12, 99, 111, 110, 116, 101, 110, 116,
             45, 116, 121, 112, 101, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47,
-            106, 115, 111, 110, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106,
-            115, 111, 110, 1, 2, 0,
+            106, 115, 111, 110, 1, 15, 123, 34, 107, 101, 121, 34, 58, 34, 118, 97, 108, 117, 101,
+            34, 125, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106, 115, 111,
+            110, 1, 2, 0,
         ];
         assert_eq!(
             Tracker::try_from(RawTracker {
@@ -493,6 +501,7 @@ mod tests {
                             .collect::<HashMap<_, _>>())
                             .try_into()?,
                     ),
+                    body: Some(json!({ "key": "value" })),
                     media_type: Some("application/json".parse()?),
                 }),
                 config: TrackerConfig::default(),
@@ -681,8 +690,9 @@ mod tests {
             3, 0, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46,
             100, 101, 118, 47, 1, 4, 80, 79, 83, 84, 1, 1, 12, 99, 111, 110, 116, 101, 110, 116,
             45, 116, 121, 112, 101, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47,
-            106, 115, 111, 110, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106,
-            115, 111, 110, 1, 2, 0,
+            106, 115, 111, 110, 1, 15, 123, 34, 107, 101, 121, 34, 58, 34, 118, 97, 108, 117, 101,
+            34, 125, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106, 115, 111,
+            110, 1, 2, 0,
         ];
         assert_eq!(
             RawTracker::try_from(&Tracker {
@@ -698,6 +708,7 @@ mod tests {
                             .collect::<HashMap<_, _>>())
                             .try_into()?,
                     ),
+                    body: Some(json!({ "key": "value" })),
                     media_type: Some("application/json".parse()?),
                 }),
                 config: TrackerConfig::default(),

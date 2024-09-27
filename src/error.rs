@@ -79,7 +79,6 @@ mod tests {
     use super::{Error, ErrorKind};
     use actix_web::{body::MessageBody, http::StatusCode, ResponseError};
     use anyhow::anyhow;
-    use bytes::Bytes;
     use insta::assert_debug_snapshot;
 
     #[test]
@@ -104,7 +103,7 @@ mod tests {
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body, Bytes::from_static(b"{\"message\":\"Uh oh.\"}"));
+        assert_eq!(body.as_ref(), b"{\"message\":\"Uh oh.\"}");
 
         let error = Error::client_with_root_cause(anyhow!("Something sensitive").context("Uh oh."));
 
@@ -131,7 +130,7 @@ mod tests {
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body, Bytes::from_static(b"{\"message\":\"Uh oh.\"}"));
+        assert_eq!(body.as_ref(), b"{\"message\":\"Uh oh.\"}");
 
         Ok(())
     }
@@ -158,10 +157,7 @@ mod tests {
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(
-            body,
-            Bytes::from_static(b"{\"message\":\"Internal Server Error\"}")
-        );
+        assert_eq!(body.as_ref(), b"{\"message\":\"Internal Server Error\"}");
 
         Ok(())
     }
@@ -198,7 +194,7 @@ mod tests {
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body, Bytes::from_static(b"{\"message\":\"Three\"}"));
+        assert_eq!(body.as_ref(), b"{\"message\":\"Three\"}");
 
         Ok(())
     }

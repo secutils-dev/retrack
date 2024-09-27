@@ -61,6 +61,7 @@ mod tests {
             url: url::Url::parse("https://retrack.dev/")?,
             method: None,
             headers: None,
+            body: None,
             media_type: None,
         });
         assert_eq!(
@@ -72,6 +73,7 @@ mod tests {
             url: url::Url::parse("https://retrack.dev/")?,
             method: Some(Method::PUT),
             headers: None,
+            body: None,
             media_type: None,
         });
         assert_eq!(
@@ -91,6 +93,7 @@ mod tests {
                 .collect::<HashMap<_, _>>())
                     .try_into()?,
             ),
+            body: None,
             media_type: None,
         });
         assert_eq!(
@@ -157,6 +160,7 @@ mod tests {
             url: url::Url::parse("https://retrack.dev")?,
             method: None,
             headers: None,
+            body: None,
             media_type: None,
         });
         assert_eq!(
@@ -170,6 +174,7 @@ mod tests {
             url: url::Url::parse("https://retrack.dev")?,
             method: Some(Method::PUT),
             headers: None,
+            body: None,
             media_type: None,
         });
         assert_eq!(
@@ -192,6 +197,7 @@ mod tests {
                 .collect::<HashMap<_, _>>())
                     .try_into()?,
             ),
+            body: None,
             media_type: None,
         });
         assert_eq!(

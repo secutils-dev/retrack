@@ -837,6 +837,7 @@ mod tests {
                             .collect::<HashMap<_, _>>())
                             .try_into()?,
                     ),
+                    body: Some(json!({ "key": "value" })),
                     media_type: Some("application/json".parse()?),
                 })),
             )
@@ -1328,6 +1329,7 @@ mod tests {
                     url: Url::parse("ftp://retrack.dev")?,
                     method: None,
                     headers: None,
+                    body: None,
                     media_type: None,
                 }),
                 config: config.clone(),
@@ -1360,6 +1362,7 @@ mod tests {
                     url: Url::parse("https://127.0.0.1")?,
                     method: None,
                     headers: None,
+                    body: None,
                     media_type: None,
                 }),
                 config: config.clone(),
@@ -2012,6 +2015,7 @@ mod tests {
                     url: Url::parse("ftp://retrack.dev")?,
                     method: None,
                     headers: None,
+                    body: None,
                     media_type: None,
                 })),
                 ..Default::default()
@@ -2041,6 +2045,7 @@ mod tests {
                     url: Url::parse("https://127.0.0.1")?,
                     method: None,
                     headers: None,
+                    body: None,
                     media_type: None,
                 })),
                 ..Default::default()
