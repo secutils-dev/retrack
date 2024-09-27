@@ -27,7 +27,7 @@ Accept: application/json
   }
 }
 
-### Create tracker
+### Create tracker (target: page)
 < {%
   const extractor = `
     export async function execute(page) {
@@ -57,7 +57,7 @@ Accept: application/json
   "tags": ["app:retrack"]
 }
 
-### Create tracker #2
+### Create tracker (target: page)
 < {%
   const extractor = `
     export async function execute(page, previousContent) {
@@ -95,8 +95,37 @@ Accept: application/json
   "tags": ["app:test"]
 }
 
+### Create tracker (target: api)
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[Test] Counter (api)",
+  "target": {
+    "type": "api",
+    "url": "https://retrack-demo.webhooks.secutils.dev/test/json",
+    "headers": {
+      "x-header-name": "x-header-value"
+    },
+    "body": {
+      "key": "value"
+    }
+  },
+  "actions": [
+    { "type": "log" }
+  ],
+  "config": {
+    "revisions": 10,
+    "job": {
+      "schedule": "0 */1 * * * *"
+    }
+  },
+  "tags": ["app:test"]
+}
+
 ### Disable tracker
-PUT {{host}}/api/trackers/01921a88-53de-79c1-b7f7-a5f6316ee461
+PUT {{host}}/api/trackers/01922cdf-133e-72f2-9b35-f21f59e86324
 Content-Type: application/json
 Accept: application/json
 

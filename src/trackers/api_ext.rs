@@ -675,11 +675,19 @@ where
         tracker: &Tracker,
         revisions: &[TrackerDataRevision],
     ) -> anyhow::Result<TrackerDataRevision> {
-        let scraper_request = WebScraperContentRequest::try_from(tracker)?;
-        let scraper_request = if let Some(revision) = revisions.last() {
-            scraper_request.set_previous_content(revision.data.original())
-        } else {
-            scraper_request
+        let TrackerTarget::Page(ref target) = tracker.target else {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{}') target is not `Page`.",
+                tracker.id
+            )));
+        };
+
+        let scraper_request = WebScraperContentRequest {
+            extractor: target.extractor.as_ref(),
+            user_agent: target.user_agent.as_deref(),
+            ignore_https_errors: target.ignore_https_errors,
+            timeout: tracker.config.timeout,
+            previous_content: revisions.last().map(|rev| rev.data.original()),
         };
 
         let client = ClientBuilder::new(reqwest::Client::new())
@@ -735,20 +743,73 @@ where
         })
     }
 
-    /// Creates data revision for a tracker with `Api` target
+    /// Creates data revision for a tracker with `Api` target.
     async fn create_tracker_api_data_revision(
         &self,
         tracker: &Tracker,
         _revisions: &[TrackerDataRevision],
     ) -> anyhow::Result<TrackerDataRevision> {
-        let TrackerTarget::Api(_) = tracker.target else {
+        let TrackerTarget::Api(ref target) = tracker.target else {
             bail!(RetrackError::client(format!(
-                "Tracker ('{}') target is not an API.",
+                "Tracker ('{}') target is not `Api`.",
                 tracker.id
             )));
         };
 
-        unimplemented!("Api target is not implemented yet.");
+        let client = ClientBuilder::new(reqwest::Client::new())
+            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
+            .build();
+        let request_builder = client.request(
+            target.method.as_ref().unwrap_or(&Method::GET).clone(),
+            target.url.clone(),
+        );
+
+        // Add headers, if any.
+        let request_builder = if let Some(ref headers) = target.headers {
+            request_builder.headers(headers.clone())
+        } else {
+            request_builder
+        };
+
+        // Add body, if any.
+        let request_builder = if let Some(ref body) = target.body {
+            request_builder.json(body)
+        } else {
+            request_builder
+        };
+
+        // Set timeout, if any.
+        let request_builder = if let Some(ref timeout) = tracker.config.timeout {
+            request_builder.timeout(*timeout)
+        } else {
+            request_builder
+        };
+
+        let api_response = client.execute(request_builder.build()?).await?;
+        if !api_response.status().is_success() {
+            let is_client_error = api_response.status().is_client_error();
+            if is_client_error {
+                bail!(RetrackError::client(api_response.text().await?));
+            } else {
+                bail!(
+                    "Unexpected scraper error for the tracker ('{}'): {}",
+                    tracker.id,
+                    api_response.text().await?
+                );
+            }
+        }
+
+        Ok(TrackerDataRevision {
+            id: Uuid::now_v7(),
+            tracker_id: tracker.id,
+            data: TrackerDataValue::new(api_response.json().await.map_err(|err| {
+                anyhow!(
+                    "Could not deserialize API response for the tracker ('{}'): {err:?}",
+                    tracker.id
+                )
+            })?),
+            created_at: Database::utc_now()?,
+        })
     }
 }
 
@@ -2318,7 +2379,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn properly_saves_revision(pool: PgPool) -> anyhow::Result<()> {
+    async fn properly_saves_page_target_revision(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
         config.components.web_scraper_url = Url::parse(&server.base_url())?;
@@ -2392,8 +2453,6 @@ mod tests {
                 .json_body_obj(content_two.value());
         });
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
         let revision = trackers
             .create_tracker_data_revision(tracker_one.id)
             .await?
@@ -2427,6 +2486,197 @@ mod tests {
             .create_tracker_data_revision(tracker_two.id)
             .await?;
         assert_eq!(revision.unwrap().data.value(), "\"rev_3\"");
+        content_mock.assert();
+
+        let tracker_one_data = trackers
+            .get_tracker_data(
+                tracker_one.id,
+                TrackerListRevisionsParams {
+                    refresh: false,
+                    calculate_diff: true,
+                },
+            )
+            .await?;
+        let tracker_two_data = trackers
+            .get_tracker_data(tracker_two.id, Default::default())
+            .await?;
+        assert_eq!(tracker_one_data.len(), 2);
+        assert_eq!(tracker_two_data.len(), 1);
+
+        assert_debug_snapshot!(
+            tracker_one_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: String("\"rev_1\""),
+                mods: None,
+            },
+            TrackerDataValue {
+                original: String("@@ -1 +1 @@\n-\"rev_1\"\n+\"rev_2\"\n"),
+                mods: None,
+            },
+        ]
+        "###
+        );
+        assert_debug_snapshot!(
+            tracker_two_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: String("\"rev_3\""),
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        let tracker_one_data = trackers
+            .get_tracker_data(
+                tracker_one.id,
+                TrackerListRevisionsParams {
+                    refresh: false,
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_debug_snapshot!(
+            tracker_one_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: String("\"rev_1\""),
+                mods: None,
+            },
+            TrackerDataValue {
+                original: String("\"rev_2\""),
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_saves_api_target_revision(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker_one = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/get-call").parse()?,
+                        method: None,
+                        headers: Some(HeaderMap::from_iter([(
+                            HeaderName::from_static("x-custom-header"),
+                            HeaderValue::from_static("x-custom-value"),
+                        )])),
+                        body: None,
+                        media_type: Some("application/json".parse()?),
+                    })),
+            )
+            .await?;
+        let tracker_two = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_two")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/post-call").parse()?,
+                        method: Some(Method::POST),
+                        headers: Some(HeaderMap::from_iter([(
+                            HeaderName::from_static("x-custom-header"),
+                            HeaderValue::from_static("x-custom-value"),
+                        )])),
+                        body: Some(json!({ "key": "value" })),
+                        media_type: Some("application/json".parse()?),
+                    })),
+            )
+            .await?;
+
+        let tracker_one_data = trackers
+            .get_tracker_data(tracker_one.id, Default::default())
+            .await?;
+        let tracker_two_data = trackers
+            .get_tracker_data(tracker_two.id, Default::default())
+            .await?;
+        assert!(tracker_one_data.is_empty());
+        assert!(tracker_two_data.is_empty());
+
+        let content_one = TrackerDataValue::new(json!("\"rev_1\""));
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content_one.value());
+        });
+
+        let tracker_one_data = trackers
+            .get_tracker_data(
+                tracker_one.id,
+                TrackerListRevisionsParams {
+                    refresh: true,
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        let tracker_two_data = trackers
+            .get_tracker_data(tracker_two.id, Default::default())
+            .await?;
+        assert_eq!(tracker_one_data.len(), 1);
+        assert_eq!(tracker_one_data[0].tracker_id, tracker_one.id);
+        assert_eq!(tracker_one_data[0].data, content_one);
+        assert!(tracker_two_data.is_empty());
+
+        content_mock.assert();
+        content_mock.delete();
+
+        let content_two = TrackerDataValue::new(json!("\"rev_2\""));
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content_two.value());
+        });
+
+        let revision = trackers
+            .create_tracker_data_revision(tracker_one.id)
+            .await?
+            .unwrap();
+        assert_eq!(revision.data.value(), "\"rev_2\"");
+        content_mock.assert();
+        content_mock.delete();
+
+        let tracker_one_data = trackers
+            .get_tracker_data(tracker_one.id, Default::default())
+            .await?;
+        let tracker_two_data = trackers
+            .get_tracker_data(tracker_two.id, Default::default())
+            .await?;
+        assert_eq!(tracker_one_data.len(), 2);
+        assert!(tracker_two_data.is_empty());
+
+        let content_two = TrackerDataValue::new(json!("\"rev_3\""));
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/post-call")
+                .header("x-custom-header", "x-custom-value")
+                .json_body(json!({ "key": "value" }));
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content_two.value());
+        });
+
+        let revision = trackers
+            .create_tracker_data_revision(tracker_two.id)
+            .await?;
+        assert_eq!(revision.unwrap().data.value(), "\"rev_3\"");
+
         content_mock.assert();
 
         let tracker_one_data = trackers

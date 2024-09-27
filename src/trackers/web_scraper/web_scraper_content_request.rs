@@ -1,5 +1,3 @@
-use crate::trackers::{Tracker, TrackerTarget};
-use anyhow::bail;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
@@ -30,41 +28,6 @@ pub struct WebScraperContentRequest<'a> {
 
     /// Optional content of the web page that has been extracted previously.
     pub previous_content: Option<&'a JsonValue>,
-}
-
-impl<'a> WebScraperContentRequest<'a> {
-    /// Sets the content that has been extracted from the page previously.
-    pub fn set_previous_content(self, previous_content: &'a JsonValue) -> Self {
-        Self {
-            previous_content: Some(previous_content),
-            ..self
-        }
-    }
-}
-
-impl<'t> TryFrom<&'t Tracker> for WebScraperContentRequest<'t> {
-    type Error = anyhow::Error;
-
-    fn try_from(tracker: &'t Tracker) -> Result<Self, Self::Error> {
-        let TrackerTarget::Page(ref target) = tracker.target else {
-            bail!(
-                "Tracker ('{}') target is not web page, instead got: {:?}",
-                tracker.id,
-                tracker.target
-            );
-        };
-
-        Ok(Self {
-            // Target properties.
-            extractor: target.extractor.as_str(),
-            user_agent: target.user_agent.as_deref(),
-            ignore_https_errors: target.ignore_https_errors,
-            // Config properties.
-            timeout: tracker.config.timeout,
-            // Non-tracker properties.
-            previous_content: None,
-        })
-    }
 }
 
 #[cfg(test)]
