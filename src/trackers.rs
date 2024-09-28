@@ -19,7 +19,9 @@ pub use self::{
     tracker_config::TrackerConfig,
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
-    tracker_target::{ApiTarget, PageTarget, TrackerTarget},
+    tracker_target::{
+        ApiTarget, ConfiguratorScriptContext, ConfiguratorScriptResult, PageTarget, TrackerTarget,
+    },
 };
 
 #[cfg(test)]

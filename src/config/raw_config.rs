@@ -1,6 +1,6 @@
 use crate::config::{
-    database_config::DatabaseConfig, ComponentsConfig, SchedulerJobsConfig, SmtpConfig,
-    TrackersConfig,
+    database_config::DatabaseConfig, ComponentsConfig, JsRuntimeConfig, SchedulerJobsConfig,
+    SmtpConfig, TrackersConfig,
 };
 use figment::{providers, providers::Format, value, Figment, Metadata, Profile, Provider};
 use serde_derive::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ pub struct RawConfig {
     pub trackers: TrackersConfig,
     /// Configuration for the SMTP functionality.
     pub smtp: Option<SmtpConfig>,
+    /// Configuration for the embedded JS Runtime.
+    pub js_runtime: JsRuntimeConfig,
 }
 
 impl RawConfig {
@@ -46,6 +48,7 @@ impl Default for RawConfig {
             components: ComponentsConfig::default(),
             scheduler: SchedulerJobsConfig::default(),
             trackers: TrackersConfig::default(),
+            js_runtime: JsRuntimeConfig::default(),
             smtp: None,
         }
     }
@@ -92,6 +95,10 @@ mod tests {
         max_revisions = 30
         min_schedule_interval = 10000
         restrict_to_public_urls = true
+
+        [js_runtime]
+        max_heap_size = 10485760
+        max_script_execution_time = 10000
         "###);
     }
 
@@ -112,6 +119,10 @@ mod tests {
 
         [components]
         web_scraper_url = 'http://localhost:7272/'
+        
+        [js_runtime]
+        max_heap_size = 20485760
+        max_script_execution_time = 20000
 
         [scheduler]
         trackers_schedule = '0 * * * * * *'
@@ -191,6 +202,10 @@ mod tests {
                 restrict_to_public_urls: true,
             },
             smtp: None,
+            js_runtime: JsRuntimeConfig {
+                max_heap_size: 20485760,
+                max_script_execution_time: 20s,
+            },
         }
         "###);
     }

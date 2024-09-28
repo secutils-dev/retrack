@@ -25,61 +25,27 @@ pub struct PageTarget {
 #[cfg(test)]
 mod tests {
     use crate::trackers::PageTarget;
-    use insta::assert_json_snapshot;
     use serde_json::json;
 
     #[test]
-    fn serialization() -> anyhow::Result<()> {
+    fn can_serialize_and_deserialize() -> anyhow::Result<()> {
         let target = PageTarget::default();
-        assert_json_snapshot!(target, @r###"
-        {
-          "extractor": ""
-        }
-        "###);
+        let target_json = json!({ "extractor": "" });
+        assert_eq!(serde_json::to_value(&target)?, target_json);
+        assert_eq!(serde_json::from_value::<PageTarget>(target_json)?, target);
 
         let target = PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         };
-        assert_json_snapshot!(target, @r###"
-        {
-          "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
-          "userAgent": "Retrack/1.0.0",
-          "ignoreHTTPSErrors": true
-        }
-        "###);
-
-        Ok(())
-    }
-
-    #[test]
-    fn deserialization() -> anyhow::Result<()> {
-        let target = PageTarget {
-            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-            user_agent: None,
-            ignore_https_errors: false,
-        };
-        assert_eq!(
-            serde_json::from_str::<PageTarget>(&json!({ "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }" }).to_string())?,
-            target
-        );
-
-        let target = PageTarget {
-            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-            user_agent: Some("Retrack/1.0.0".to_string()),
-            ignore_https_errors: true,
-        };
-        assert_eq!(
-            serde_json::from_str::<PageTarget>(
-                &json!({
-                    "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
-                    "userAgent": "Retrack/1.0.0",
-                    "ignoreHTTPSErrors": true
-                }).to_string()
-            )?,
-            target
-        );
+        let target_json = json!({
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "userAgent": "Retrack/1.0.0",
+            "ignoreHTTPSErrors": true
+        });
+        assert_eq!(serde_json::to_value(&target)?, target_json);
+        assert_eq!(serde_json::from_value::<PageTarget>(target_json)?, target);
 
         Ok(())
     }

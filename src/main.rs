@@ -4,6 +4,7 @@ mod api;
 mod config;
 mod database;
 mod error;
+mod js_runtime;
 mod network;
 mod scheduler;
 mod server;
@@ -80,7 +81,7 @@ mod tests {
 
     pub use crate::{config::tests::*, network::tests::*, scheduler::tests::*, trackers::tests::*};
     use crate::{
-        config::{DatabaseConfig, TrackersConfig},
+        config::{DatabaseConfig, JsRuntimeConfig, TrackersConfig},
         templates::create_templates,
     };
     use sqlx::{postgres::PgDatabaseError, PgPool};
@@ -113,6 +114,7 @@ mod tests {
                 restrict_to_public_urls: false,
                 ..Default::default()
             },
+            js_runtime: JsRuntimeConfig::default(),
         })
     }
 

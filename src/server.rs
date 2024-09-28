@@ -24,6 +24,7 @@ use utoipa_rapidoc::RapiDoc;
 
 use crate::{
     config::{Config, RawConfig},
+    js_runtime::JsRuntime,
     server::handlers::RetrackOpenApi,
 };
 pub use server_state::{GetStatusParams, SchedulerStatus, ServerState, Status};
@@ -76,6 +77,8 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
         Network::new(TokioDnsResolver::create(), email_transport),
         create_templates()?,
     ));
+
+    JsRuntime::init_platform();
 
     let scheduler = Scheduler::start(api.clone()).await?;
     let state = web::Data::new(ServerState::new(api, scheduler));

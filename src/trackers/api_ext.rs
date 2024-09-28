@@ -13,6 +13,7 @@ use crate::{
     config::TrackersConfig,
     database::Database,
     error::Error as RetrackError,
+    js_runtime::{JsRuntime, JsRuntimeConfig},
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{CronExt, SchedulerJobRetryStrategy},
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
@@ -20,19 +21,20 @@ use crate::{
         database_ext::TrackersDatabaseExt,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
-        ApiTarget, PageTarget, Tracker, TrackerAction, TrackerDataRevision, TrackerDataValue,
-        TrackerTarget, WebhookAction,
+        ApiTarget, ConfiguratorScriptContext, ConfiguratorScriptResult, PageTarget, Tracker,
+        TrackerAction, TrackerDataRevision, TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use croner::Cron;
 use futures::Stream;
 use http::Method;
 use lettre::message::Mailbox;
 use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{collections::HashSet, str::FromStr, time::Duration};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 /// Defines a maximum number of jobs that can be retrieved from the database at once.
@@ -747,13 +749,32 @@ where
     async fn create_tracker_api_data_revision(
         &self,
         tracker: &Tracker,
-        _revisions: &[TrackerDataRevision],
+        revisions: &[TrackerDataRevision],
     ) -> anyhow::Result<TrackerDataRevision> {
         let TrackerTarget::Api(ref target) = tracker.target else {
             bail!(RetrackError::client(format!(
                 "Tracker ('{}') target is not `Api`.",
                 tracker.id
             )));
+        };
+
+        // Run configurator script, if specified to check if there are any overrides to the request
+        // parameters need to be made.
+        let (body_override, headers_override) = if let Some(ref configurator) = target.configurator
+        {
+            let result = self
+                .execute_script_sync::<ConfiguratorScriptResult>(
+                    configurator.as_str(),
+                    ConfiguratorScriptContext {
+                        previous_content: revisions.last().map(|rev| &rev.data),
+                        body: target.body.as_ref(),
+                    },
+                )
+                .with_context(|| "Failed to execute \"configurator\" script.")?
+                .unwrap_or_default();
+            (result.body, result.headers)
+        } else {
+            (None, None)
         };
 
         let client = ClientBuilder::new(reqwest::Client::new())
@@ -765,15 +786,17 @@ where
         );
 
         // Add headers, if any.
-        let request_builder = if let Some(ref headers) = target.headers {
-            request_builder.headers(headers.clone())
+        let headers = headers_override.or_else(|| target.headers.clone());
+        let request_builder = if let Some(headers) = headers {
+            request_builder.headers(headers)
         } else {
             request_builder
         };
 
         // Add body, if any.
-        let request_builder = if let Some(ref body) = target.body {
-            request_builder.json(body)
+        let original_body = target.body.as_ref().map(serde_json::to_vec).transpose()?;
+        let request_builder = if let Some(body) = body_override.or(original_body) {
+            request_builder.body(body)
         } else {
             request_builder
         };
@@ -810,6 +833,35 @@ where
             })?),
             created_at: Database::utc_now()?,
         })
+    }
+
+    /// Executes JavaScript with Deno JS runtime.
+    fn execute_script_sync<R: DeserializeOwned>(
+        &self,
+        script: &str,
+        context: impl Serialize,
+    ) -> anyhow::Result<Option<R>> {
+        let js_code = script.to_string();
+        match JsRuntime::execute_script_sync::<Option<R>>(
+            &JsRuntimeConfig {
+                max_heap_size: self.api.config.js_runtime.max_heap_size,
+                max_script_execution_time: self.api.config.js_runtime.max_script_execution_time,
+            },
+            js_code,
+            Some(context),
+        ) {
+            Ok((result, execution_time)) => {
+                debug!(
+                    metrics.script_execution_time = execution_time.as_secs_f64(),
+                    "Successfully executed script.",
+                );
+                Ok(result)
+            }
+            Err(err) => {
+                error!("Failed to execute script: {err:?}");
+                Err(err)
+            }
+        }
     }
 }
 
@@ -900,6 +952,8 @@ mod tests {
                     ),
                     body: Some(json!({ "key": "value" })),
                     media_type: Some("application/json".parse()?),
+                    configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
+                    extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                 })),
             )
             .await?;
@@ -1392,6 +1446,8 @@ mod tests {
                     headers: None,
                     body: None,
                     media_type: None,
+                    configurator: None,
+                    extractor: None
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -1425,6 +1481,8 @@ mod tests {
                     headers: None,
                     body: None,
                     media_type: None,
+                    configurator: None,
+                    extractor: None
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2078,6 +2136,8 @@ mod tests {
                     headers: None,
                     body: None,
                     media_type: None,
+                    configurator: None,
+                    extractor: None
                 })),
                 ..Default::default()
             }).await),
@@ -2108,6 +2168,8 @@ mod tests {
                     headers: None,
                     body: None,
                     media_type: None,
+                    configurator: None,
+                    extractor: None
                 })),
                 ..Default::default()
             }).await),
@@ -2579,6 +2641,8 @@ mod tests {
                         )])),
                         body: None,
                         media_type: Some("application/json".parse()?),
+                        configurator: None,
+                        extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string())
                     })),
             )
             .await?;
@@ -2595,6 +2659,8 @@ mod tests {
                         )])),
                         body: Some(json!({ "key": "value" })),
                         media_type: Some("application/json".parse()?),
+                        configurator: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: `overridden-${context.body.key}` })) }))(context);".to_string()),
+                        extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string())
                     })),
             )
             .await?;
@@ -2666,7 +2732,8 @@ mod tests {
             when.method(httpmock::Method::POST)
                 .path("/api/post-call")
                 .header("x-custom-header", "x-custom-value")
-                .json_body(json!({ "key": "value" }));
+                // Make sure "configurator" script managed to override body.
+                .json_body(json!({ "key": "overridden-value" }));
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body_obj(content_two.value());

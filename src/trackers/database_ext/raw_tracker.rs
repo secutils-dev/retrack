@@ -73,6 +73,8 @@ struct RawApiTarget<'s> {
     body: Option<Vec<u8>>,
     #[serde(borrow)]
     media_type: Option<MediaType<'s>>,
+    configurator: Option<Cow<'s, str>>,
+    extractor: Option<Cow<'s, str>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -162,6 +164,8 @@ impl TryFrom<RawTracker> for Tracker {
                         .map(|body| serde_json::from_slice(&body))
                         .transpose()?,
                     media_type: target.media_type.map(|media_type| media_type.into()),
+                    configurator: target.configurator.map(Cow::into_owned),
+                    extractor: target.extractor.map(Cow::into_owned),
                 }),
             },
             actions: raw_config
@@ -265,6 +269,14 @@ impl TryFrom<&Tracker> for RawTracker {
                             .media_type
                             .as_ref()
                             .map(|media_type| media_type.to_ref()),
+                        configurator: target
+                            .configurator
+                            .as_ref()
+                            .map(|configurator| Cow::Borrowed(configurator.as_ref())),
+                        extractor: target
+                            .extractor
+                            .as_ref()
+                            .map(|extractor| Cow::Borrowed(extractor.as_ref())),
                     }),
                 },
                 actions: item.actions.iter().map(|action| action.into()).collect(),
@@ -352,386 +364,104 @@ mod tests {
     use uuid::uuid;
 
     #[test]
-    fn can_convert_into_tracker() -> anyhow::Result<()> {
-        let raw_config = vec![
-            1, 1, 2, 0, 0, 100, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102,
-            117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 41,
-            32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116,
-            116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39,
-            41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 97, 119, 97, 105, 116, 32, 112, 46, 99,
-            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 0, 0, 0, 0,
-        ];
-        assert_eq!(
-            Tracker::try_from(RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                config: raw_config,
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: None,
-                job_needed: false,
-            })?,
-            Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                target: TrackerTarget::Page(PageTarget {
-                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    user_agent: None,
-                    ignore_https_errors: false,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_millis(2000)),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-                actions: vec![],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: None,
-            }
-        );
+    fn can_convert_into_and_from_raw_tracker() -> anyhow::Result<()> {
+        let tracker = Tracker {
+            id: uuid!("00000000-0000-0000-0000-000000000001"),
+            name: "tk".to_string(),
+            enabled: true,
+            target: TrackerTarget::Page(PageTarget {
+                extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                user_agent: None,
+                ignore_https_errors: false,
+            }),
+            config: TrackerConfig {
+                revisions: 1,
+                timeout: Some(Duration::from_millis(2000)),
+                job: None,
+            },
+            tags: vec!["tag".to_string()],
+            actions: vec![],
+            created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+            updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
+            job_id: None,
+        };
+        assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
 
-        let raw_config = vec![
-            1, 1, 2, 0, 0, 100, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102,
-            117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 41,
-            32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116,
-            116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39,
-            41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 97, 119, 97, 105, 116, 32, 112, 46, 99,
-            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 1, 13, 82, 101, 116, 114, 97, 99,
-            107, 47, 49, 46, 48, 46, 48, 1, 1, 3, 2, 0, 1, 15, 100, 101, 118, 64, 114, 101, 116,
-            114, 97, 99, 107, 46, 100, 101, 118, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114,
-            101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 1, 3, 71, 69, 84, 1, 1, 12, 99, 111,
-            110, 116, 101, 110, 116, 45, 116, 121, 112, 101, 10, 116, 101, 120, 116, 47, 112, 108,
-            97, 105, 110, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
-            120, 0, 5,
-        ];
-        assert_eq!(
-            Tracker::try_from(RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: false,
-                config: raw_config,
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_needed: true,
-            })?,
-            Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: false,
-                target: TrackerTarget::Page(PageTarget {
-                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
+        let tracker = Tracker {
+            enabled: false,
+            target: TrackerTarget::Page(PageTarget {
+                extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                user_agent: Some("Retrack/1.0.0".to_string()),
+                ignore_https_errors: true,
+            }),
+            config: TrackerConfig {
+                revisions: 1,
+                timeout: Some(Duration::from_millis(2000)),
+                job: Some(SchedulerJobConfig {
+                    schedule: "0 0 * * *".to_string(),
+                    retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
+                        initial_interval: Duration::from_millis(1234),
+                        multiplier: 2,
+                        max_interval: Duration::from_secs(120),
+                        max_attempts: 5,
+                    })
                 }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_millis(2000)),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "0 0 * * *".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
-                            initial_interval: Duration::from_millis(1234),
-                            multiplier: 2,
-                            max_interval: Duration::from_secs(120),
-                            max_attempts: 5,
-                        })
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog, TrackerAction::Email(EmailAction {
-                    to: vec!["dev@retrack.dev".to_string()],
-                }), TrackerAction::Webhook(WebhookAction {
-                    url: "https://retrack.dev".parse()?,
-                    method: Some(Method::GET),
-                    headers: Some(
-                        (&[(CONTENT_TYPE, "text/plain".to_string())]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>())
-                            .try_into()?,
-                    ),
-                })],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-            }
-        );
+            },
+            actions: vec![TrackerAction::ServerLog, TrackerAction::Email(EmailAction {
+                to: vec!["dev@retrack.dev".to_string()],
+            }), TrackerAction::Webhook(WebhookAction {
+                url: "https://retrack.dev".parse()?,
+                method: Some(Method::GET),
+                headers: Some(
+                    (&[(CONTENT_TYPE, "text/plain".to_string())]
+                        .into_iter()
+                        .collect::<HashMap<_, _>>())
+                        .try_into()?,
+                ),
+            })],
+            job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
+            ..tracker.clone()
+        };
+        assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
 
-        let raw_config = vec![
-            3, 0, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46,
-            100, 101, 118, 47, 1, 4, 80, 79, 83, 84, 1, 1, 12, 99, 111, 110, 116, 101, 110, 116,
-            45, 116, 121, 112, 101, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47,
-            106, 115, 111, 110, 1, 15, 123, 34, 107, 101, 121, 34, 58, 34, 118, 97, 108, 117, 101,
-            34, 125, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106, 115, 111,
-            110, 1, 2, 0,
-        ];
-        assert_eq!(
-            Tracker::try_from(RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                config: raw_config,
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
-                job_needed: false,
-            })?,
-            Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                target: TrackerTarget::Api(ApiTarget {
-                    url: "https://retrack.dev/".parse()?,
-                    method: Some(Method::POST),
-                    headers: Some(
-                        (&[(CONTENT_TYPE, "application/json".to_string())]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>())
-                            .try_into()?,
-                    ),
-                    body: Some(json!({ "key": "value" })),
-                    media_type: Some("application/json".parse()?),
-                }),
-                config: TrackerConfig::default(),
-                tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
-            }
-        );
+        let tracker = Tracker {
+            target: TrackerTarget::Api(ApiTarget {
+                url: "https://retrack.dev/".parse()?,
+                method: None,
+                headers: None,
+                body: None,
+                media_type: None,
+                configurator: None,
+                extractor: None,
+            }),
+            config: TrackerConfig::default(),
+            actions: vec![TrackerAction::ServerLog],
+            job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
+            ..tracker.clone()
+        };
+        assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
 
-        Ok(())
-    }
-
-    #[test]
-    fn can_convert_into_raw_tracker() -> anyhow::Result<()> {
-        let raw_config = vec![
-            1, 1, 2, 0, 0, 100, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102,
-            117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 41,
-            32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116,
-            116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39,
-            41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 97, 119, 97, 105, 116, 32, 112, 46, 99,
-            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 0, 0, 0, 0,
-        ];
-        assert_eq!(
-            RawTracker::try_from(&Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                target: TrackerTarget::Page(PageTarget {
-                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    user_agent: None,
-                    ignore_https_errors: false,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_millis(2000)),
-                    job: None,
-                },
-                tags: vec!["tag".to_string()],
-                actions: vec![],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: None,
-            })?,
-            RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                config: raw_config,
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: None,
-                job_needed: false,
-            }
-        );
-
-        let raw_config = vec![
-            1, 1, 2, 0, 0, 100, 101, 120, 112, 111, 114, 116, 32, 97, 115, 121, 110, 99, 32, 102,
-            117, 110, 99, 116, 105, 111, 110, 32, 101, 120, 101, 99, 117, 116, 101, 40, 112, 41,
-            32, 123, 32, 97, 119, 97, 105, 116, 32, 112, 46, 103, 111, 116, 111, 40, 39, 104, 116,
-            116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 39,
-            41, 59, 32, 114, 101, 116, 117, 114, 110, 32, 97, 119, 97, 105, 116, 32, 112, 46, 99,
-            111, 110, 116, 101, 110, 116, 40, 41, 59, 32, 125, 1, 13, 82, 101, 116, 114, 97, 99,
-            107, 47, 49, 46, 48, 46, 48, 1, 1, 3, 2, 0, 1, 15, 100, 101, 118, 64, 114, 101, 116,
-            114, 97, 99, 107, 46, 100, 101, 118, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114,
-            101, 116, 114, 97, 99, 107, 46, 100, 101, 118, 47, 1, 3, 71, 69, 84, 1, 1, 12, 99, 111,
-            110, 116, 101, 110, 116, 45, 116, 121, 112, 101, 10, 116, 101, 120, 116, 47, 112, 108,
-            97, 105, 110, 1, 9, 48, 32, 48, 32, 42, 32, 42, 32, 42, 1, 1, 1, 128, 157, 202, 111, 2,
-            120, 0, 5,
-        ];
-        assert_eq!(
-            RawTracker::try_from(&Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                target: TrackerTarget::Page(PageTarget {
-                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_millis(2000)),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "0 0 * * *".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
-                            initial_interval: Duration::from_millis(1234),
-                            multiplier: 2,
-                            max_interval: Duration::from_secs(120),
-                            max_attempts: 5,
-                        })
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog, TrackerAction::Email(EmailAction {
-                    to: vec!["dev@retrack.dev".to_string()],
-                }), TrackerAction::Webhook(WebhookAction {
-                    url: "https://retrack.dev".parse()?,
-                    method: Some(Method::GET),
-                    headers: Some(
-                        (&[(CONTENT_TYPE, "text/plain".to_string())]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>())
-                            .try_into()?,
-                    ),
-                })],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-            })?,
-            RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                config: raw_config.clone(),
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_needed: true,
-            }
-        );
-
-        assert_eq!(
-            RawTracker::try_from(&Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: false,
-                target: TrackerTarget::Page(PageTarget {
-                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: TrackerConfig {
-                    revisions: 1,
-                    timeout: Some(Duration::from_millis(2000)),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "0 0 * * *".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Exponential {
-                            initial_interval: Duration::from_millis(1234),
-                            multiplier: 2,
-                            max_interval: Duration::from_secs(120),
-                            max_attempts: 5,
-                        })
-                    }),
-                },
-                tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog, TrackerAction::Email(EmailAction {
-                    to: vec!["dev@retrack.dev".to_string()],
-                }), TrackerAction::Webhook(WebhookAction {
-                    url: "https://retrack.dev".parse()?,
-                    method: Some(Method::GET),
-                    headers: Some(
-                        (&[(CONTENT_TYPE, "text/plain".to_string())]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>())
-                            .try_into()?,
-                    ),
-                })],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-            })?,
-            RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: false,
-                config: raw_config,
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
-                job_needed: false,
-            }
-        );
-
-        let raw_config = vec![
-            3, 0, 1, 20, 104, 116, 116, 112, 115, 58, 47, 47, 114, 101, 116, 114, 97, 99, 107, 46,
-            100, 101, 118, 47, 1, 4, 80, 79, 83, 84, 1, 1, 12, 99, 111, 110, 116, 101, 110, 116,
-            45, 116, 121, 112, 101, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47,
-            106, 115, 111, 110, 1, 15, 123, 34, 107, 101, 121, 34, 58, 34, 118, 97, 108, 117, 101,
-            34, 125, 1, 16, 97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106, 115, 111,
-            110, 1, 2, 0,
-        ];
-        assert_eq!(
-            RawTracker::try_from(&Tracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                target: TrackerTarget::Api(ApiTarget {
-                    url: "https://retrack.dev/".parse()?,
-                    method: Some(Method::POST),
-                    headers: Some(
-                        (&[(CONTENT_TYPE, "application/json".to_string()),]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>())
-                            .try_into()?,
-                    ),
-                    body: Some(json!({ "key": "value" })),
-                    media_type: Some("application/json".parse()?),
-                }),
-                config: TrackerConfig::default(),
-                tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog,],
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
-            })?,
-            RawTracker {
-                id: uuid!("00000000-0000-0000-0000-000000000001"),
-                name: "tk".to_string(),
-                enabled: true,
-                config: raw_config,
-                tags: vec!["tag".to_string()],
-                // January 1, 2000 10:00:00
-                created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                // January 1, 2000 10:00:10
-                updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
-                job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
-                job_needed: false,
-            }
-        );
+        let tracker = Tracker {
+            target: TrackerTarget::Api(ApiTarget {
+                url: "https://retrack.dev/".parse()?,
+                method: Some(Method::POST),
+                headers: Some(
+                    (&[(CONTENT_TYPE, "application/json".to_string())]
+                        .into_iter()
+                        .collect::<HashMap<_, _>>())
+                        .try_into()?,
+                ),
+                body: Some(json!({ "key": "value" })),
+                media_type: Some("application/json".parse()?),
+                configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
+                extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context)) })();".to_string())
+            }),
+            config: TrackerConfig::default(),
+            actions: vec![TrackerAction::ServerLog],
+            job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
+            ..tracker.clone()
+        };
+        assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
 
         Ok(())
     }

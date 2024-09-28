@@ -1,5 +1,6 @@
 mod components_config;
 mod database_config;
+mod js_runtime_config;
 mod raw_config;
 mod scheduler_jobs_config;
 mod smtp_config;
@@ -8,7 +9,8 @@ mod trackers_config;
 use url::Url;
 
 pub use self::{
-    components_config::ComponentsConfig, database_config::DatabaseConfig, raw_config::RawConfig,
+    components_config::ComponentsConfig, database_config::DatabaseConfig,
+    js_runtime_config::JsRuntimeConfig, raw_config::RawConfig,
     scheduler_jobs_config::SchedulerJobsConfig, smtp_config::SmtpConfig,
     trackers_config::TrackersConfig,
 };
@@ -28,6 +30,8 @@ pub struct Config {
     pub scheduler: SchedulerJobsConfig,
     /// Configuration for the trackers.
     pub trackers: TrackersConfig,
+    /// Configuration for the embedded JS Runtime.
+    pub js_runtime: JsRuntimeConfig,
 }
 
 impl AsRef<Config> for Config {
@@ -45,6 +49,7 @@ impl From<RawConfig> for Config {
             components: raw_config.components,
             scheduler: raw_config.scheduler,
             trackers: raw_config.trackers,
+            js_runtime: raw_config.js_runtime,
         }
     }
 }
@@ -141,6 +146,10 @@ pub mod tests {
                 schedules: None,
                 min_schedule_interval: 10s,
                 restrict_to_public_urls: true,
+            },
+            js_runtime: JsRuntimeConfig {
+                max_heap_size: 10485760,
+                max_script_execution_time: 10s,
             },
         }
         "###);
