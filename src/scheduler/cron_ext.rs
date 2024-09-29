@@ -5,8 +5,7 @@ pub trait CronExt {
     /// Returns the minimum interval between occurrences.
     fn min_interval(&self) -> anyhow::Result<Duration>;
 
-    /// Converts string cron pattern to `Cron` expression while properly handling aliases (see
-    /// https://github.com/Hexagon/croner-rust/issues/9).
+    /// Converts string cron pattern to `Cron` instance.
     fn parse_pattern(pattern: impl AsRef<str>) -> anyhow::Result<Cron>;
 }
 
@@ -30,24 +29,9 @@ impl CronExt for Cron {
         Ok(minimum_interval)
     }
 
-    /// Converts string cron pattern to `Cron` expression while properly handling aliases (see
-    /// https://github.com/Hexagon/croner-rust/issues/9).
+    /// Converts string cron pattern to `Cron` instance.
     fn parse_pattern(pattern: impl AsRef<str>) -> anyhow::Result<Cron> {
-        let pattern = pattern.as_ref().trim();
-
-        // Closure that performs a case-insensitive comparison of two strings.
-        let eq_ignore_case = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
-
-        let pattern = match pattern {
-            p if eq_ignore_case(p, "@yearly") || eq_ignore_case(p, "@annually") => "0 0 0 1 1 *",
-            p if eq_ignore_case(p, "@monthly") => "0 0 0 1 * *",
-            p if eq_ignore_case(p, "@weekly") => "0 0 0 * * 0",
-            p if eq_ignore_case(p, "@daily") => "0 0 0 * * *",
-            p if eq_ignore_case(p, "@hourly") => "0 0 * * * *",
-            _ => pattern,
-        };
-
-        Ok(Cron::new(pattern)
+        Ok(Cron::new(pattern.as_ref())
             .with_seconds_required()
             .with_dom_and_dow()
             .parse()?)
