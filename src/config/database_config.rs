@@ -13,6 +13,8 @@ pub struct DatabaseConfig {
     pub username: String,
     /// Optional password to use to connect to the database.
     pub password: Option<String>,
+    /// Defines a maximum number of connections allowed.
+    pub max_connections: u32,
 }
 
 impl Default for DatabaseConfig {
@@ -23,6 +25,7 @@ impl Default for DatabaseConfig {
             port: 5432,
             username: "postgres".to_string(),
             password: None,
+            max_connections: 100,
         }
     }
 }
@@ -40,6 +43,7 @@ mod tests {
         host = 'localhost'
         port = 5432
         username = 'postgres'
+        max_connections = 100
         "###);
 
         let config = DatabaseConfig {
@@ -52,6 +56,7 @@ mod tests {
         port = 5432
         username = 'postgres'
         password = 'password'
+        max_connections = 100
         "###);
     }
 
@@ -64,6 +69,7 @@ mod tests {
         password = 'password'
         host = 'localhost'
         port = 5432
+        max_connections = 1000
     "#,
         )
         .unwrap();
@@ -76,6 +82,7 @@ mod tests {
             password: Some(
                 "password",
             ),
+            max_connections: 1000,
         }
         "###);
     }

@@ -29,27 +29,11 @@ use crate::{
 };
 pub use server_state::{GetStatusParams, SchedulerStatus, ServerState, Status};
 
-#[tokio::main]
 pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
-    let db_url = format!(
-        "postgres://{}@{}:{}/{}",
-        if let Some(ref password) = raw_config.db.password {
-            format!(
-                "{}:{}",
-                urlencoding::encode(&raw_config.db.username),
-                urlencoding::encode(password)
-            )
-        } else {
-            raw_config.db.username.clone()
-        },
-        raw_config.db.host,
-        raw_config.db.port,
-        urlencoding::encode(&raw_config.db.name)
-    );
     let database = Database::create(
         PgPoolOptions::new()
-            .max_connections(100)
-            .connect(&db_url)
+            .max_connections(raw_config.db.max_connections)
+            .connect(&Database::connection_url(&raw_config.db))
             .await?,
     )
     .await?;

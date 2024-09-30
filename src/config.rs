@@ -101,6 +101,7 @@ pub mod tests {
                 port: 5432,
                 username: "postgres",
                 password: None,
+                max_connections: 100,
             },
             smtp: Some(
                 SmtpConfig {

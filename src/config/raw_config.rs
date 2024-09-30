@@ -82,6 +82,7 @@ mod tests {
         host = 'localhost'
         port = 5432
         username = 'postgres'
+        max_connections = 100
 
         [components]
         web_scraper_url = 'http://localhost:7272/'
@@ -116,6 +117,7 @@ mod tests {
         password = 'password'
         host = 'localhost'
         port = 5432
+        max_connections = 1000
 
         [components]
         web_scraper_url = 'http://localhost:7272/'
@@ -166,6 +168,7 @@ mod tests {
                 password: Some(
                     "password",
                 ),
+                max_connections: 1000,
             },
             components: ComponentsConfig {
                 web_scraper_url: Url {

@@ -18,7 +18,8 @@ use clap::{crate_authors, crate_description, crate_version, value_parser, Arg, C
 use std::env;
 use tracing::info;
 
-fn main() -> Result<(), anyhow::Error> {
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
     dotenvy::dotenv().ok();
 
     if env::var("RUST_LOG_FORMAT").is_ok_and(|format| format == "json") {
@@ -62,7 +63,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     info!(config = ?raw_config, "Retrack raw configuration.");
 
-    server::run(raw_config)
+    server::run(raw_config).await
 }
 
 #[cfg(test)]
