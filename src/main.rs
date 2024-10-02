@@ -83,6 +83,7 @@ mod tests {
     pub use crate::{config::tests::*, network::tests::*, scheduler::tests::*, trackers::tests::*};
     use crate::{
         config::{DatabaseConfig, JsRuntimeConfig, TrackersConfig},
+        js_runtime::JsRuntime,
         templates::create_templates,
     };
     use sqlx::{postgres::PgDatabaseError, PgPool};
@@ -140,11 +141,13 @@ mod tests {
         pool: PgPool,
         config: Config,
     ) -> anyhow::Result<Api<MockResolver, AsyncStubTransport>> {
+        let js_runtime = JsRuntime::init_platform(&config.js_runtime)?;
         Ok(Api::new(
             config,
             Database::create(pool).await?,
             mock_network(),
             create_templates()?,
+            js_runtime,
         ))
     }
 
@@ -152,11 +155,14 @@ mod tests {
         pool: PgPool,
         network: Network<DR, AsyncStubTransport>,
     ) -> anyhow::Result<Api<DR, AsyncStubTransport>> {
+        let config = mock_config()?;
+        let js_runtime = JsRuntime::init_platform(&config.js_runtime)?;
         Ok(Api::new(
-            mock_config()?,
+            config,
             Database::create(pool).await?,
             network,
             create_templates()?,
+            js_runtime,
         ))
     }
 

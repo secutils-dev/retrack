@@ -151,6 +151,7 @@ pub mod tests {
             js_runtime: JsRuntimeConfig {
                 max_heap_size: 10485760,
                 max_script_execution_time: 10s,
+                channel_buffer_size: 10,
             },
         }
         "###);

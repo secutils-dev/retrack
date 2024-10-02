@@ -15,7 +15,7 @@ impl Database {
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
-            .with_context(|| "Failed to migrate database")?;
+            .context("Failed to migrate database")?;
 
         Ok(Database { pool })
     }

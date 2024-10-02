@@ -2,7 +2,10 @@ mod api_target;
 mod page_target;
 
 pub use self::{
-    api_target::{ApiTarget, ConfiguratorScriptContext, ConfiguratorScriptResult},
+    api_target::{
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
+        ExtractorScriptResult,
+    },
     page_target::PageTarget,
 };
 use serde_derive::{Deserialize, Serialize};

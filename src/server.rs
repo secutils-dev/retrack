@@ -41,7 +41,7 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
     let email_transport = if let Some(ref smtp_config) = raw_config.smtp {
         if let Some(ref catch_all_config) = smtp_config.catch_all {
             Mailbox::from_str(catch_all_config.recipient.as_str())
-                .with_context(|| "Cannot parse SMTP catch-all recipient.")?;
+                .context("Cannot parse SMTP catch-all recipient.")?;
         }
 
         AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_config.address)?
@@ -55,14 +55,14 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
     };
 
     let http_port = raw_config.port;
+    let js_runtime = JsRuntime::init_platform(&raw_config.js_runtime)?;
     let api = Arc::new(Api::new(
         Config::from(raw_config),
         database,
         Network::new(TokioDnsResolver::create(), email_transport),
         create_templates()?,
+        js_runtime,
     ));
-
-    JsRuntime::init_platform();
 
     let scheduler = Scheduler::start(api.clone()).await?;
     let state = web::Data::new(ServerState::new(api, scheduler));
@@ -97,5 +97,5 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
     http_server
         .run()
         .await
-        .with_context(|| "Failed to run Retrack API server.")
+        .context("Failed to run Retrack API server.")
 }

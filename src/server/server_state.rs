@@ -51,6 +51,7 @@ pub mod tests {
         api::Api,
         config::Config,
         database::Database,
+        js_runtime::JsRuntime,
         network::{Network, TokioDnsResolver},
         scheduler::Scheduler,
         server::ServerState,
@@ -69,6 +70,7 @@ pub mod tests {
         pool: PgPool,
         config: Config,
     ) -> anyhow::Result<ServerState> {
+        let js_runtime = JsRuntime::init_platform(&config.js_runtime)?;
         let api = Arc::new(Api::new(
             config,
             Database::create(pool.clone()).await?,
@@ -79,6 +81,7 @@ pub mod tests {
                 AsyncSmtpTransport::<Tokio1Executor>::unencrypted_localhost(),
             ),
             create_templates()?,
+            js_runtime,
         ));
 
         let scheduler = Scheduler {

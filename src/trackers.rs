@@ -20,7 +20,8 @@ pub use self::{
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
     tracker_target::{
-        ApiTarget, ConfiguratorScriptContext, ConfiguratorScriptResult, PageTarget, TrackerTarget,
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
+        ExtractorScriptResult, PageTarget, TrackerTarget,
     },
 };
 

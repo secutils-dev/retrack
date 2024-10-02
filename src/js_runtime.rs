@@ -1,64 +1,136 @@
-mod js_runtime_config;
-mod script_termination_reason;
+mod script;
+mod script_config;
+mod script_execution_status;
+mod script_task;
 
-pub use self::js_runtime_config::JsRuntimeConfig;
-use self::script_termination_reason::ScriptTerminationReason;
-use anyhow::{bail, Context};
+use self::script_execution_status::ScriptExecutionStatus;
+pub use self::{
+    script::{Script, ScriptBuilder},
+    script_config::ScriptConfig,
+    script_task::ScriptTask,
+};
+use crate::{config::JsRuntimeConfig, js_runtime::script::ScriptDefinition};
+use anyhow::Context;
 use deno_core::{serde_v8, v8, RuntimeOptions};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
+};
+use tokio::{
+    runtime::Builder,
+    sync::{mpsc, oneshot},
+    task::LocalSet,
 };
 use tracing::error;
 
 /// Defines a maximum interval on which script is checked for timeout.
 const SCRIPT_TIMEOUT_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Defines the name of the global variable available to the scripts that stores script arguments.
+const SCRIPT_CONTEXT_KEY: &str = "context";
+
 /// An abstraction over the V8/Deno runtime that allows any utilities to execute custom user
 /// JavaScript scripts.
-pub struct JsRuntime;
+pub struct JsRuntime {
+    tx: mpsc::Sender<ScriptTask>,
+}
+
 impl JsRuntime {
     /// Initializes the JS runtime platform, should be called only once and in the main thread.
-    pub fn init_platform() {
+    pub fn init_platform(config: &JsRuntimeConfig) -> anyhow::Result<Self> {
         deno_core::JsRuntime::init_platform(None, false);
+
+        // JsRuntime will be initialized in the dedicated thread.
+        let (tx, mut rx) = mpsc::channel::<ScriptTask>(config.channel_buffer_size);
+        let rt = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("Unable to initialize JS runtime worker thread.")?;
+        std::thread::spawn(move || {
+            let local = LocalSet::new();
+            local.spawn_local(async move {
+                while let Some(task) = rx.recv().await {
+                    match task.script {
+                        Script::ApiTargetConfigurator(def) => {
+                            JsRuntime::handle_script(&task.config, def).await;
+                        }
+                        Script::ApiTargetExtractor(def) => {
+                            JsRuntime::handle_script(&task.config, def).await;
+                        }
+                        Script::Custom(def) => {
+                            JsRuntime::handle_script(&task.config, def).await;
+                        }
+                    }
+                }
+            });
+            rt.block_on(local);
+        });
+
+        Ok(Self { tx })
     }
 
     /// Executes a user script and returns the result.
-    pub fn execute_script_sync<R: for<'de> Deserialize<'de>>(
-        config: &JsRuntimeConfig,
-        js_code: impl Into<String>,
-        js_script_context: Option<impl Serialize>,
-    ) -> Result<(R, Duration), anyhow::Error> {
-        let now = Instant::now();
+    pub async fn execute_script<ScriptArgs, ScriptResult>(
+        &self,
+        script_src: impl Into<String>,
+        script_args: impl ScriptBuilder<ScriptArgs, ScriptResult>,
+        script_config: ScriptConfig,
+    ) -> Result<Option<ScriptResult>, anyhow::Error> {
+        let (script_result_tx, script_result_rx) = oneshot::channel();
 
-        let termination_reason = Arc::new(AtomicUsize::new(
-            ScriptTerminationReason::NotTerminated as usize,
-        ));
-        let timeout_token = Arc::new(AtomicBool::new(false));
+        self.tx
+            .send(ScriptTask {
+                config: script_config,
+                script: script_args.build(script_src, script_result_tx).0,
+            })
+            .await
+            .context("Failed to schedule script execute task")?;
 
+        script_result_rx
+            .await
+            .context("Failed to receive script execute task result")?
+    }
+
+    /// Executes a user script and sends result over oneshot channel. This method doesn't fail, and
+    /// only logs error if sending result over channel fails.
+    async fn handle_script<ScriptArgs: Serialize, ScriptResult: DeserializeOwned>(
+        config: &ScriptConfig,
+        script: ScriptDefinition<ScriptArgs, ScriptResult>,
+    ) {
+        let execute_result = JsRuntime::execute_script_internal(config, &script).await;
+        if script.result.send(execute_result).is_err() {
+            error!("Failed to send script result.");
+        }
+    }
+
+    async fn execute_script_internal<ScriptArgs: Serialize, ScriptResult: DeserializeOwned>(
+        config: &ScriptConfig,
+        script: &ScriptDefinition<ScriptArgs, ScriptResult>,
+    ) -> Result<Option<ScriptResult>, anyhow::Error> {
         let mut runtime = deno_core::JsRuntime::new(RuntimeOptions {
-            create_params: Some(v8::Isolate::create_params().heap_limits(0, config.max_heap_size)),
+            create_params: Some(
+                v8::Isolate::create_params().heap_limits(1024, config.max_heap_size),
+            ),
             ..Default::default()
         });
-        let isolate_handle = runtime.v8_isolate().thread_safe_handle();
+
+        let script_status = Arc::new(AtomicUsize::new(ScriptExecutionStatus::Running as usize));
 
         // Track memory usage and terminate execution if threshold is exceeded.
-        let isolate_handle_clone = isolate_handle.clone();
-        let termination_reason_clone = termination_reason.clone();
-        let timeout_token_clone = timeout_token.clone();
+        let script_status_clone = script_status.clone();
+        let isolate_handle = runtime.v8_isolate().thread_safe_handle();
         runtime.add_near_heap_limit_callback(move |current_value, _| {
             error!("Approaching the memory limit of ({current_value}), terminating execution.");
 
             // Define termination reason and terminate execution.
-            isolate_handle_clone.terminate_execution();
+            isolate_handle.terminate_execution();
 
-            timeout_token_clone.swap(true, Ordering::Relaxed);
-            termination_reason_clone.store(
-                ScriptTerminationReason::MemoryLimit as usize,
+            script_status_clone.store(
+                ScriptExecutionStatus::ReachedMemoryLimit as usize,
                 Ordering::Relaxed,
             );
 
@@ -66,38 +138,28 @@ impl JsRuntime {
             5 * current_value
         });
 
-        // Set script context on a global scope if provided.
-        if let Some(script_context) = js_script_context {
-            let scope = &mut runtime.handle_scope();
-            let context = scope.get_current_context();
-            let scope = &mut v8::ContextScope::new(scope, context);
-
-            let Some(context_key) = v8::String::new(scope, "context") else {
-                bail!("Cannot create script context key.");
-            };
-            let context_value = serde_v8::to_v8(scope, script_context)
-                .with_context(|| "Cannot serialize script context")?;
-            context
-                .global(scope)
-                .set(scope, context_key.into(), context_value);
+        // Set script args as a global variable, if provided.
+        if let Some(ref args) = script.args {
+            Self::set_script_args(&mut runtime, args)?;
         }
 
         // Track the time the script takes to execute, and terminate execution if threshold is exceeded.
-        let termination_reason_clone = termination_reason.clone();
-        let timeout_token_clone = timeout_token.clone();
-        let max_script_execution_time = config.max_script_execution_time;
+        let max_script_execution_time = config.max_execution_time;
+        let isolate_handle = runtime.v8_isolate().thread_safe_handle();
+        let script_status_clone = script_status.clone();
         std::thread::spawn(move || {
             let now = Instant::now();
             loop {
-                // If task is cancelled, return immediately.
-                if timeout_token_clone.load(Ordering::Relaxed) {
+                // If script is no longer running, return immediately.
+                let script_status = script_status_clone.load(Ordering::Relaxed);
+                if ScriptExecutionStatus::from(script_status) != ScriptExecutionStatus::Running {
                     return;
                 }
 
                 // Otherwise, terminate execution if time is out, or sleep for max `SCRIPT_TIMEOUT_CHECK_INTERVAL`.
                 let Some(time_left) = max_script_execution_time.checked_sub(now.elapsed()) else {
-                    termination_reason_clone.store(
-                        ScriptTerminationReason::TimeLimit as usize,
+                    script_status_clone.store(
+                        ScriptExecutionStatus::ReachedTimeLimit as usize,
                         Ordering::Relaxed,
                     );
                     isolate_handle.terminate_execution();
@@ -108,74 +170,96 @@ impl JsRuntime {
             }
         });
 
-        let handle_error = |err: anyhow::Error| match ScriptTerminationReason::from(
-            termination_reason.load(Ordering::Relaxed),
+        let handle_error = |err: anyhow::Error| match ScriptExecutionStatus::from(
+            script_status.load(Ordering::Relaxed),
         ) {
-            ScriptTerminationReason::MemoryLimit => err.context("Script exceeded memory limit."),
-            ScriptTerminationReason::TimeLimit => err.context("Script exceeded time limit."),
-            ScriptTerminationReason::NotTerminated => err,
-        };
-
-        // Retrieve the result.
-        let script_result_or_promise =
-            runtime
-                .execute_script("<anon>", js_code.into())
-                .map_err(|err| {
-                    timeout_token.swap(true, Ordering::Relaxed);
-                    runtime.v8_isolate().cancel_terminate_execution();
-                    handle_error(err)
-                })?;
-
-        let scope = &mut runtime.handle_scope();
-        let local = v8::Local::new(scope, script_result_or_promise);
-        let local = if let Ok(promise) = v8::Local::<v8::Promise>::try_from(local) {
-            while promise.state() == v8::PromiseState::Pending {
-                scope.perform_microtask_checkpoint();
-
-                // Check if script has been terminated in the meantime.
-                if termination_reason.load(Ordering::Relaxed)
-                    != ScriptTerminationReason::NotTerminated as usize
-                {
-                    return Err(handle_error(anyhow::anyhow!(
-                        "Script returned a promise that timed out."
-                    )));
-                }
+            ScriptExecutionStatus::ReachedMemoryLimit => {
+                err.context("Script exceeded memory limit.")
             }
-            promise.result(scope)
-        } else {
-            local
+            ScriptExecutionStatus::ReachedTimeLimit => err.context("Script exceeded time limit."),
+            ScriptExecutionStatus::Running => {
+                script_status.store(
+                    ScriptExecutionStatus::ExecutionCompleted as usize,
+                    Ordering::Relaxed,
+                );
+                err
+            }
+            ScriptExecutionStatus::ExecutionCompleted => err,
         };
+
+        // Retrieve the result `Promise`.
+        let script_result_promise = runtime
+            .execute_script("<anon>", script.src.clone())
+            .map(|script_result| runtime.resolve(script_result))
+            .map_err(handle_error)?;
+
+        // Wait for the promise to resolve.
+        let script_result = runtime
+            .with_event_loop_promise(script_result_promise, Default::default())
+            .await
+            .map_err(handle_error)?;
 
         // Abort termination thread, if script managed to complete.
-        timeout_token.swap(true, Ordering::Relaxed);
+        script_status.store(
+            ScriptExecutionStatus::ExecutionCompleted as usize,
+            Ordering::Relaxed,
+        );
 
-        serde_v8::from_v8(scope, local)
-            .map(|result| (result, now.elapsed()))
-            .with_context(|| "Error deserializing script result")
+        let scope = &mut runtime.handle_scope();
+        let local = v8::Local::new(scope, script_result);
+        serde_v8::from_v8(scope, local).context("Error deserializing script result")
+    }
+
+    fn set_script_args<ScriptArgs: Serialize>(
+        runtime: &mut deno_core::JsRuntime,
+        args: ScriptArgs,
+    ) -> anyhow::Result<()> {
+        let scope = &mut runtime.handle_scope();
+        let context = scope.get_current_context();
+        let context_scope = &mut v8::ContextScope::new(scope, context);
+
+        let script_context_key = v8::String::new(context_scope, SCRIPT_CONTEXT_KEY)
+            .expect("Cannot create script context key.");
+        let script_context_value = serde_v8::to_v8(context_scope, args)
+            .context("Cannot serialize script context value")?;
+        context.global(context_scope).set(
+            context_scope,
+            script_context_key.into(),
+            script_context_value,
+        );
+
+        Ok(())
     }
 }
 #[cfg(test)]
 pub mod tests {
-    use super::{JsRuntime, JsRuntimeConfig};
+    use super::{JsRuntime, ScriptConfig};
+    use crate::{
+        config::JsRuntimeConfig,
+        trackers::{ConfiguratorScriptArgs, ConfiguratorScriptResult, TrackerDataValue},
+    };
     use deno_core::error::JsError;
+    use http::{HeaderMap, HeaderName, HeaderValue};
     use serde::{Deserialize, Serialize};
+    use serde_bytes::ByteBuf;
     use serde_json::json;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn can_execute_scripts() -> anyhow::Result<()> {
-        let config = JsRuntimeConfig {
+        let js_runtime = JsRuntime::init_platform(&JsRuntimeConfig::default())?;
+        let config = ScriptConfig {
             max_heap_size: 10 * 1024 * 1024,
-            max_script_execution_time: std::time::Duration::from_secs(5),
+            max_execution_time: std::time::Duration::from_secs(5),
         };
 
         #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
-        struct ScriptContext {
+        struct ScriptParams {
             arg_num: usize,
             arg_str: String,
             arg_array: Vec<String>,
             arg_buf: Vec<u8>,
         }
-        let script_context = ScriptContext {
+        let script_params = ScriptParams {
             arg_num: 115,
             arg_str: "Hello, world!".to_string(),
             arg_array: vec!["one".to_string(), "two".to_string()],
@@ -183,94 +267,137 @@ pub mod tests {
         };
 
         // Can access script context.
-        let (result, _) = JsRuntime::execute_script_sync::<ScriptContext>(
-            &config,
-            r#"(() => {{ return context; }})();"#,
-            Some(script_context.clone()),
-        )?;
-        assert_eq!(result, script_context);
-
-        // Can do basic math.
-        let (result, _) = JsRuntime::execute_script_sync::<usize>(
-            &config,
-            r#"((context) => {{ return context.arg_num * 2; }})(context);"#,
-            Some(script_context.clone()),
-        )?;
-        assert_eq!(result, 230);
-
-        // Can use Deno APIs.
-        let (result, _) = JsRuntime::execute_script_sync::<serde_bytes::ByteBuf>(
-            &config,
-            r#"((context) => Deno.core.encode(JSON.stringify({ key: 'value' })))(context);"#,
-            Some(script_context.clone()),
-        )?;
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"(() => {{ return context; }})();"#,
+                Some(ByteBuf::from(serde_json::to_vec(&script_params)?)),
+                config,
+            )
+            .await?
+            .unwrap();
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&result)?,
-            json!({ "key": "value" })
+            serde_json::from_slice::<ScriptParams>(&result)?,
+            script_params.clone()
         );
 
+        // Supports known scripts.
+        let result = js_runtime
+            .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
+                r#"(() => {{ return { headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify(context)) }; }})();"#,
+                ConfiguratorScriptArgs {
+                    previous_content: Some(TrackerDataValue::new(json!({ "key": "content" }))),
+                    body: Some(json!({ "key": "body" })),
+                },
+                config,
+            )
+            .await?
+            .unwrap();
+        assert_eq!(
+            result,
+            ConfiguratorScriptResult {
+                headers: Some(HeaderMap::from_iter([(
+                    HeaderName::from_static("x-key"),
+                    HeaderValue::from_static("x-value")
+                )])),
+                body: Some(serde_json::to_vec(&json!({
+                    "previousContent": { "original": { "key": "content" } },
+                    "body": { "key": "body" }
+                }))?),
+            }
+        );
+
+        // Can do basic math.
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"(() => {{
+                  return Deno.core.encode(
+                    JSON.stringify(
+                      JSON.parse(Deno.core.decode(context)).arg_num * 2
+                    )
+                  );
+                }})(context);"#,
+                Some(ByteBuf::from(serde_json::to_vec(&script_params)?)),
+                config,
+            )
+            .await?
+            .unwrap();
+        assert_eq!(Some(serde_json::from_slice::<usize>(&result)?), Some(230));
+
         // Returns error from scripts
-        let result = JsRuntime::execute_script_sync::<()>(
-            &config,
-            r#"(() => {{ throw new Error("Uh oh."); }})();"#,
-            None::<()>,
-        )
-        .unwrap_err()
-        .downcast::<JsError>()?;
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"(() => {{ throw new Error("Uh oh."); }})();"#,
+                None,
+                config,
+            )
+            .await
+            .unwrap_err()
+            .downcast::<JsError>()?;
         assert_eq!(result.exception_message, "Uncaught Error: Uh oh.");
 
         // Can access script context (async).
-        let (result, _) = JsRuntime::execute_script_sync::<ScriptContext>(
-            &config,
-            r#"(async () => {{ return new Promise((resolve) => resolve(context)); }})();"#,
-            Some(script_context.clone()),
-        )?;
-        assert_eq!(result, script_context);
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"(async () => {{ return new Promise((resolve) => resolve(context)); }})();"#,
+                Some(ByteBuf::from(serde_json::to_vec(&script_params)?)),
+                config,
+            )
+            .await?
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ScriptParams>(&result)?,
+            script_params
+        );
 
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn can_limit_execution_time() -> anyhow::Result<()> {
-        let config = JsRuntimeConfig {
+        let js_runtime = JsRuntime::init_platform(&JsRuntimeConfig::default())?;
+        let config = ScriptConfig {
             max_heap_size: 10 * 1024 * 1024,
-            max_script_execution_time: std::time::Duration::from_secs(5),
+            max_execution_time: std::time::Duration::from_secs(5),
         };
 
         // Limit execution time (async).
-        let result = JsRuntime::execute_script_sync::<String>(
-            &config,
-            r#"
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"
         (async () => {{
             return new Promise((resolve) => {
                 Deno.core.queueUserTimer(
                     Deno.core.getTimerDepth() + 1,
                     false,
                     10 * 1000,
-                    () => resolve("Done")
+                    () => resolve(Deno.core.encode("Done"))
                 );
             });
         }})();
         "#,
-            None::<()>,
-        )
-        .unwrap_err();
+                None,
+                config,
+            )
+            .await
+            .unwrap_err();
         assert_eq!(
             format!("{result}"),
             "Script exceeded time limit.".to_string()
         );
 
         // Limit execution time (sync).
-        let result = JsRuntime::execute_script_sync::<String>(
-            &config,
-            r#"
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"
         (() => {{
             while (true) {}
         }})();
         "#,
-            None::<()>,
-        )
-        .unwrap_err();
+                None,
+                config,
+            )
+            .await
+            .unwrap_err();
         assert_eq!(
             format!("{result}"),
             "Script exceeded time limit.".to_string()
@@ -281,24 +408,27 @@ pub mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn can_limit_execution_memory() -> anyhow::Result<()> {
-        let config = JsRuntimeConfig {
+        let js_runtime = JsRuntime::init_platform(&JsRuntimeConfig::default())?;
+        let config = ScriptConfig {
             max_heap_size: 10 * 1024 * 1024,
-            max_script_execution_time: std::time::Duration::from_secs(5),
+            max_execution_time: std::time::Duration::from_secs(5),
         };
 
         // Limit memory usage.
-        let result = JsRuntime::execute_script_sync::<String>(
-            &config,
-            r#"
+        let result = js_runtime
+            .execute_script::<ByteBuf, ByteBuf>(
+                r#"
         (() => {{
            let s = "";
            while(true) { s += "Hello"; }
            return "Done";
         }})();
         "#,
-            None::<()>,
-        )
-        .unwrap_err();
+                None,
+                config,
+            )
+            .await
+            .unwrap_err();
         assert_eq!(
             format!("{result}"),
             "Script exceeded memory limit.".to_string()

@@ -6,12 +6,15 @@ use serde_with::skip_serializing_none;
 use url::Url;
 use utoipa::ToSchema;
 
-mod configurator_script_context;
+mod configurator_script_args;
 mod configurator_script_result;
+mod extractor_script_args;
+mod extractor_script_result;
 
 pub use self::{
-    configurator_script_context::ConfiguratorScriptContext,
+    configurator_script_args::ConfiguratorScriptArgs,
     configurator_script_result::ConfiguratorScriptResult,
+    extractor_script_args::ExtractorScriptArgs, extractor_script_result::ExtractorScriptResult,
 };
 
 /// Tracker's target for HTTP API.

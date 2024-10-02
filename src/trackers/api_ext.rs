@@ -13,7 +13,7 @@ use crate::{
     config::TrackersConfig,
     database::Database,
     error::Error as RetrackError,
-    js_runtime::{JsRuntime, JsRuntimeConfig},
+    js_runtime::{ScriptBuilder, ScriptConfig},
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{CronExt, SchedulerJobRetryStrategy},
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
@@ -21,7 +21,7 @@ use crate::{
         database_ext::TrackersDatabaseExt,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
-        ApiTarget, ConfiguratorScriptContext, ConfiguratorScriptResult, PageTarget, Tracker,
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, PageTarget, Tracker,
         TrackerAction, TrackerDataRevision, TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
@@ -32,8 +32,11 @@ use http::Method;
 use lettre::message::Mailbox;
 use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
-use serde::{de::DeserializeOwned, Serialize};
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::{
+    collections::HashSet,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -763,14 +766,15 @@ where
         let (body_override, headers_override) = if let Some(ref configurator) = target.configurator
         {
             let result = self
-                .execute_script_sync::<ConfiguratorScriptResult>(
+                .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
                     configurator.as_str(),
-                    ConfiguratorScriptContext {
-                        previous_content: revisions.last().map(|rev| &rev.data),
-                        body: target.body.as_ref(),
+                    ConfiguratorScriptArgs {
+                        previous_content: revisions.last().map(|rev| rev.data.clone()),
+                        body: target.body.clone(),
                     },
                 )
-                .with_context(|| "Failed to execute \"configurator\" script.")?
+                .await
+                .context("Failed to execute \"configurator\" script.")?
                 .unwrap_or_default();
             (result.body, result.headers)
         } else {
@@ -836,29 +840,37 @@ where
     }
 
     /// Executes JavaScript with Deno JS runtime.
-    fn execute_script_sync<R: DeserializeOwned>(
+    async fn execute_script<ScriptArgs: ScriptBuilder<ScriptArgs, ScriptResult>, ScriptResult>(
         &self,
-        script: &str,
-        context: impl Serialize,
-    ) -> anyhow::Result<Option<R>> {
-        let js_code = script.to_string();
-        match JsRuntime::execute_script_sync::<Option<R>>(
-            &JsRuntimeConfig {
-                max_heap_size: self.api.config.js_runtime.max_heap_size,
-                max_script_execution_time: self.api.config.js_runtime.max_script_execution_time,
-            },
-            js_code,
-            Some(context),
-        ) {
-            Ok((result, execution_time)) => {
+        script_src: &str,
+        script_args: ScriptArgs,
+    ) -> anyhow::Result<Option<ScriptResult>> {
+        let now = Instant::now();
+        match self
+            .api
+            .js_runtime
+            .execute_script(
+                script_src,
+                script_args,
+                ScriptConfig {
+                    max_heap_size: self.api.config.js_runtime.max_heap_size,
+                    max_execution_time: self.api.config.js_runtime.max_script_execution_time,
+                },
+            )
+            .await
+        {
+            Ok(result) => {
                 debug!(
-                    metrics.script_execution_time = execution_time.as_secs_f64(),
+                    metrics.script_execution_time = now.elapsed().as_secs_f64(),
                     "Successfully executed script.",
                 );
                 Ok(result)
             }
             Err(err) => {
-                error!("Failed to execute script: {err:?}");
+                error!(
+                    metrics.script_execution_time = now.elapsed().as_secs_f64(),
+                    "Failed to execute script: {err:?}"
+                );
                 Err(err)
             }
         }

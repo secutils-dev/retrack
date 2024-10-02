@@ -100,6 +100,7 @@ mod tests {
         [js_runtime]
         max_heap_size = 10485760
         max_script_execution_time = 10000
+        channel_buffer_size = 10
         "###);
     }
 
@@ -125,6 +126,7 @@ mod tests {
         [js_runtime]
         max_heap_size = 20485760
         max_script_execution_time = 20000
+        channel_buffer_size = 200
 
         [scheduler]
         trackers_schedule = '0 * * * * * *'
@@ -208,6 +210,7 @@ mod tests {
             js_runtime: JsRuntimeConfig {
                 max_heap_size: 20485760,
                 max_script_execution_time: 20s,
+                channel_buffer_size: 200,
             },
         }
         "###);

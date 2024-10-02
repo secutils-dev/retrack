@@ -1,5 +1,6 @@
 use crate::{
     database::Database,
+    js_runtime::JsRuntime,
     network::{DnsResolver, EmailTransport, Network},
     Config,
 };
@@ -10,6 +11,7 @@ pub struct Api<DR: DnsResolver, ET: EmailTransport> {
     pub config: Config,
     pub network: Network<DR, ET>,
     pub templates: Handlebars<'static>,
+    pub js_runtime: JsRuntime,
 }
 
 impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
@@ -19,12 +21,14 @@ impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
         database: Database,
         network: Network<DR, ET>,
         templates: Handlebars<'static>,
+        js_runtime: JsRuntime,
     ) -> Self {
         Self {
             config,
             db: database,
             network,
             templates,
+            js_runtime,
         }
     }
 }
