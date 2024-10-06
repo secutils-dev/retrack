@@ -43,8 +43,8 @@ use uuid::Uuid;
 /// Defines a maximum number of jobs that can be retrieved from the database at once.
 const MAX_JOBS_PAGE_SIZE: usize = 1000;
 
-/// Defines the maximum length of the extractor script.
-const MAX_TRACKER_PAGE_EXTRACTOR_SCRIPT_LENGTH: usize = 2048;
+/// Defines the maximum length of the user scripts.
+const MAX_TRACKER_SCRIPT_LENGTH: usize = 2048;
 
 /// Defines the maximum length of the user agent string.
 const MAX_TRACKER_PAGE_USER_AGENT_LENGTH: usize = 200;
@@ -635,9 +635,9 @@ where
             ));
         }
 
-        if target.extractor.len() > MAX_TRACKER_PAGE_EXTRACTOR_SCRIPT_LENGTH {
+        if target.extractor.len() > MAX_TRACKER_SCRIPT_LENGTH {
             bail!(RetrackError::client(format!(
-                "Tracker web page extractor script cannot be longer than {MAX_TRACKER_PAGE_EXTRACTOR_SCRIPT_LENGTH} characters."
+                "Tracker web page extractor script cannot be longer than {MAX_TRACKER_SCRIPT_LENGTH} characters."
             )));
         }
 
@@ -669,6 +669,34 @@ where
             bail!(RetrackError::client(
                 format!("Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", target.url)
             ));
+        }
+
+        if let Some(script) = &target.configurator {
+            if script.is_empty() {
+                bail!(RetrackError::client(
+                    "Tracker API configurator script cannot be empty."
+                ));
+            }
+
+            if script.len() > MAX_TRACKER_SCRIPT_LENGTH {
+                bail!(RetrackError::client(format!(
+                    "Tracker API configurator script cannot be longer than {MAX_TRACKER_SCRIPT_LENGTH} characters."
+                )));
+            }
+        }
+
+        if let Some(script) = &target.extractor {
+            if script.is_empty() {
+                bail!(RetrackError::client(
+                    "Tracker API extractor script cannot be empty."
+                ));
+            }
+
+            if script.len() > MAX_TRACKER_SCRIPT_LENGTH {
+                bail!(RetrackError::client(format!(
+                    "Tracker API extractor script cannot be longer than {MAX_TRACKER_SCRIPT_LENGTH} characters."
+                )));
+            }
         }
 
         Ok(())
@@ -1503,6 +1531,90 @@ mod tests {
             @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
 
+        // Empty API target configurator.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: false,
+                target: TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: Some("".to_string()),
+                    extractor: None
+                }),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: actions.clone()
+            }).await),
+            @r###""Tracker API configurator script cannot be empty.""###
+        );
+
+        // Very long API target configurator.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: Some("a".repeat(2049)),
+                    extractor: None
+                }),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: actions.clone()
+            }).await),
+            @r###""Tracker API configurator script cannot be longer than 2048 characters.""###
+        );
+
+        // Empty API target extractor.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: false,
+                target: TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: None,
+                    extractor: Some("".to_string())
+                }),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: actions.clone()
+            }).await),
+            @r###""Tracker API extractor script cannot be empty.""###
+        );
+
+        // Very long API target extractor.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: None,
+                    extractor: Some("a".repeat(2049))
+                }),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: actions.clone()
+            }).await),
+            @r###""Tracker API extractor script cannot be longer than 2048 characters.""###
+        );
+
         Ok(())
     }
 
@@ -2154,6 +2266,74 @@ mod tests {
                 ..Default::default()
             }).await),
             @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
+        );
+
+        // Empty API target configurator.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: Some("".to_string()),
+                    extractor: None
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker API configurator script cannot be empty.""###
+        );
+
+        // Very long API target configurator.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: Some("a".repeat(2049)),
+                    extractor: None
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker API configurator script cannot be longer than 2048 characters.""###
+        );
+
+        // Empty API target extractor.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: None,
+                    extractor: Some("".to_string())
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker API extractor script cannot be empty.""###
+        );
+
+        // Very long API target extractor.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::Api(ApiTarget {
+                    url: Url::parse("https://retrack.dev")?,
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    configurator: None,
+                    extractor: Some("a".repeat(2049))
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker API extractor script cannot be longer than 2048 characters.""###
         );
 
         let mut api_with_local_network = mock_api_with_network(
