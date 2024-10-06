@@ -11,7 +11,7 @@ pub use self::{
 };
 use crate::{config::JsRuntimeConfig, js_runtime::script::ScriptDefinition};
 use anyhow::Context;
-use deno_core::{serde_v8, v8, RuntimeOptions};
+use deno_core::{serde_v8, v8, Extension, RuntimeOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     sync::{
@@ -32,6 +32,16 @@ const SCRIPT_TIMEOUT_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Defines the name of the global variable available to the scripts that stores script arguments.
 const SCRIPT_CONTEXT_KEY: &str = "context";
+
+/// A list of Deno Core operations that aren't available to user scripts.
+const SCRIPT_EXCLUDED_OPS: [&str; 6] = [
+    "op_resources",
+    "op_shutdown",
+    "op_panic",
+    "op_import_sync",
+    "op_lazy_load_esm",
+    "op_eval_context",
+];
 
 /// An abstraction over the V8/Deno runtime that allows any utilities to execute custom user
 /// JavaScript scripts.
@@ -115,6 +125,18 @@ impl JsRuntime {
             create_params: Some(
                 v8::Isolate::create_params().heap_limits(1024, config.max_heap_size),
             ),
+            // Disable certain built-in operations.
+            extensions: vec![Extension {
+                name: "retrack_ext",
+                middleware_fn: Some(Box::new(|op| {
+                    if SCRIPT_EXCLUDED_OPS.contains(&op.name) {
+                        op.disable()
+                    } else {
+                        op
+                    }
+                })),
+                ..Default::default()
+            }],
             ..Default::default()
         });
 
