@@ -8,7 +8,7 @@ use serde_with::skip_serializing_none;
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfiguratorScriptArgs {
-    /// Optional previous contentAn internet socket address of the client that made the request.
+    /// Optional previous content.
     pub previous_content: Option<TrackerDataValue>,
 
     /// Optional HTTP body configured for the request.

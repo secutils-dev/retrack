@@ -210,8 +210,9 @@ impl JsRuntime {
         };
 
         // Retrieve the result `Promise`.
+        let script_src = script.src.trim();
         let script_result_promise = runtime
-            .execute_script("<anon>", script.src.clone())
+            .execute_script("<anon>", script_src.to_string())
             .map(|script_result| runtime.resolve(script_result))
             .map_err(handle_error)?;
 

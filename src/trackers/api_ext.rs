@@ -21,8 +21,9 @@ use crate::{
         database_ext::TrackersDatabaseExt,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, PageTarget, Tracker,
-        TrackerAction, TrackerDataRevision, TrackerDataValue, TrackerTarget, WebhookAction,
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
+        ExtractorScriptResult, PageTarget, Tracker, TrackerAction, TrackerDataRevision,
+        TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
 use anyhow::{anyhow, bail, Context};
@@ -854,15 +855,39 @@ where
             }
         }
 
+        // Read response, and extract data with extractor script, if specified.
+        let response_bytes = api_response
+            .bytes()
+            .await
+            .context("Failed to read API response.")?;
+        let response_bytes = if let Some(ref extractor) = target.extractor {
+            let result = self
+                .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
+                    extractor,
+                    ExtractorScriptArgs {
+                        previous_content: revisions.last().map(|rev| rev.data.clone()),
+                        body: Some(response_bytes.to_vec()),
+                    },
+                )
+                .await
+                .context("Failed to execute \"extractor\" script.")?
+                .unwrap_or_default();
+            result.body.unwrap_or_else(|| response_bytes.to_vec())
+        } else {
+            response_bytes.to_vec()
+        };
+
         Ok(TrackerDataRevision {
             id: Uuid::now_v7(),
             tracker_id: tracker.id,
-            data: TrackerDataValue::new(api_response.json().await.map_err(|err| {
-                anyhow!(
-                    "Could not deserialize API response for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?),
+            data: TrackerDataValue::new(serde_json::from_slice(&response_bytes).map_err(
+                |err| {
+                    anyhow!(
+                        "Could not deserialize API response for the tracker ('{}'): {err:?}",
+                        tracker.id
+                    )
+                },
+            )?),
             created_at: Database::utc_now()?,
         })
     }
@@ -2834,7 +2859,7 @@ mod tests {
                         body: None,
                         media_type: Some("application/json".parse()?),
                         configurator: None,
-                        extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string())
+                        extractor: None,
                     })),
             )
             .await?;
@@ -2852,7 +2877,7 @@ mod tests {
                         body: Some(json!({ "key": "value" })),
                         media_type: Some("application/json".parse()?),
                         configurator: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: `overridden-${context.body.key}` })) }))(context);".to_string()),
-                        extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string())
+                        extractor: None
                     })),
             )
             .await?;
@@ -2999,6 +3024,119 @@ mod tests {
             },
             TrackerDataValue {
                 original: String("\"rev_2\""),
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_extractor(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/get-call").parse()?,
+                        method: None,
+                        headers: Some(HeaderMap::from_iter([(
+                            HeaderName::from_static("x-custom-header"),
+                            HeaderValue::from_static("x-custom-value"),
+                        )])),
+                        body: None,
+                        media_type: Some("application/json".parse()?),
+                        configurator: None,
+                        extractor: Some(
+                            r#"
+((context) => {{
+  const newBody = JSON.parse(Deno.core.decode(context.body));
+  return {
+    body: Deno.core.encode(
+      JSON.stringify(`${newBody}_modified_${JSON.stringify(context.previousContent)}`)
+    )
+  };
+}})(context);"#
+                                .to_string(),
+                        ),
+                    })),
+            )
+            .await?;
+
+        let content = TrackerDataValue::new(json!("\"rev_1\""));
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    refresh: true,
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].tracker_id, tracker.id);
+        assert_eq!(
+            tracker_data[0].data,
+            TrackerDataValue::new(json!("\"rev_1\"_modified_undefined"))
+        );
+
+        content_mock.assert();
+        content_mock.delete();
+
+        let content_two = TrackerDataValue::new(json!("\"rev_2\""));
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content_two.value());
+        });
+
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id)
+            .await?
+            .unwrap();
+        assert_eq!(
+            revision.data.value(),
+            "\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}"
+        );
+        content_mock.assert();
+
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    refresh: false,
+                    calculate_diff: true,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 2);
+
+        assert_debug_snapshot!(
+            tracker_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: String("\"rev_1\"_modified_undefined"),
+                mods: None,
+            },
+            TrackerDataValue {
+                original: String("@@ -1 +1 @@\n-\"rev_1\"_modified_undefined\n+\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}\n"),
                 mods: None,
             },
         ]

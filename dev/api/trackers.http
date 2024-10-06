@@ -124,6 +124,36 @@ Accept: application/json
   "tags": ["app:test"]
 }
 
+### Create tracker (target: api, with extractor)
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[Test] Counter (api)",
+  "target": {
+    "type": "api",
+    "url": "https://retrack-demo.webhooks.secutils.dev/test/json",
+    "headers": {
+      "x-header-name": "x-header-value"
+    },
+    "body": {
+      "key": "value"
+    },
+    "extractor": "((context) => ({ body: Deno.core.encode(JSON.stringify({...JSON.parse(Deno.core.decode(context.body)), ts: Date.now() })) }))(context);"
+  },
+  "actions": [
+    { "type": "log" }
+  ],
+  "config": {
+    "revisions": 10,
+    "job": {
+      "schedule": "0 */1 * * * *"
+    }
+  },
+  "tags": ["app:test"]
+}
+
 ### Disable tracker
 PUT {{host}}/api/trackers/01922cdf-133e-72f2-9b35-f21f59e86324
 Content-Type: application/json
