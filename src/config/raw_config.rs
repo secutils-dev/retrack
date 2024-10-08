@@ -96,6 +96,7 @@ mod tests {
         max_revisions = 30
         min_schedule_interval = 10000
         restrict_to_public_urls = true
+        max_script_size = '4 KiB'
 
         [js_runtime]
         max_heap_size = 10485760
@@ -138,6 +139,7 @@ mod tests {
         max_revisions = 11
         min_schedule_interval = 10_000
         restrict_to_public_urls = true
+        max_script_size = '4 KiB'
     "#,
         )
         .unwrap();
@@ -205,6 +207,9 @@ mod tests {
                 ),
                 min_schedule_interval: 10s,
                 restrict_to_public_urls: true,
+                max_script_size: Byte(
+                    4096,
+                ),
             },
             smtp: None,
             js_runtime: JsRuntimeConfig {

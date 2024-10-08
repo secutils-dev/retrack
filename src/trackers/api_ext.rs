@@ -27,6 +27,7 @@ use crate::{
     },
 };
 use anyhow::{anyhow, bail, Context};
+use byte_unit::Byte;
 use croner::Cron;
 use futures::Stream;
 use http::Method;
@@ -43,9 +44,6 @@ use uuid::Uuid;
 
 /// Defines a maximum number of jobs that can be retrieved from the database at once.
 const MAX_JOBS_PAGE_SIZE: usize = 1000;
-
-/// Defines the maximum length of the user scripts.
-const MAX_TRACKER_SCRIPT_LENGTH: usize = 2048;
 
 /// Defines the maximum length of the user agent string.
 const MAX_TRACKER_PAGE_USER_AGENT_LENGTH: usize = 200;
@@ -469,7 +467,7 @@ where
 
         match tracker.target {
             TrackerTarget::Page(ref target) => {
-                Self::validate_page_target(target)?;
+                self.validate_page_target(target)?;
             }
             TrackerTarget::Api(ref target) => {
                 self.validate_api_target(config, target).await?;
@@ -629,16 +627,18 @@ where
     }
 
     /// Validates tracker's web page target parameters.
-    fn validate_page_target(target: &PageTarget) -> anyhow::Result<()> {
+    fn validate_page_target(&self, target: &PageTarget) -> anyhow::Result<()> {
         if target.extractor.is_empty() {
             bail!(RetrackError::client(
                 "Tracker web page extractor script cannot be empty."
             ));
         }
 
-        if target.extractor.len() > MAX_TRACKER_SCRIPT_LENGTH {
+        let extractor_size = Byte::from_u64(target.extractor.len() as u64);
+        if extractor_size > self.api.config.trackers.max_script_size {
             bail!(RetrackError::client(format!(
-                "Tracker web page extractor script cannot be longer than {MAX_TRACKER_SCRIPT_LENGTH} characters."
+                "Tracker web page extractor script cannot be larger than {} bytes.",
+                self.api.config.trackers.max_script_size
             )));
         }
 
@@ -679,9 +679,11 @@ where
                 ));
             }
 
-            if script.len() > MAX_TRACKER_SCRIPT_LENGTH {
+            let script_size = Byte::from_u64(script.len() as u64);
+            if script_size > config.max_script_size {
                 bail!(RetrackError::client(format!(
-                    "Tracker API configurator script cannot be longer than {MAX_TRACKER_SCRIPT_LENGTH} characters."
+                    "Tracker API configurator script cannot be larger than {} bytes.",
+                    config.max_script_size
                 )));
             }
         }
@@ -693,9 +695,11 @@ where
                 ));
             }
 
-            if script.len() > MAX_TRACKER_SCRIPT_LENGTH {
+            let script_size = Byte::from_u64(script.len() as u64);
+            if script_size > config.max_script_size {
                 bail!(RetrackError::client(format!(
-                    "Tracker API extractor script cannot be longer than {MAX_TRACKER_SCRIPT_LENGTH} characters."
+                    "Tracker API extractor script cannot be larger than {} bytes.",
+                    config.max_script_size
                 )));
             }
         }
@@ -1030,17 +1034,14 @@ mod tests {
 
     #[sqlx::test]
     async fn properly_validates_tracker_at_creation(pool: PgPool) -> anyhow::Result<()> {
-        let api = mock_api_with_config(
-            pool.clone(),
-            Config {
-                trackers: TrackersConfig {
-                    restrict_to_public_urls: true,
-                    ..Default::default()
-                },
-                ..mock_config()?
+        let global_config = Config {
+            trackers: TrackersConfig {
+                restrict_to_public_urls: true,
+                ..Default::default()
             },
-        )
-        .await?;
+            ..mock_config()?
+        };
+        let api = mock_api_with_config(pool.clone(), global_config.clone()).await?;
 
         let api = api.trackers();
 
@@ -1278,14 +1279,14 @@ mod tests {
                 name: "name".to_string(),
                 enabled: true,
                 target: TrackerTarget::Page(PageTarget {
-                    extractor: "a".repeat(2049),
+                    extractor: "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1),
                     ..Default::default()
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker web page extractor script cannot be longer than 2048 characters.""###
+            @r###""Tracker web page extractor script cannot be larger than 4096 bytes.""###
         );
 
         // Empty web page target user agent.
@@ -1588,14 +1589,16 @@ mod tests {
                     headers: None,
                     body: None,
                     media_type: None,
-                    configurator: Some("a".repeat(2049)),
+                    configurator: Some(
+                        "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
+                    ),
                     extractor: None
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker API configurator script cannot be longer than 2048 characters.""###
+            @r###""Tracker API configurator script cannot be larger than 4096 bytes.""###
         );
 
         // Empty API target extractor.
@@ -1631,13 +1634,15 @@ mod tests {
                     body: None,
                     media_type: None,
                     configurator: None,
-                    extractor: Some("a".repeat(2049))
+                    extractor: Some(
+                        "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
+                    )
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker API extractor script cannot be longer than 2048 characters.""###
+            @r###""Tracker API extractor script cannot be larger than 4096 bytes.""###
         );
 
         Ok(())
@@ -1869,17 +1874,14 @@ mod tests {
 
     #[sqlx::test]
     async fn properly_validates_tracker_at_update(pool: PgPool) -> anyhow::Result<()> {
-        let api = mock_api_with_config(
-            pool.clone(),
-            Config {
-                trackers: TrackersConfig {
-                    restrict_to_public_urls: true,
-                    ..Default::default()
-                },
-                ..mock_config()?
+        let global_config = Config {
+            trackers: TrackersConfig {
+                restrict_to_public_urls: true,
+                ..Default::default()
             },
-        )
-        .await?;
+            ..mock_config()?
+        };
+        let api = mock_api_with_config(pool.clone(), global_config.clone()).await?;
 
         let trackers = api.trackers();
         let tracker = trackers
@@ -2093,13 +2095,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Page(PageTarget {
-                    extractor: "a".repeat(2049),
+                    extractor: "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1),
                     user_agent: None,
                     ignore_https_errors: false
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker web page extractor script cannot be longer than 2048 characters.""###
+            @r###""Tracker web page extractor script cannot be larger than 4096 bytes.""###
         );
 
         // Empty web page target user agent.
@@ -2319,12 +2321,14 @@ mod tests {
                     headers: None,
                     body: None,
                     media_type: None,
-                    configurator: Some("a".repeat(2049)),
+                    configurator: Some(
+                        "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
+                    ),
                     extractor: None
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker API configurator script cannot be longer than 2048 characters.""###
+            @r###""Tracker API configurator script cannot be larger than 4096 bytes.""###
         );
 
         // Empty API target extractor.
@@ -2354,11 +2358,13 @@ mod tests {
                     body: None,
                     media_type: None,
                     configurator: None,
-                    extractor: Some("a".repeat(2049))
+                    extractor: Some(
+                        "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
+                    )
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker API extractor script cannot be longer than 2048 characters.""###
+            @r###""Tracker API extractor script cannot be larger than 4096 bytes.""###
         );
 
         let mut api_with_local_network = mock_api_with_network(

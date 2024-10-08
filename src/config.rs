@@ -147,6 +147,9 @@ pub mod tests {
                 schedules: None,
                 min_schedule_interval: 10s,
                 restrict_to_public_urls: true,
+                max_script_size: Byte(
+                    4096,
+                ),
             },
             js_runtime: JsRuntimeConfig {
                 max_heap_size: 10485760,

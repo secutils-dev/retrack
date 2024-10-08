@@ -1,3 +1,4 @@
+use byte_unit::Byte;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationMilliSeconds};
 use std::{collections::HashSet, time::Duration};
@@ -14,6 +15,8 @@ pub struct TrackersConfig {
     pub min_schedule_interval: Duration,
     /// Indicates whether to restrict the tracker to publicly reachable HTTP and HTTPS URLs only.
     pub restrict_to_public_urls: bool,
+    /// The maximum size of any give tracker script (configurators, extractors etc.).
+    pub max_script_size: Byte,
 }
 
 impl Default for TrackersConfig {
@@ -25,6 +28,8 @@ impl Default for TrackersConfig {
             // Default to 10 seconds.
             min_schedule_interval: Duration::from_secs(10),
             restrict_to_public_urls: true,
+            // Default is 4KiB.
+            max_script_size: Byte::from_u64(4096),
         }
     }
 }
@@ -32,6 +37,7 @@ impl Default for TrackersConfig {
 #[cfg(test)]
 mod tests {
     use crate::config::TrackersConfig;
+    use byte_unit::Byte;
     use insta::assert_toml_snapshot;
     use std::time::Duration;
 
@@ -42,6 +48,7 @@ mod tests {
         max_revisions = 30
         min_schedule_interval = 10000
         restrict_to_public_urls = true
+        max_script_size = '4 KiB'
         "###);
 
         let config = TrackersConfig {
@@ -49,12 +56,14 @@ mod tests {
             schedules: Some(["@hourly".to_string()].into_iter().collect()),
             min_schedule_interval: Duration::from_secs(2),
             restrict_to_public_urls: false,
+            max_script_size: Byte::from_u64(8192),
         };
         assert_toml_snapshot!(config, @r###"
         max_revisions = 10
         schedules = ['@hourly']
         min_schedule_interval = 2000
         restrict_to_public_urls = false
+        max_script_size = '8 KiB'
         "###);
     }
 
@@ -65,6 +74,7 @@ mod tests {
         max_revisions = 30
         min_schedule_interval = 10_000
         restrict_to_public_urls = true
+        max_script_size = '4 KiB'
     "#,
         )
         .unwrap();
@@ -76,6 +86,7 @@ mod tests {
         min_schedule_interval = 2_000
         schedules = ['@', '@hourly']
         restrict_to_public_urls = false
+        max_script_size = '8 KiB'
     "#,
         )
         .unwrap();
@@ -89,7 +100,8 @@ mod tests {
                         .collect(),
                 ),
                 min_schedule_interval: Duration::from_secs(2),
-                restrict_to_public_urls: false
+                restrict_to_public_urls: false,
+                max_script_size: Byte::from_u64(8192),
             }
         );
     }

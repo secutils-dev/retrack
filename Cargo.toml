@@ -15,6 +15,7 @@ actix-web = "4.9.0"
 actix-web-lab = "0.22.0"
 anyhow = "1.0.89"
 async-stream = "0.3.5"
+byte-unit = "5.1.4"
 chrono = { version = "0.4.38", default-features = false }
 clap = "4.5.18"
 croner = "2.0.6"
@@ -66,6 +67,7 @@ toml = "0.8.19"
 
 [features]
 default = [
+    "byte-unit/serde",
     "clap/cargo",
     "clap/env",
     "figment/env",
