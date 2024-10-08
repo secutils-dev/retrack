@@ -802,6 +802,7 @@ where
                 .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
                     configurator.as_str(),
                     ConfiguratorScriptArgs {
+                        tags: tracker.tags.clone(),
                         previous_content: revisions.last().map(|rev| rev.data.clone()),
                         body: target.body.clone(),
                     },
@@ -869,6 +870,7 @@ where
                 .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
                     extractor,
                     ExtractorScriptArgs {
+                        tags: tracker.tags.clone(),
                         previous_content: revisions.last().map(|rev| rev.data.clone()),
                         body: Some(response_bytes.to_vec()),
                     },

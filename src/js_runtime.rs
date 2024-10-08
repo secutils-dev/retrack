@@ -308,6 +308,7 @@ pub mod tests {
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
                 r#"(() => {{ return { headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify(context)) }; }})();"#,
                 ConfiguratorScriptArgs {
+                    tags: vec!["tag1".to_string(), "tag2".to_string()],
                     previous_content: Some(TrackerDataValue::new(json!({ "key": "content" }))),
                     body: Some(json!({ "key": "body" })),
                 },
@@ -323,6 +324,7 @@ pub mod tests {
                     HeaderValue::from_static("x-value")
                 )])),
                 body: Some(serde_json::to_vec(&json!({
+                    "tags": ["tag1", "tag2"],
                     "previousContent": { "original": { "key": "content" } },
                     "body": { "key": "body" }
                 }))?),
