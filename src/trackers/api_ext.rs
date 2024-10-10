@@ -31,8 +31,9 @@ use byte_unit::Byte;
 use croner::Cron;
 use futures::Stream;
 use http::Method;
+use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use lettre::message::Mailbox;
-use reqwest_middleware::ClientBuilder;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use std::{
     collections::HashSet,
@@ -40,6 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, info};
+use url::Url;
 use uuid::Uuid;
 
 /// Defines a maximum number of jobs that can be retrieved from the database at once.
@@ -467,7 +469,7 @@ where
 
         match tracker.target {
             TrackerTarget::Page(ref target) => {
-                self.validate_page_target(target)?;
+                self.validate_page_target(target).await?;
             }
             TrackerTarget::Api(ref target) => {
                 self.validate_api_target(config, target).await?;
@@ -627,31 +629,35 @@ where
     }
 
     /// Validates tracker's web page target parameters.
-    fn validate_page_target(&self, target: &PageTarget) -> anyhow::Result<()> {
+    async fn validate_page_target(&self, target: &PageTarget) -> anyhow::Result<()> {
         if target.extractor.is_empty() {
             bail!(RetrackError::client(
-                "Tracker web page extractor script cannot be empty."
+                "Tracker target extractor script cannot be empty."
             ));
         }
 
         let extractor_size = Byte::from_u64(target.extractor.len() as u64);
         if extractor_size > self.api.config.trackers.max_script_size {
             bail!(RetrackError::client(format!(
-                "Tracker web page extractor script cannot be larger than {} bytes.",
+                "Tracker target extractor script cannot be larger than {} bytes.",
                 self.api.config.trackers.max_script_size
             )));
         }
 
+        // Check if configurator script is URL pointing to a remote script.
+        self.validate_script_url(&target.extractor, "extractor")
+            .await?;
+
         if let Some(ref user_agent) = target.user_agent {
             if user_agent.is_empty() {
                 bail!(RetrackError::client(
-                    "Tracker web page user-agent header cannot be empty.",
+                    "Tracker target user-agent header cannot be empty.",
                 ));
             }
 
             if user_agent.len() > MAX_TRACKER_PAGE_USER_AGENT_LENGTH {
                 bail!(RetrackError::client(format!(
-                    "Tracker web page user-agent cannot be longer than {MAX_TRACKER_PAGE_USER_AGENT_LENGTH} characters."
+                    "Tracker target user-agent cannot be longer than {MAX_TRACKER_PAGE_USER_AGENT_LENGTH} characters."
                 )));
             }
         }
@@ -668,40 +674,46 @@ where
         if config.restrict_to_public_urls && !self.api.network.is_public_web_url(&target.url).await
         {
             bail!(RetrackError::client(
-                format!("Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", target.url)
+                format!("Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", target.url)
             ));
         }
 
         if let Some(script) = &target.configurator {
             if script.is_empty() {
                 bail!(RetrackError::client(
-                    "Tracker API configurator script cannot be empty."
+                    "Tracker target configurator script cannot be empty."
                 ));
             }
 
             let script_size = Byte::from_u64(script.len() as u64);
             if script_size > config.max_script_size {
                 bail!(RetrackError::client(format!(
-                    "Tracker API configurator script cannot be larger than {} bytes.",
+                    "Tracker target configurator script cannot be larger than {} bytes.",
                     config.max_script_size
                 )));
             }
+
+            // Check if configurator script is URL pointing to a remote script.
+            self.validate_script_url(script, "configurator").await?;
         }
 
         if let Some(script) = &target.extractor {
             if script.is_empty() {
                 bail!(RetrackError::client(
-                    "Tracker API extractor script cannot be empty."
+                    "Tracker target extractor script cannot be empty."
                 ));
             }
 
             let script_size = Byte::from_u64(script.len() as u64);
             if script_size > config.max_script_size {
                 bail!(RetrackError::client(format!(
-                    "Tracker API extractor script cannot be larger than {} bytes.",
+                    "Tracker target extractor script cannot be larger than {} bytes.",
                     config.max_script_size
                 )));
             }
+
+            // Check if extractor script is URL pointing to a remote script.
+            self.validate_script_url(script, "extractor").await?;
         }
 
         Ok(())
@@ -720,18 +732,16 @@ where
             )));
         };
 
+        let extractor = self.get_script_content(tracker, &target.extractor).await?;
         let scraper_request = WebScraperContentRequest {
-            extractor: target.extractor.as_ref(),
+            extractor: extractor.as_ref(),
             user_agent: target.user_agent.as_deref(),
             ignore_https_errors: target.ignore_https_errors,
             timeout: tracker.config.timeout,
             previous_content: revisions.last().map(|rev| rev.data.original()),
         };
 
-        let client = ClientBuilder::new(reqwest::Client::new())
-            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
-            .build();
-        let scraper_response = client
+        let scraper_response = Self::http_client()
             .post(format!(
                 "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()
@@ -800,7 +810,7 @@ where
         {
             let result = self
                 .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                    configurator.as_str(),
+                    self.get_script_content(tracker, configurator).await?,
                     ConfiguratorScriptArgs {
                         tags: tracker.tags.clone(),
                         previous_content: revisions.last().map(|rev| rev.data.clone()),
@@ -815,9 +825,7 @@ where
             (None, None)
         };
 
-        let client = ClientBuilder::new(reqwest::Client::new())
-            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
-            .build();
+        let client = Self::http_client();
         let request_builder = client.request(
             target.method.as_ref().unwrap_or(&Method::GET).clone(),
             target.url.clone(),
@@ -832,8 +840,11 @@ where
         };
 
         // Add body, if any.
-        let original_body = target.body.as_ref().map(serde_json::to_vec).transpose()?;
-        let request_builder = if let Some(body) = body_override.or(original_body) {
+        let body = body_override
+            .map(Ok)
+            .or_else(|| target.body.as_ref().map(serde_json::to_vec))
+            .transpose()?;
+        let request_builder = if let Some(body) = body {
             request_builder.body(body)
         } else {
             request_builder
@@ -868,7 +879,7 @@ where
         let response_bytes = if let Some(ref extractor) = target.extractor {
             let result = self
                 .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
-                    extractor,
+                    self.get_script_content(tracker, extractor).await?,
                     ExtractorScriptArgs {
                         tags: tracker.tags.clone(),
                         previous_content: revisions.last().map(|rev| rev.data.clone()),
@@ -901,7 +912,7 @@ where
     /// Executes JavaScript with Deno JS runtime.
     async fn execute_script<ScriptArgs: ScriptBuilder<ScriptArgs, ScriptResult>, ScriptResult>(
         &self,
-        script_src: &str,
+        script_src: impl Into<String>,
         script_args: ScriptArgs,
     ) -> anyhow::Result<Option<ScriptResult>> {
         let now = Instant::now();
@@ -933,6 +944,74 @@ where
                 Err(err)
             }
         }
+    }
+
+    /// Validates remote script reference.
+    async fn validate_script_url(&self, url: &str, script_ref: &str) -> anyhow::Result<()> {
+        // No need to parse the URL if we don't restrict to public URLs.
+        if !self.api.config.trackers.restrict_to_public_urls {
+            return Ok(());
+        }
+
+        // Try to parse the URL and check if it's a valid URL. If it's not, script will be treated
+        // as a script content.
+        let Ok(url) = Url::parse(url) else {
+            return Ok(());
+        };
+
+        if !self.api.network.is_public_web_url(&url).await {
+            bail!(RetrackError::client(
+                format!("Tracker target {script_ref} script URL must be either `http` or `https` and have a valid public reachable domain name, but received {url}.")
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Takes script reference saved as a tracker script and returns its content. If the script
+    /// reference is a valid URL, its content will be fetched from the remote server.
+    async fn get_script_content(
+        &self,
+        tracker: &Tracker,
+        script_ref: &str,
+    ) -> anyhow::Result<String> {
+        // First check if script is a URL pointing to a remote script.
+        let Ok(url) = Url::parse(script_ref) else {
+            return Ok(script_ref.to_string());
+        };
+
+        // Make sure that URL is allowed.
+        let config = &self.api.config.trackers;
+        if config.restrict_to_public_urls && !self.api.network.is_public_web_url(&url).await {
+            error!(
+                tracker.id = %tracker.id,
+                tracker.name = tracker.name,
+                "Attempted to fetch remote script from not allowed URL: {script_ref}"
+            );
+            bail!(RetrackError::client(format!(
+                "Attempted to fetch remote script from not allowed URL: {script_ref}"
+            )));
+        }
+
+        Ok(Self::http_client()
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?)
+    }
+
+    /// Constructs a new instance of the HTTP client with tracing and caching middleware.
+    fn http_client() -> ClientWithMiddleware {
+        ClientBuilder::new(reqwest::Client::new())
+            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
+            .with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: CACacheManager::default(),
+                options: HttpCacheOptions::default(),
+            }))
+            .build()
     }
 }
 
@@ -1272,7 +1351,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker web page extractor script cannot be empty.""###
+            @r###""Tracker target extractor script cannot be empty.""###
         );
 
         // Very long web page target extractor.
@@ -1288,7 +1367,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker web page extractor script cannot be larger than 4096 bytes.""###
+            @r###""Tracker target extractor script cannot be larger than 4096 bytes.""###
         );
 
         // Empty web page target user agent.
@@ -1304,7 +1383,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker web page extractor script cannot be empty.""###
+            @r###""Tracker target extractor script cannot be empty.""###
         );
 
         // Very long web page target user agent.
@@ -1320,7 +1399,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker web page extractor script cannot be empty.""###
+            @r###""Tracker target extractor script cannot be empty.""###
         );
 
         // Invalid schedule.
@@ -1503,7 +1582,7 @@ mod tests {
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
-        // Invalid JSON API target URL schema.
+        // Invalid API target URL schema.
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
@@ -1521,7 +1600,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
+            @r###""Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
         );
 
         let mut api_with_local_network = mock_api_with_network(
@@ -1538,7 +1617,7 @@ mod tests {
             .trackers
             .restrict_to_public_urls = true;
 
-        // Non-public JSON API target URL.
+        // Non-public API target URL.
         assert_debug_snapshot!(
             create_and_fail(api_with_local_network.trackers().create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
@@ -1556,7 +1635,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
+            @r###""Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
 
         // Empty API target configurator.
@@ -1577,7 +1656,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker API configurator script cannot be empty.""###
+            @r###""Tracker target configurator script cannot be empty.""###
         );
 
         // Very long API target configurator.
@@ -1600,7 +1679,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker API configurator script cannot be larger than 4096 bytes.""###
+            @r###""Tracker target configurator script cannot be larger than 4096 bytes.""###
         );
 
         // Empty API target extractor.
@@ -1621,7 +1700,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker API extractor script cannot be empty.""###
+            @r###""Tracker target extractor script cannot be empty.""###
         );
 
         // Very long API target extractor.
@@ -1644,7 +1723,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker API extractor script cannot be larger than 4096 bytes.""###
+            @r###""Tracker target extractor script cannot be larger than 4096 bytes.""###
         );
 
         Ok(())
@@ -2090,7 +2169,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker web page extractor script cannot be empty.""###
+            @r###""Tracker target extractor script cannot be empty.""###
         );
 
         // Very long web page target extractor.
@@ -2103,7 +2182,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker web page extractor script cannot be larger than 4096 bytes.""###
+            @r###""Tracker target extractor script cannot be larger than 4096 bytes.""###
         );
 
         // Empty web page target user agent.
@@ -2116,7 +2195,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker web page user-agent header cannot be empty.""###
+            @r###""Tracker target user-agent header cannot be empty.""###
         );
 
         // Very long web page target user agent.
@@ -2129,7 +2208,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker web page user-agent cannot be longer than 200 characters.""###
+            @r###""Tracker target user-agent cannot be longer than 200 characters.""###
         );
 
         // Invalid schedule.
@@ -2280,7 +2359,7 @@ mod tests {
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
-        // Invalid JSON API target URL schema.
+        // Invalid API target URL schema.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
@@ -2294,7 +2373,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
+            @r###""Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received ftp://retrack.dev/.""###
         );
 
         // Empty API target configurator.
@@ -2311,7 +2390,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker API configurator script cannot be empty.""###
+            @r###""Tracker target configurator script cannot be empty.""###
         );
 
         // Very long API target configurator.
@@ -2330,7 +2409,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker API configurator script cannot be larger than 4096 bytes.""###
+            @r###""Tracker target configurator script cannot be larger than 4096 bytes.""###
         );
 
         // Empty API target extractor.
@@ -2347,7 +2426,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker API extractor script cannot be empty.""###
+            @r###""Tracker target extractor script cannot be empty.""###
         );
 
         // Very long API target extractor.
@@ -2366,7 +2445,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker API extractor script cannot be larger than 4096 bytes.""###
+            @r###""Tracker target extractor script cannot be larger than 4096 bytes.""###
         );
 
         let mut api_with_local_network = mock_api_with_network(
@@ -2398,7 +2477,7 @@ mod tests {
                 })),
                 ..Default::default()
             }).await),
-            @r###""Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
+            @r###""Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/.""###
         );
 
         Ok(())
@@ -3145,6 +3224,120 @@ mod tests {
             },
             TrackerDataValue {
                 original: String("@@ -1 +1 @@\n-\"rev_1\"_modified_undefined\n+\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}\n"),
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_remote_scripts(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/get-call").parse()?,
+                        method: Some(Method::POST),
+                        headers: Some(HeaderMap::from_iter([(
+                            HeaderName::from_static("x-custom-header"),
+                            HeaderValue::from_static("x-custom-value"),
+                        )])),
+                        body: Some(json!({ "key": "value" })),
+                        media_type: Some("application/json".parse()?),
+                        configurator: Some(server.url("/configurator.js")),
+                        extractor: Some(server.url("/extractor.js")),
+                    })),
+            )
+            .await?;
+
+        let configurator_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/configurator.js");
+            then.status(200)
+                .header("Content-Type", "text/javascript")
+                .body(
+                    r#"
+((context) => ({ 
+  body: Deno.core.encode(JSON.stringify({ key: `overridden-${context.body.key}` }))
+ }))(context);"#,
+                );
+        });
+
+        let content = TrackerDataValue::new(json!("\"rev_1\""));
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/get-call")
+                .body(serde_json::to_string(&json!({ "key": "overridden-value" })).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        let extractor_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/extractor.js");
+            then.status(200)
+                .header("Content-Type", "text/javascript")
+                .body(
+                    r#"
+((context) => {{
+  const newBody = JSON.parse(Deno.core.decode(context.body));
+  return {
+    body: Deno.core.encode(
+      JSON.stringify(`${newBody}_modified_${JSON.stringify(context.previousContent)}`)
+    )
+  };
+}})(context);"#,
+                );
+        });
+
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    refresh: true,
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].tracker_id, tracker.id);
+        assert_eq!(
+            tracker_data[0].data,
+            TrackerDataValue::new(json!("\"rev_1\"_modified_undefined"))
+        );
+
+        configurator_mock.assert();
+        content_mock.assert();
+        extractor_mock.assert();
+
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    refresh: false,
+                    calculate_diff: true,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+
+        assert_debug_snapshot!(
+            tracker_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: String("\"rev_1\"_modified_undefined"),
                 mods: None,
             },
         ]

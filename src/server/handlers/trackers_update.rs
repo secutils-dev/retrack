@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(response.status(), 400);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            r###"{"message":"Tracker JSON API target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."}"###
+            r###"{"message":"Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."}"###
         );
         let trackers = server_state
             .api
