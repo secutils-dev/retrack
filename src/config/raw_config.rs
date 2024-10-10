@@ -1,6 +1,6 @@
 use crate::config::{
-    database_config::DatabaseConfig, ComponentsConfig, JsRuntimeConfig, SchedulerJobsConfig,
-    SmtpConfig, TrackersConfig,
+    database_config::DatabaseConfig, CacheConfig, ComponentsConfig, JsRuntimeConfig,
+    SchedulerJobsConfig, SmtpConfig, TrackersConfig,
 };
 use figment::{providers, providers::Format, value, Figment, Metadata, Profile, Provider};
 use serde_derive::{Deserialize, Serialize};
@@ -15,6 +15,8 @@ pub struct RawConfig {
     pub public_url: Url,
     /// Database configuration.
     pub db: DatabaseConfig,
+    /// Defines various caches related settings.
+    pub cache: CacheConfig,
     /// Configuration for the components that are deployed separately.
     pub components: ComponentsConfig,
     /// Configuration for the scheduler jobs.
@@ -50,6 +52,7 @@ impl Default for RawConfig {
             trackers: TrackersConfig::default(),
             js_runtime: JsRuntimeConfig::default(),
             smtp: None,
+            cache: CacheConfig::default(),
         }
     }
 }
@@ -83,6 +86,8 @@ mod tests {
         port = 5432
         username = 'postgres'
         max_connections = 100
+
+        [cache]
 
         [components]
         web_scraper_url = 'http://localhost:7272/'
@@ -120,6 +125,9 @@ mod tests {
         host = 'localhost'
         port = 5432
         max_connections = 1000
+        
+        [cache]
+        http_cache_path = './http-cache'
 
         [components]
         web_scraper_url = 'http://localhost:7272/'
@@ -173,6 +181,11 @@ mod tests {
                     "password",
                 ),
                 max_connections: 1000,
+            },
+            cache: CacheConfig {
+                http_cache_path: Some(
+                    "./http-cache",
+                ),
             },
             components: ComponentsConfig {
                 web_scraper_url: Url {

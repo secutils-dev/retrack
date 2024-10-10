@@ -82,7 +82,7 @@ mod tests {
 
     pub use crate::{config::tests::*, network::tests::*, scheduler::tests::*, trackers::tests::*};
     use crate::{
-        config::{DatabaseConfig, JsRuntimeConfig, TrackersConfig},
+        config::{CacheConfig, DatabaseConfig, JsRuntimeConfig, TrackersConfig},
         js_runtime::JsRuntime,
         templates::create_templates,
     };
@@ -100,6 +100,9 @@ mod tests {
         Ok(Config {
             public_url: Url::parse("http://localhost:1234")?,
             db: DatabaseConfig::default(),
+            cache: CacheConfig {
+                http_cache_path: Some("./target/http-cache".into()),
+            },
             smtp: Some(SmtpConfig {
                 username: "dev@retrack.dev".to_string(),
                 password: "password".to_string(),

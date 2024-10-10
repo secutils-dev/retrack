@@ -1,3 +1,4 @@
+mod cache_config;
 mod components_config;
 mod database_config;
 mod js_runtime_config;
@@ -9,8 +10,8 @@ mod trackers_config;
 use url::Url;
 
 pub use self::{
-    components_config::ComponentsConfig, database_config::DatabaseConfig,
-    js_runtime_config::JsRuntimeConfig, raw_config::RawConfig,
+    cache_config::CacheConfig, components_config::ComponentsConfig,
+    database_config::DatabaseConfig, js_runtime_config::JsRuntimeConfig, raw_config::RawConfig,
     scheduler_jobs_config::SchedulerJobsConfig, smtp_config::SmtpConfig,
     trackers_config::TrackersConfig,
 };
@@ -22,6 +23,8 @@ pub struct Config {
     pub public_url: Url,
     /// Database configuration.
     pub db: DatabaseConfig,
+    /// Configuration for the various caches Retrack relies on.
+    pub cache: CacheConfig,
     /// Configuration for the SMTP functionality.
     pub smtp: Option<SmtpConfig>,
     /// Configuration for the components that are deployed separately.
@@ -45,6 +48,7 @@ impl From<RawConfig> for Config {
         Self {
             public_url: raw_config.public_url,
             db: raw_config.db,
+            cache: raw_config.cache,
             smtp: raw_config.smtp,
             components: raw_config.components,
             scheduler: raw_config.scheduler,
@@ -102,6 +106,9 @@ pub mod tests {
                 username: "postgres",
                 password: None,
                 max_connections: 100,
+            },
+            cache: CacheConfig {
+                http_cache_path: None,
             },
             smtp: Some(
                 SmtpConfig {

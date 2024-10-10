@@ -741,7 +741,7 @@ where
             previous_content: revisions.last().map(|rev| rev.data.original()),
         };
 
-        let scraper_response = Self::http_client()
+        let scraper_response = self.http_client()
             .post(format!(
                 "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()
@@ -825,7 +825,7 @@ where
             (None, None)
         };
 
-        let client = Self::http_client();
+        let client = self.http_client();
         let request_builder = client.request(
             target.method.as_ref().unwrap_or(&Method::GET).clone(),
             target.url.clone(),
@@ -993,7 +993,8 @@ where
             )));
         }
 
-        Ok(Self::http_client()
+        Ok(self
+            .http_client()
             .get(url)
             .send()
             .await?
@@ -1003,12 +1004,19 @@ where
     }
 
     /// Constructs a new instance of the HTTP client with tracing and caching middleware.
-    fn http_client() -> ClientWithMiddleware {
+    fn http_client(&self) -> ClientWithMiddleware {
+        let manager = if let Some(ref path) = self.api.config.cache.http_cache_path {
+            CACacheManager {
+                path: path.to_path_buf(),
+            }
+        } else {
+            CACacheManager::default()
+        };
         ClientBuilder::new(reqwest::Client::new())
             .with(TracingMiddleware::<SpanBackendWithUrl>::new())
             .with(Cache(HttpCache {
                 mode: CacheMode::Default,
-                manager: CACacheManager::default(),
+                manager,
                 options: HttpCacheOptions::default(),
             }))
             .build()
@@ -3268,7 +3276,7 @@ mod tests {
                 .header("Content-Type", "text/javascript")
                 .body(
                     r#"
-((context) => ({ 
+((context) => ({
   body: Deno.core.encode(JSON.stringify({ key: `overridden-${context.body.key}` }))
  }))(context);"#,
                 );
