@@ -69,7 +69,7 @@ pub const MAX_TRACKER_NAME_LENGTH: usize = 100;
 pub const MAX_TRACKER_TAG_LENGTH: usize = 50;
 
 /// Defines the maximum count of tracker tags.
-pub const MAX_TRACKER_TAGS_COUNT: usize = 10;
+pub const MAX_TRACKER_TAGS_COUNT: usize = 20;
 
 /// Defines the maximum count of tracker actions.
 pub const MAX_TRACKER_ACTIONS_COUNT: usize = 10;
@@ -1226,10 +1226,10 @@ mod tests {
                 enabled: true,
                 target: target.clone(),
                 config: config.clone(),
-                tags: (0..11).map(|i| i.to_string()).collect(),
+                tags: (0..21).map(|i| i.to_string()).collect(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker cannot have more than 10 tags.""###
+            @r###""Tracker cannot have more than 20 tags.""###
         );
 
         // Too many actions.
@@ -2075,10 +2075,10 @@ mod tests {
         // Too many tags.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                tags: Some((0..11).map(|i| i.to_string()).collect()),
+                tags: Some((0..21).map(|i| i.to_string()).collect()),
                 ..Default::default()
             }).await),
-            @r###""Tracker cannot have more than 10 tags.""###
+            @r###""Tracker cannot have more than 20 tags.""###
         );
 
         // Too many actions.
@@ -2744,9 +2744,9 @@ mod tests {
         // Too many tags.
         assert_debug_snapshot!(
             list_and_fail(api.get_trackers(TrackersListParams {
-                tags: (0..11).map(|i| i.to_string()).collect()
+                tags: (0..21).map(|i| i.to_string()).collect()
             }).await),
-            @r###""Trackers filter params cannot use more than 10 tags.""###
+            @r###""Trackers filter params cannot use more than 20 tags.""###
         );
 
         Ok(())
