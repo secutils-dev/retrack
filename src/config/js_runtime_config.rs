@@ -1,4 +1,4 @@
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationMilliSeconds};
 use std::time::Duration;
 

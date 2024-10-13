@@ -1,4 +1,4 @@
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Configuration for the Retrack scheduler jobs.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]

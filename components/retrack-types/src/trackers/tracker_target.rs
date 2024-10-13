@@ -8,7 +8,7 @@ pub use self::{
     },
     page_target::PageTarget,
 };
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Tracker's target (web page, API, or file).

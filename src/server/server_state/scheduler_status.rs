@@ -1,4 +1,4 @@
-use serde_derive::Serialize;
+use serde::Serialize;
 use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
 use std::time::Duration;
 use utoipa::ToSchema;

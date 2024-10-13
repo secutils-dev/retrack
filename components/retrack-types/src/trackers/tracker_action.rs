@@ -2,8 +2,8 @@ mod email_action;
 mod webhook_action;
 
 pub use self::{email_action::EmailAction, webhook_action::WebhookAction};
+use serde::{Deserialize, Serialize};
 
-use serde_derive::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Tracker's action (sending emails or HTTP request, logging, or transforming the tracker data).

@@ -3,7 +3,7 @@ use crate::config::{
     SchedulerJobsConfig, SmtpConfig, TrackersConfig,
 };
 use figment::{providers, providers::Format, value, Figment, Metadata, Profile, Provider};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// Raw configuration structure that is used to read the configuration from the file.
@@ -125,13 +125,13 @@ mod tests {
         host = 'localhost'
         port = 5432
         max_connections = 1000
-        
+
         [cache]
         http_cache_path = './http-cache'
 
         [components]
         web_scraper_url = 'http://localhost:7272/'
-        
+
         [js_runtime]
         max_heap_size = 20485760
         max_script_execution_time = 20000

@@ -1,7 +1,6 @@
 use http::{HeaderMap, Method};
 use mediatype::MediaTypeBuf;
-use serde_derive::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use url::Url;
 use utoipa::ToSchema;
@@ -37,7 +36,7 @@ pub struct ApiTarget {
     pub media_type: Option<MediaTypeBuf>,
 
     /// Optional body to include to the request.
-    pub body: Option<JsonValue>,
+    pub body: Option<serde_json::Value>,
 
     /// Optional custom script (Deno) to configure request.
     pub configurator: Option<String>,

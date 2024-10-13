@@ -1,4 +1,4 @@
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Tracker's action to send an email.

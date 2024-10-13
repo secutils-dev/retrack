@@ -1,11 +1,11 @@
 use crate::trackers::{TrackerAction, TrackerConfig, TrackerTarget};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Tracker for a web page, API response, or a file.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Tracker {
     /// Unique tracker id (UUIDv7).

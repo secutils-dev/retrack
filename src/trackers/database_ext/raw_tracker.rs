@@ -7,7 +7,7 @@ use retrack_types::{
         WebhookAction,
     },
 };
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::{borrow::Cow, collections::HashMap, str::FromStr, time::Duration};
 use time::OffsetDateTime;

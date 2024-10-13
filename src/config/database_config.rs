@@ -1,4 +1,4 @@
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Configuration for the database connection.
 #[derive(Deserialize, Serialize, Debug, Clone)]
