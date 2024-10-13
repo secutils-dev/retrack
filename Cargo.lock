@@ -3785,6 +3785,7 @@ dependencies = [
  "reqwest",
  "reqwest-middleware",
  "reqwest-tracing",
+ "retrack-types",
  "rust-embed",
  "serde",
  "serde_bytes",
@@ -3809,6 +3810,26 @@ dependencies = [
  "utoipa-rapidoc",
  "uuid",
  "void",
+]
+
+[[package]]
+name = "retrack-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http 1.1.0",
+ "http-serde",
+ "insta",
+ "mediatype",
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "serde_json",
+ "serde_with",
+ "time",
+ "url",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]

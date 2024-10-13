@@ -1,4 +1,4 @@
-use crate::trackers::{
+use retrack_types::trackers::{
     ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs, ExtractorScriptResult,
 };
 use serde::{de::DeserializeOwned, Serialize};

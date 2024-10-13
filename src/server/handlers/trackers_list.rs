@@ -29,13 +29,14 @@ pub async fn trackers_list(
 mod tests {
     use crate::{
         server::{handlers::trackers_list::trackers_list, server_state::tests::mock_server_state},
-        trackers::{EmailAction, TrackerAction, TrackerCreateParams},
+        trackers::TrackerCreateParams,
     };
     use actix_web::{
         body::MessageBody,
         test::{call_service, init_service, TestRequest},
         web, App,
     };
+    use retrack_types::trackers::{EmailAction, TrackerAction};
     use sqlx::PgPool;
     use std::str::from_utf8;
 

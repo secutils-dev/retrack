@@ -15,15 +15,12 @@ use crate::{
     error::Error as RetrackError,
     js_runtime::{ScriptBuilder, ScriptConfig},
     network::{DnsResolver, EmailTransport, EmailTransportError},
-    scheduler::{CronExt, SchedulerJobRetryStrategy},
+    scheduler::CronExt,
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
     trackers::{
         database_ext::TrackersDatabaseExt,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, PageTarget, Tracker, TrackerAction, TrackerDataRevision,
-        TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
 use anyhow::{anyhow, bail, Context};
@@ -35,6 +32,14 @@ use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheO
 use lettre::message::Mailbox;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
+use retrack_types::{
+    scheduler::SchedulerJobRetryStrategy,
+    trackers::{
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
+        ExtractorScriptResult, PageTarget, Tracker, TrackerAction, TrackerDataRevision,
+        TrackerDataValue, TrackerTarget, WebhookAction,
+    },
+};
 use std::{
     collections::HashSet,
     str::FromStr,
@@ -1038,7 +1043,7 @@ mod tests {
     use crate::{
         config::{Config, TrackersConfig},
         error::Error as RetrackError,
-        scheduler::{SchedulerJob, SchedulerJobConfig, SchedulerJobRetryStrategy},
+        scheduler::SchedulerJob,
         tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
         tests::{
             mock_api, mock_api_with_config, mock_api_with_network, mock_config,
@@ -1046,9 +1051,8 @@ mod tests {
             RawSchedulerJobStoredData, WebScraperContentRequest, WebScraperErrorResponse,
         },
         trackers::{
-            ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
-            TrackerCreateParams, TrackerDataValue, TrackerListRevisionsParams, TrackerTarget,
-            TrackerUpdateParams, TrackersListParams, WebhookAction,
+            TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams,
+            TrackersListParams,
         },
     };
     use actix_web::ResponseError;
@@ -1056,6 +1060,13 @@ mod tests {
     use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
+    use retrack_types::{
+        scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
+        trackers::{
+            ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
+            TrackerDataValue, TrackerTarget, WebhookAction,
+        },
+    };
     use serde_json::json;
     use sqlx::PgPool;
     use std::{collections::HashMap, net::Ipv4Addr, str::FromStr, time::Duration};

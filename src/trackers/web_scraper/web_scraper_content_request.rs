@@ -33,11 +33,9 @@ pub struct WebScraperContentRequest<'a> {
 #[cfg(test)]
 mod tests {
     use super::WebScraperContentRequest;
-    use crate::{
-        tests::MockTrackerBuilder,
-        trackers::{PageTarget, TrackerTarget},
-    };
+    use crate::tests::MockTrackerBuilder;
     use insta::assert_json_snapshot;
+    use retrack_types::trackers::{PageTarget, TrackerTarget};
     use serde_json::json;
     use std::time::Duration;
     use uuid::uuid;

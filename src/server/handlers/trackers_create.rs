@@ -30,19 +30,21 @@ pub async fn trackers_create(
 mod tests {
     use crate::{
         config::{Config, TrackersConfig},
-        scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         server::{
             handlers::trackers_create::trackers_create,
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
         tests::mock_config,
-        trackers::{PageTarget, TrackerTarget},
     };
     use actix_web::{
         body::MessageBody,
         http::Method,
         test::{call_service, init_service, TestRequest},
         web, App,
+    };
+    use retrack_types::{
+        scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
+        trackers::{PageTarget, TrackerTarget},
     };
     use serde_json::json;
     use sqlx::PgPool;

@@ -1,8 +1,8 @@
 use crate::{
+    config::Config,
     database::Database,
     js_runtime::JsRuntime,
     network::{DnsResolver, EmailTransport, Network},
-    Config,
 };
 use handlebars::Handlebars;
 

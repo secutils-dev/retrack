@@ -112,9 +112,10 @@ mod tests {
     use crate::{
         scheduler::scheduler_job::SchedulerJob,
         tests::{mock_api, mock_get_scheduler_job, mock_scheduler, mock_scheduler_job},
-        trackers::{Tracker, TrackerCreateParams},
+        trackers::TrackerCreateParams,
     };
     use insta::assert_debug_snapshot;
+    use retrack_types::trackers::Tracker;
     use sqlx::PgPool;
     use std::sync::Arc;
     use uuid::uuid;

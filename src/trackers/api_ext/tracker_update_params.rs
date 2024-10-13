@@ -1,4 +1,4 @@
-use crate::trackers::{TrackerAction, TrackerConfig, TrackerTarget};
+use retrack_types::trackers::{TrackerAction, TrackerConfig, TrackerTarget};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -26,12 +26,10 @@ pub struct TrackerUpdateParams {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use crate::trackers::TrackerUpdateParams;
+    use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
-        trackers::{
-            PageTarget, TrackerAction, TrackerConfig, TrackerTarget, TrackerUpdateParams,
-            WebhookAction,
-        },
+        trackers::{PageTarget, TrackerAction, TrackerConfig, TrackerTarget, WebhookAction},
     };
     use std::time::Duration;
 

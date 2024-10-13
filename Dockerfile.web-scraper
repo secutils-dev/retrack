@@ -4,11 +4,11 @@ WORKDIR /app
 # Copy workspace root `package.json` and `package-lock.json` files,
 # and `package.json` file from the component, to just install dependencies.
 COPY ["./*.json", "./"]
-COPY ["./components/web_scraper/package.json", "./components/web_scraper/"]
+COPY ["./components/retrack-web-scraper/package.json", "./components/retrack-web-scraper/"]
 RUN set -x && npm ci --ws
 
 # Now copy the rest of the component files, test and build it.
-COPY ["./components/web_scraper", "./components/web_scraper"]
+COPY ["./components/retrack-web-scraper", "./components/retrack-web-scraper"]
 RUN set -x && npm test --ws
 RUN set -x && npm run build --ws
 
@@ -25,8 +25,8 @@ RUN set -x && apk update --no-cache && \
 COPY ./dev/docker/chromium-local.conf /etc/fonts/local.conf
 RUN set -x && fc-cache -fv
 
-COPY --from=builder ["/app/components/web_scraper/dist/", "./"]
-COPY --from=builder ["/app/components/web_scraper/package.json", "/app/package-lock.json", "./"]
+COPY --from=builder ["/app/components/retrack-web-scraper/dist/", "./"]
+COPY --from=builder ["/app/components/retrack-web-scraper/package.json", "/app/package-lock.json", "./"]
 
 # Install production dependencies and clean up.
 RUN set -x && npm ci --production && npm cache clean --force && \

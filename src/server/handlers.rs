@@ -8,12 +8,14 @@ pub mod trackers_remove;
 pub mod trackers_update;
 
 use crate::{
-    scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     server::Status,
+    trackers::{TrackerCreateParams, TrackerUpdateParams},
+};
+use retrack_types::{
+    scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
         ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
-        TrackerCreateParams, TrackerDataRevision, TrackerDataValue, TrackerTarget,
-        TrackerUpdateParams, WebhookAction,
+        TrackerDataRevision, TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
 use utoipa::OpenApi;

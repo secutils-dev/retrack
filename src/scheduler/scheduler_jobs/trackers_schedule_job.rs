@@ -5,10 +5,10 @@ use crate::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
         scheduler_jobs::TrackersTriggerJob, CronExt,
     },
-    trackers::Tracker,
 };
 use anyhow::Context;
 use croner::Cron;
+use retrack_types::trackers::Tracker;
 use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error};
@@ -134,10 +134,11 @@ mod tests {
     use crate::{
         scheduler::{scheduler_job::SchedulerJob, SchedulerJobMetadata},
         tests::{mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job},
-        trackers::{TrackerConfig, TrackerCreateParams},
+        trackers::TrackerCreateParams,
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
+    use retrack_types::trackers::TrackerConfig;
     use sqlx::PgPool;
     use std::{sync::Arc, time::Duration};
     use uuid::uuid;

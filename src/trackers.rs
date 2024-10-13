@@ -1,40 +1,22 @@
 mod api_ext;
 mod database_ext;
 
-mod tracker;
-mod tracker_action;
-mod tracker_config;
-mod tracker_data_revision;
 mod tracker_data_revisions_diff;
-mod tracker_data_value;
-mod tracker_target;
 mod web_scraper;
 
-pub use self::{
-    api_ext::{
-        TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams, TrackersListParams,
-    },
-    tracker::Tracker,
-    tracker_action::{EmailAction, TrackerAction, WebhookAction},
-    tracker_config::TrackerConfig,
-    tracker_data_revision::TrackerDataRevision,
-    tracker_data_value::TrackerDataValue,
-    tracker_target::{
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, PageTarget, TrackerTarget,
-    },
+pub use self::api_ext::{
+    TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams, TrackersListParams,
 };
 
 #[cfg(test)]
 pub mod tests {
     pub use crate::trackers::web_scraper::{WebScraperContentRequest, WebScraperErrorResponse};
-    use crate::{
-        scheduler::SchedulerJobConfig,
-        trackers::{
-            PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerTarget,
-        },
-    };
+    use crate::trackers::TrackerCreateParams;
     use anyhow::bail;
+    use retrack_types::{
+        scheduler::SchedulerJobConfig,
+        trackers::{PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerTarget},
+    };
     use serde_json::Value as JsonValue;
     use std::time::Duration;
     use time::OffsetDateTime;
@@ -167,11 +149,6 @@ pub mod tests {
             self
         }
 
-        pub fn with_job_config(mut self, job_config: SchedulerJobConfig) -> Self {
-            self.tracker.config.job = Some(job_config);
-            self
-        }
-
         pub fn with_job_id(mut self, job_id: Uuid) -> Self {
             self.tracker.job_id = Some(job_id);
             self
@@ -189,11 +166,6 @@ pub mod tests {
 
         pub fn with_tags(mut self, tags: Vec<String>) -> Self {
             self.tracker.tags = tags;
-            self
-        }
-
-        pub fn with_actions(mut self, actions: Vec<TrackerAction>) -> Self {
-            self.tracker.actions = actions;
             self
         }
 

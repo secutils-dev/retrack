@@ -7,11 +7,11 @@ use crate::{
         CronExt,
     },
     tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
-    trackers::Tracker,
 };
 use anyhow::Context;
 use croner::Cron;
 use futures::{pin_mut, StreamExt};
+use retrack_types::trackers::Tracker;
 use std::{sync::Arc, time::Instant};
 use time::OffsetDateTime;
 use tokio_cron_scheduler::{Job, JobScheduler};
@@ -267,24 +267,25 @@ mod tests {
     use super::TrackersRunJob;
     use crate::{
         config::SmtpConfig,
-        scheduler::{
-            scheduler_job::SchedulerJob, scheduler_jobs::TrackersTriggerJob, SchedulerJobConfig,
-            SchedulerJobRetryStrategy,
-        },
+        scheduler::{scheduler_job::SchedulerJob, scheduler_jobs::TrackersTriggerJob},
         tests::{
             mock_api_with_config, mock_config, mock_get_scheduler_job, mock_schedule_in_sec,
             mock_schedule_in_secs, mock_scheduler, mock_scheduler_job, SmtpCatchAllConfig,
             WebScraperContentRequest, WebScraperErrorResponse,
         },
-        trackers::{
-            EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
-            TrackerDataRevision, TrackerDataValue, TrackerTarget,
-        },
+        trackers::TrackerCreateParams,
     };
     use futures::StreamExt;
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
     use regex::Regex;
+    use retrack_types::{
+        scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
+        trackers::{
+            EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerDataRevision,
+            TrackerDataValue, TrackerTarget,
+        },
+    };
     use serde_json::json;
     use sqlx::PgPool;
     use std::{default::Default, ops::Add, sync::Arc, time::Duration};

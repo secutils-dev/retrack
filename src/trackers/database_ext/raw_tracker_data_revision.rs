@@ -1,4 +1,4 @@
-use crate::trackers::{TrackerDataRevision, TrackerDataValue};
+use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
 use serde_json::Value as JsonValue;
 use std::collections::VecDeque;
 use time::OffsetDateTime;
@@ -58,7 +58,7 @@ impl TryFrom<&TrackerDataRevision> for RawTrackerDataRevision {
 #[cfg(test)]
 mod tests {
     use super::RawTrackerDataRevision;
-    use crate::trackers::{TrackerDataRevision, TrackerDataValue};
+    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use time::OffsetDateTime;
     use uuid::uuid;

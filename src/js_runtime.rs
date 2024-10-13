@@ -257,12 +257,12 @@ impl JsRuntime {
 #[cfg(test)]
 pub mod tests {
     use super::{JsRuntime, ScriptConfig};
-    use crate::{
-        config::JsRuntimeConfig,
-        trackers::{ConfiguratorScriptArgs, ConfiguratorScriptResult, TrackerDataValue},
-    };
+    use crate::config::JsRuntimeConfig;
     use deno_core::error::JsError;
     use http::{HeaderMap, HeaderName, HeaderValue};
+    use retrack_types::trackers::{
+        ConfiguratorScriptArgs, ConfiguratorScriptResult, TrackerDataValue,
+    };
     use serde::{Deserialize, Serialize};
     use serde_bytes::ByteBuf;
     use serde_json::json;

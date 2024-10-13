@@ -1,8 +1,9 @@
 use crate::{
     api::Api,
     network::{DnsResolver, EmailTransport},
-    scheduler::{SchedulerJobMetadata, SchedulerJobRetryState, SchedulerJobRetryStrategy},
+    scheduler::{SchedulerJobMetadata, SchedulerJobRetryState},
 };
+use retrack_types::scheduler::SchedulerJobRetryStrategy;
 use std::ops::Add;
 use time::OffsetDateTime;
 use tracing::{debug, warn};
@@ -77,12 +78,10 @@ impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        scheduler::{
-            database_ext::RawSchedulerJobStoredData, SchedulerJob, SchedulerJobMetadata,
-            SchedulerJobRetryStrategy,
-        },
+        scheduler::{database_ext::RawSchedulerJobStoredData, SchedulerJob, SchedulerJobMetadata},
         tests::{mock_api, mock_upsert_scheduler_job},
     };
+    use retrack_types::scheduler::SchedulerJobRetryStrategy;
     use sqlx::PgPool;
     use std::{ops::Add, time::Duration};
     use time::OffsetDateTime;

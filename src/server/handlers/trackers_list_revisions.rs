@@ -43,7 +43,7 @@ mod tests {
             handlers::trackers_list_revisions::trackers_list_revisions,
             server_state::tests::mock_server_state,
         },
-        trackers::{TrackerCreateParams, TrackerDataRevision, TrackerDataValue},
+        trackers::TrackerCreateParams,
     };
     use actix_web::{
         body::MessageBody,
@@ -51,6 +51,7 @@ mod tests {
         web, App,
     };
     use insta::assert_debug_snapshot;
+    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use sqlx::PgPool;
     use std::str::from_utf8;

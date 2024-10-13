@@ -35,13 +35,14 @@ mod tests {
             handlers::trackers_clear_revisions::trackers_clear_revisions,
             server_state::tests::mock_server_state,
         },
-        trackers::{TrackerCreateParams, TrackerDataRevision, TrackerDataValue},
+        trackers::TrackerCreateParams,
     };
     use actix_web::{
         http::Method,
         test::{call_service, init_service, TestRequest},
         web, App,
     };
+    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use sqlx::PgPool;
     use time::OffsetDateTime;

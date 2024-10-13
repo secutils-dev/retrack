@@ -2,18 +2,14 @@ mod raw_tracker;
 mod raw_tracker_data_revision;
 
 use crate::{
-    database::Database,
-    error::Error as RetrackError,
-    scheduler::SchedulerJobMetadata,
-    trackers::{
-        database_ext::raw_tracker_data_revision::RawTrackerDataRevision, Tracker,
-        TrackerDataRevision,
-    },
+    database::Database, error::Error as RetrackError, scheduler::SchedulerJobMetadata,
+    trackers::database_ext::raw_tracker_data_revision::RawTrackerDataRevision,
 };
 use anyhow::{anyhow, bail};
 use async_stream::try_stream;
 use futures::Stream;
 use raw_tracker::RawTracker;
+use retrack_types::trackers::{Tracker, TrackerDataRevision};
 use sqlx::{error::ErrorKind as SqlxErrorKind, query, query_as, Pool, Postgres};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -416,10 +412,10 @@ mod tests {
             mock_scheduler_job, mock_upsert_scheduler_job, to_database_error, MockTrackerBuilder,
             RawSchedulerJobStoredData,
         },
-        trackers::{Tracker, TrackerDataRevision, TrackerDataValue},
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
+    use retrack_types::trackers::{Tracker, TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use sqlx::PgPool;
     use std::{

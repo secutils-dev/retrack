@@ -1,5 +1,5 @@
-use crate::trackers::{TrackerDataRevision, TrackerDataValue};
 use handlebars::JsonRender;
+use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
 use serde_json::{json, Value as JSONValue};
 use similar::TextDiff;
 
@@ -53,11 +53,9 @@ pub fn tracker_data_revisions_diff(
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::{
-        tracker_data_revisions_diff::tracker_data_revisions_diff, TrackerDataRevision,
-        TrackerDataValue,
-    };
+    use crate::trackers::tracker_data_revisions_diff::tracker_data_revisions_diff;
     use insta::assert_debug_snapshot;
+    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use time::OffsetDateTime;
     use uuid::uuid;

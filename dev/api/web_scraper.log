@@ -1,4 +1,4 @@
-// DEBUG=pw:protocol npm run test:watch -w components/web_scraper
+// DEBUG=pw:protocol npm run test:watch -w components/retrack-web-scraper
 
 [11:41:36 UTC] INFO: Step 1: Connecting to a browser…
   pw:protocol SEND ► {"id":1,"method":"Browser.getVersion"} +0ms

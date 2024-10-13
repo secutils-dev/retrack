@@ -1,0 +1,31 @@
+[package]
+name = "retrack-types"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+http = "1.1.0"
+http-serde = "2.1.1"
+mediatype = "0.19.18"
+serde = "1.0.210"
+serde_bytes = "0.11.15"
+serde_derive = "1.0.210"
+serde_json = "1.0.128"
+serde_with = "3.9.0"
+time = "0.3.36"
+url = "2.5.2"
+utoipa = "5.0.0-beta.0"
+uuid = "1.10.0"
+
+[dev-dependencies]
+anyhow = "1.0.89"
+insta = "1.40.0"
+
+[features]
+default = [
+    "insta/json",
+    "mediatype/serde",
+    "serde_with/time_0_3",
+    "url/serde",
+    "uuid/serde"
+]

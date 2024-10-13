@@ -1,12 +1,12 @@
-use crate::{
+use http::{HeaderMap, HeaderName, HeaderValue, Method};
+use mediatype::MediaType;
+use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
         ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerTarget,
         WebhookAction,
     },
 };
-use http::{HeaderMap, HeaderName, HeaderValue, Method};
-use mediatype::MediaType;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::{borrow::Cow, collections::HashMap, str::FromStr, time::Duration};
@@ -350,14 +350,14 @@ impl<'s> TryFrom<RawTrackerAction<'s>> for TrackerAction {
 #[cfg(test)]
 mod tests {
     use super::RawTracker;
-    use crate::{
+    use http::{header::CONTENT_TYPE, Method};
+    use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
             ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
             TrackerTarget, WebhookAction,
         },
     };
-    use http::{header::CONTENT_TYPE, Method};
     use serde_json::json;
     use std::{collections::HashMap, time::Duration};
     use time::OffsetDateTime;

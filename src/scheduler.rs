@@ -3,10 +3,8 @@ mod cron_ext;
 mod database_ext;
 mod job_ext;
 mod scheduler_job;
-mod scheduler_job_config;
 mod scheduler_job_metadata;
 mod scheduler_job_retry_state;
-mod scheduler_job_retry_strategy;
 mod scheduler_jobs;
 
 use anyhow::anyhow;
@@ -20,10 +18,8 @@ use tokio_cron_scheduler::{
 use tracing::{debug, error, warn};
 
 pub use self::{
-    cron_ext::CronExt, scheduler_job::SchedulerJob, scheduler_job_config::SchedulerJobConfig,
-    scheduler_job_metadata::SchedulerJobMetadata,
+    cron_ext::CronExt, scheduler_job::SchedulerJob, scheduler_job_metadata::SchedulerJobMetadata,
     scheduler_job_retry_state::SchedulerJobRetryState,
-    scheduler_job_retry_strategy::SchedulerJobRetryStrategy,
 };
 use crate::{
     api::Api,

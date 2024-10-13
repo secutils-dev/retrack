@@ -81,12 +81,12 @@ RETRACK_CONFIG=${PWD}/retrack.toml
 
 If you plan to interact with the web page trackers, you'll also need to have Chromium installed and start the Web Scraper component:
 ```shell
-npm run watch -w components/web_scraper
+npm run watch -w components/retrack-web-scraper
 ```
 
 To run with the debug output from Playwright, use the following command:
 ```shell
-DEBUG=pw:protocol npm run watch -w components/web_scraper
+DEBUG=pw:protocol npm run watch -w components/retrack-web-scraper
 ```
 
 You can also use `.env` file to configure Web Scraper:

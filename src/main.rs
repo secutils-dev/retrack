@@ -12,7 +12,7 @@ mod tasks;
 mod templates;
 mod trackers;
 
-use crate::config::{Config, RawConfig};
+use crate::config::RawConfig;
 use anyhow::anyhow;
 use clap::{crate_authors, crate_description, crate_version, value_parser, Arg, Command};
 use std::env;
