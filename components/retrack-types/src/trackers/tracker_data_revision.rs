@@ -11,7 +11,6 @@ pub struct TrackerDataRevision<TValue = serde_json::Value> {
     /// Unique tracker data revision id (UUIDv7).
     pub id: Uuid,
     /// ID of the tracker captured data belongs to.
-    #[serde(skip_serializing)]
     pub tracker_id: Uuid,
     /// Array of tracker data revision values including the original one and the those potentially
     /// transformed by the tracker actions, if any.
@@ -41,6 +40,7 @@ mod tests {
         }, @r###"
         {
           "id": "00000000-0000-0000-0000-000000000001",
+          "trackerId": "00000000-0000-0000-0000-000000000002",
           "data": {
             "original": "some-data"
           },

@@ -43,6 +43,7 @@ mod tests {
             handlers::trackers_list_revisions::trackers_list_revisions,
             server_state::tests::mock_server_state,
         },
+        tests::tracker_data_revisions_diff,
         trackers::TrackerCreateParams,
     };
     use actix_web::{
@@ -112,7 +113,11 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800}]""###);
+
+        let revisions = serde_json::from_slice::<Vec<TrackerDataRevision>>(
+            &response.into_body().try_into_bytes().unwrap(),
+        )?;
+        assert_eq!(revisions, vec![data_revision_one.clone()]);
 
         // Add another revision
         let mut data = TrackerDataValue::new(json!("\"some-new-data\""));
@@ -136,7 +141,14 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":{\"original\":\"\\\"some-new-data\\\"\",\"mods\":[\"\\\"some-other-data\\\"\"]},\"createdAt\":946720900}]""###);
+
+        let revisions = serde_json::from_slice::<Vec<TrackerDataRevision>>(
+            &response.into_body().try_into_bytes().unwrap(),
+        )?;
+        assert_eq!(
+            revisions,
+            vec![data_revision_one.clone(), data_revision_two.clone()]
+        );
 
         let response = call_service(
             &app,
@@ -148,7 +160,13 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":{\"original\":\"\\\"some-new-data\\\"\",\"mods\":[\"\\\"some-other-data\\\"\"]},\"createdAt\":946720900}]""###);
+        let revisions = serde_json::from_slice::<Vec<TrackerDataRevision>>(
+            &response.into_body().try_into_bytes().unwrap(),
+        )?;
+        assert_eq!(
+            revisions,
+            vec![data_revision_one.clone(), data_revision_two.clone()]
+        );
 
         // Calculate the difference between the two revisions
         let response = call_service(
@@ -161,7 +179,14 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"data\":{\"original\":\"\\\"some-data\\\"\"},\"createdAt\":946720800},{\"id\":\"00000000-0000-0000-0000-000000000002\",\"data\":{\"original\":\"@@ -1 +1 @@\\n-\\\"some-data\\\"\\n+\\\"some-other-data\\\"\\n\"},\"createdAt\":946720900}]""###);
+
+        let revisions = serde_json::from_slice::<Vec<TrackerDataRevision>>(
+            &response.into_body().try_into_bytes().unwrap(),
+        )?;
+        assert_eq!(
+            revisions,
+            tracker_data_revisions_diff(vec![data_revision_one, data_revision_two])?
+        );
 
         Ok(())
     }

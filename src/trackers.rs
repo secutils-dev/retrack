@@ -10,8 +10,11 @@ pub use self::api_ext::{
 
 #[cfg(test)]
 pub mod tests {
-    pub use crate::trackers::web_scraper::{WebScraperContentRequest, WebScraperErrorResponse};
     use crate::trackers::TrackerCreateParams;
+    pub use crate::trackers::{
+        tracker_data_revisions_diff::tracker_data_revisions_diff,
+        web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
+    };
     use anyhow::bail;
     use retrack_types::{
         scheduler::SchedulerJobConfig,
