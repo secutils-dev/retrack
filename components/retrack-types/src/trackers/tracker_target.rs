@@ -15,6 +15,7 @@ use utoipa::ToSchema;
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "type")]
+#[allow(clippy::large_enum_variant)]
 pub enum TrackerTarget {
     /// Web page target.
     Page(PageTarget),

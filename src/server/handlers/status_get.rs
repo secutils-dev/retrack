@@ -1,6 +1,6 @@
 use crate::{
     error::Error as RetrackError,
-    server::{GetStatusParams, ServerState},
+    server::{GetStatusParams, ServerState, Status},
 };
 use actix_web::{get, web, HttpResponse};
 use tracing::error;

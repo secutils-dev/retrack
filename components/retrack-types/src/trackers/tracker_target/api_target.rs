@@ -26,13 +26,16 @@ pub struct ApiTarget {
 
     /// The HTTP method to use to send request to.
     #[serde(with = "http_serde::option::method", default)]
+    #[schema(value_type = String)]
     pub method: Option<Method>,
 
     /// Optional headers to include in the request.
     #[serde(with = "http_serde::option::header_map", default)]
+    #[schema(value_type = HashMap<String, String>)]
     pub headers: Option<HeaderMap>,
 
     /// The media type of the content returned by the API. By default, application/json is assumed.
+    #[schema(value_type = String)]
     pub media_type: Option<MediaTypeBuf>,
 
     /// Optional body to include to the request.

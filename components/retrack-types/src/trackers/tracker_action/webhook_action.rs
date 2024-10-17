@@ -12,12 +12,15 @@ pub struct WebhookAction {
     /// URL of the API endpoint to send the tracker data (JSON) to.
     pub url: Url,
 
-    /// HTTP method to use for the request. If not specified, during deserialization set to `POST`.
+    /// HTTP method to use for the request (`GET`, `POST`, or `PUT`). If not specified, defaults to
+    /// `POST`.
     #[serde(with = "http_serde::option::method", default)]
+    #[schema(value_type = String)]
     pub method: Option<Method>,
 
     /// Optional headers to include in the request.
     #[serde(with = "http_serde::option::header_map", default)]
+    #[schema(value_type = HashMap<String, String>)]
     pub headers: Option<HeaderMap>,
 }
 

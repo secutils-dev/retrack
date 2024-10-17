@@ -1,6 +1,7 @@
 use crate::{error::Error as RetrackError, server::ServerState, trackers::TrackersListParams};
 use actix_web::{get, web, HttpResponse};
 use actix_web_lab::extract::Query;
+use retrack_types::trackers::Tracker;
 use tracing::error;
 
 /// Gets a list of active trackers.

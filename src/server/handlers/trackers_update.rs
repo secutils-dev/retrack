@@ -1,5 +1,6 @@
 use crate::{error::Error as RetrackError, server::ServerState, trackers::TrackerUpdateParams};
 use actix_web::{put, web, HttpResponse};
+use retrack_types::trackers::Tracker;
 use tracing::error;
 use uuid::Uuid;
 
