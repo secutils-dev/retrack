@@ -5,9 +5,6 @@ use utoipa::IntoParams;
 #[derive(Deserialize, Default, Debug, Copy, Clone, PartialEq, Eq, IntoParams)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerListRevisionsParams {
-    /// Whether to refresh the list of revisions by triggering the tracker to fetch a new revision.
-    #[serde(default)]
-    pub refresh: bool,
     /// Whether to calculate the diff between the returned data revisions.
     #[serde(default)]
     pub calculate_diff: bool,
@@ -22,7 +19,6 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<TrackerListRevisionsParams>(r#"{}"#)?,
             TrackerListRevisionsParams {
-                refresh: false,
                 calculate_diff: false
             }
         );
@@ -31,13 +27,11 @@ mod tests {
             serde_json::from_str::<TrackerListRevisionsParams>(
                 r#"
 {
-    "refresh": true,
     "calculateDiff": true
 }
           "#
             )?,
             TrackerListRevisionsParams {
-                refresh: true,
                 calculate_diff: true
             }
         );

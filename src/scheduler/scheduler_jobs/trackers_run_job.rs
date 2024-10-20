@@ -156,22 +156,13 @@ impl TrackersRunJob {
             };
 
             let execution_time = run_start.elapsed();
-            if let Some(revision) = new_revision {
-                info!(
-                    tracker.id = %tracker.id,
-                    tracker.name = tracker.name,
-                    metrics.job_execution_time = execution_time.as_nanos() as u64,
-                    metrics.tracker_data_size = revision.data.size(),
-                    "Successfully checked tracker data — changes detected, and a new data revision has been created."
-                );
-            } else {
-                info!(
-                    tracker.id = %tracker.id,
-                    tracker.name = tracker.name,
-                    metrics.job_execution_time = execution_time.as_nanos() as u64,
-                    "Successfully checked tracker data — no changes detected since the last check."
-                );
-            }
+            info!(
+                tracker.id = %tracker.id,
+                tracker.name = tracker.name,
+                metrics.job_execution_time = execution_time.as_nanos() as u64,
+                metrics.tracker_data_size = new_revision.data.size(),
+                "Successfully checked tracker data."
+            );
 
             api.db.reset_scheduler_job_state(job_id, false).await?;
         }

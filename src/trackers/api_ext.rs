@@ -41,6 +41,7 @@ use retrack_types::{
     },
 };
 use std::{
+    cmp::{max, min},
     collections::HashSet,
     str::FromStr,
     time::{Duration, Instant},
@@ -221,27 +222,19 @@ where
         self.trackers.remove_tracker(id).await
     }
 
-    /// Persists data revision for the specified tracker.
+    /// Fetches data revision for the specified tracker, and persists it if allowed by config and
+    /// if the data has changed.
     pub async fn create_tracker_data_revision(
         &self,
         tracker_id: Uuid,
-    ) -> anyhow::Result<Option<TrackerDataRevision>> {
+    ) -> anyhow::Result<TrackerDataRevision> {
         let Some(tracker) = self.get_tracker(tracker_id).await? else {
             bail!(RetrackError::client(format!(
                 "Tracker ('{tracker_id}') is not found."
             )));
         };
 
-        // Enforce revisions limit and displace old ones.
-        let max_revisions = std::cmp::min(
-            tracker.config.revisions,
-            self.api.config.trackers.max_revisions,
-        );
-        if max_revisions == 0 {
-            return Ok(None);
-        }
-
-        let revisions = self.trackers.get_tracker_data(tracker.id).await?;
+        let mut revisions = self.trackers.get_tracker_data(tracker.id).await?;
         let mut new_revision = match tracker.target {
             TrackerTarget::Page(_) => {
                 self.create_tracker_page_data_revision(&tracker, &revisions)
@@ -254,15 +247,21 @@ where
         };
 
         // If the last revision has the same original data value, drop newly fetched revision.
-        let last_revision = revisions.last();
-        if let Some(last_revision) = last_revision {
+        let last_revision = if let Some(last_revision) = revisions.pop() {
             if last_revision.data.original() == new_revision.data.original() {
-                return Ok(None);
+                // Return the last revision without re-running actions as data hasn't changed.
+                return Ok(last_revision);
             }
+
+            // Return revision back to the revision list, in case it needs to be displaced.
+            revisions.push(last_revision);
+            revisions.last()
+        } else {
+            None
         };
 
         // Iterate through all tracker actions and execute them.
-        let previous_data_value = last_revision.as_ref().map(|r| &r.data);
+        let previous_data_value = last_revision.map(|r| &r.data);
         for action in tracker.actions.iter() {
             self.execute_tracker_action(
                 &tracker,
@@ -273,22 +272,27 @@ where
             .await?
         }
 
-        // Insert new revision.
-        self.trackers
-            .insert_tracker_data_revision(&new_revision)
-            .await?;
+        let max_revisions = min(
+            tracker.config.revisions,
+            self.api.config.trackers.max_revisions,
+        ) as isize;
 
-        // Enforce revisions limit and displace old ones.
-        if revisions.len() >= max_revisions {
-            let revisions_to_remove = revisions.len() - max_revisions + 1;
-            for revision in revisions.iter().take(revisions_to_remove) {
-                self.trackers
-                    .remove_tracker_data_revision(tracker.id, revision.id)
-                    .await?;
-            }
+        // Insert new revision if allowed by the config.
+        if max_revisions > 0 {
+            self.trackers
+                .insert_tracker_data_revision(&new_revision)
+                .await?;
         }
 
-        Ok(Some(new_revision))
+        // Enforce revisions limit and displace old revisions if needed.
+        let revisions_to_remove = max((revisions.len() as isize) - max_revisions + 1, 0) as usize;
+        for revision in revisions.iter().take(revisions_to_remove) {
+            self.trackers
+                .remove_tracker_data_revision(tracker.id, revision.id)
+                .await?;
+        }
+
+        Ok(new_revision)
     }
 
     /// Returns all stored tracker data revisions.
@@ -297,9 +301,7 @@ where
         tracker_id: Uuid,
         params: TrackerListRevisionsParams,
     ) -> anyhow::Result<Vec<TrackerDataRevision>> {
-        if params.refresh {
-            self.create_tracker_data_revision(tracker_id).await?;
-        } else if self.get_tracker(tracker_id).await?.is_none() {
+        if self.get_tracker(tracker_id).await?.is_none() {
             bail!(RetrackError::client(format!(
                 "Tracker ('{tracker_id}') is not found."
             )));
@@ -2801,11 +2803,13 @@ mod tests {
                 .json_body_obj(content_one.value());
         });
 
+        trackers
+            .create_tracker_data_revision(tracker_one.id)
+            .await?;
         let tracker_one_data = trackers
             .get_tracker_data(
                 tracker_one.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -2840,8 +2844,7 @@ mod tests {
 
         let revision = trackers
             .create_tracker_data_revision(tracker_one.id)
-            .await?
-            .unwrap();
+            .await?;
         assert_eq!(revision.data.value(), "\"rev_2\"");
         content_mock.assert();
         content_mock.delete();
@@ -2870,14 +2873,13 @@ mod tests {
         let revision = trackers
             .create_tracker_data_revision(tracker_two.id)
             .await?;
-        assert_eq!(revision.unwrap().data.value(), "\"rev_3\"");
+        assert_eq!(revision.data.value(), "\"rev_3\"");
         content_mock.assert();
 
         let tracker_one_data = trackers
             .get_tracker_data(
                 tracker_one.id,
                 TrackerListRevisionsParams {
-                    refresh: false,
                     calculate_diff: true,
                 },
             )
@@ -2919,7 +2921,6 @@ mod tests {
             .get_tracker_data(
                 tracker_one.id,
                 TrackerListRevisionsParams {
-                    refresh: false,
                     calculate_diff: false,
                 },
             )
@@ -3005,11 +3006,13 @@ mod tests {
                 .json_body_obj(content_one.value());
         });
 
+        let revision_one = trackers
+            .create_tracker_data_revision(tracker_one.id)
+            .await?;
         let tracker_one_data = trackers
             .get_tracker_data(
                 tracker_one.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -3033,11 +3036,11 @@ mod tests {
                 .json_body_obj(content_two.value());
         });
 
-        let revision = trackers
+        let revision_two = trackers
             .create_tracker_data_revision(tracker_one.id)
-            .await?
-            .unwrap();
-        assert_eq!(revision.data.value(), "\"rev_2\"");
+            .await?;
+        assert_eq!(revision_two.data.value(), "\"rev_2\"");
+        assert_ne!(revision_one, revision_two);
         content_mock.assert();
         content_mock.delete();
 
@@ -3065,7 +3068,7 @@ mod tests {
         let revision = trackers
             .create_tracker_data_revision(tracker_two.id)
             .await?;
-        assert_eq!(revision.unwrap().data.value(), "\"rev_3\"");
+        assert_eq!(revision.data.value(), "\"rev_3\"");
 
         content_mock.assert();
 
@@ -3073,7 +3076,6 @@ mod tests {
             .get_tracker_data(
                 tracker_one.id,
                 TrackerListRevisionsParams {
-                    refresh: false,
                     calculate_diff: true,
                 },
             )
@@ -3115,7 +3117,6 @@ mod tests {
             .get_tracker_data(
                 tracker_one.id,
                 TrackerListRevisionsParams {
-                    refresh: false,
                     calculate_diff: false,
                 },
             )
@@ -3185,11 +3186,11 @@ mod tests {
                 .json_body_obj(content.value());
         });
 
+        trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -3212,10 +3213,7 @@ mod tests {
                 .json_body_obj(content_two.value());
         });
 
-        let revision = trackers
-            .create_tracker_data_revision(tracker.id)
-            .await?
-            .unwrap();
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
         assert_eq!(
             revision.data.value(),
             "\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}"
@@ -3226,7 +3224,6 @@ mod tests {
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: false,
                     calculate_diff: true,
                 },
             )
@@ -3320,11 +3317,11 @@ mod tests {
                 );
         });
 
+        trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -3344,7 +3341,6 @@ mod tests {
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: false,
                     calculate_diff: true,
                 },
             )
@@ -3421,11 +3417,11 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
+        trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -3494,11 +3490,11 @@ mod tests {
                 .json_body_obj(content.value());
         });
 
+        trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -3530,11 +3526,11 @@ mod tests {
                 .json_body_obj(new_content.value());
         });
 
+        trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
             .get_tracker_data(
                 tracker.id,
                 TrackerListRevisionsParams {
-                    refresh: true,
                     calculate_diff: false,
                 },
             )
@@ -3614,13 +3610,7 @@ mod tests {
         });
 
         let scraper_error = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    refresh: true,
-                    calculate_diff: false,
-                },
-            )
+            .create_tracker_data_revision(tracker.id)
             .await
             .unwrap_err()
             .downcast::<RetrackError>()?;
@@ -3671,7 +3661,7 @@ mod tests {
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
-        assert_eq!(revision.unwrap().data.value(), "\"rev_1\"");
+        assert_eq!(revision.data.value(), "\"rev_1\"");
         content_mock.assert();
         content_mock.delete();
 
@@ -3693,13 +3683,13 @@ mod tests {
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
-        assert!(revision.is_none());
         content_mock.assert();
 
         let tracker_content = trackers
             .get_tracker_data(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_content.len(), 1);
+        assert_eq!(tracker_content, vec![revision]);
 
         Ok(())
     }
@@ -3736,11 +3726,11 @@ mod tests {
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
-        assert!(revision.is_some());
         let tracker_content = trackers
             .get_tracker_data(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_content.len(), 1);
+        assert_eq!(tracker_content, vec![revision]);
         content_mock.assert();
 
         trackers.clear_tracker_data(tracker.id).await?;
@@ -3787,11 +3777,11 @@ mod tests {
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
-        assert!(revision.is_some());
         let tracker_content = trackers
             .get_tracker_data(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_content.len(), 1);
+        assert_eq!(tracker_content, vec![revision]);
         content_mock.assert();
 
         trackers.remove_tracker(tracker.id).await?;
