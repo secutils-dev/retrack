@@ -19,6 +19,7 @@ use crate::{
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
     trackers::{
         database_ext::TrackersDatabaseExt,
+        parsers::XlsParser,
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
     },
@@ -878,11 +879,22 @@ where
             }
         }
 
-        // Read response, and extract data with extractor script, if specified.
+        // Read response, parse, and extract data with extractor script, if specified.
         let response_bytes = api_response
             .bytes()
             .await
             .context("Failed to read API response.")?;
+        let media_type = target
+            .media_type
+            .as_ref()
+            .map(|media_type| media_type.to_ref());
+        let response_bytes = match media_type {
+            Some(ref media_type) if XlsParser::supports(media_type) => {
+                XlsParser::parse(&response_bytes)?
+            }
+            _ => response_bytes,
+        };
+
         let response_bytes = if let Some(ref extractor) = target.extractor {
             let result = self
                 .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
@@ -1048,7 +1060,7 @@ mod tests {
         scheduler::SchedulerJob,
         tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
         tests::{
-            mock_api, mock_api_with_config, mock_api_with_network, mock_config,
+            load_fixture, mock_api, mock_api_with_config, mock_api_with_network, mock_config,
             mock_network_with_records, mock_scheduler_job, mock_upsert_scheduler_job,
             RawSchedulerJobStoredData, WebScraperContentRequest, WebScraperErrorResponse,
         },
@@ -3240,6 +3252,119 @@ mod tests {
             },
             TrackerDataValue {
                 original: String("@@ -1 +1 @@\n-\"rev_1\"_modified_undefined\n+\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}\n"),
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_parser_xlsx(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/get-call").parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: Some(
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                .parse()?,
+                        ),
+                        configurator: None,
+                        extractor: None,
+                    })),
+            )
+            .await?;
+
+        let tracker_data = trackers
+            .get_tracker_data(tracker.id, Default::default())
+            .await?;
+        assert!(tracker_data.is_empty());
+
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8")
+                .body(load_fixture("xlsx_fixture.xlsx").unwrap());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        content_mock.assert();
+
+        let revs = trackers
+            .get_tracker_data(tracker.id, Default::default())
+            .await?;
+        assert_debug_snapshot!(
+            revs.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: Array [
+                    Object {
+                        "name": String("Sheet N1"),
+                        "data": Array [
+                            Array [
+                                String("Header N1"),
+                                String("Header N2"),
+                                String(""),
+                            ],
+                            Array [
+                                String("Some string"),
+                                String("100500"),
+                                String(""),
+                            ],
+                            Array [
+                                String("500100"),
+                                String("Some string 2"),
+                                String("100"),
+                            ],
+                            Array [
+                                String(""),
+                                String(""),
+                                String("Another string"),
+                            ],
+                        ],
+                    },
+                    Object {
+                        "name": String("Sheet N2"),
+                        "data": Array [
+                            Array [
+                                String("Header N3"),
+                                String("Header N4"),
+                                String(""),
+                            ],
+                            Array [
+                                String("Some string 3"),
+                                String("100500"),
+                                String(""),
+                            ],
+                            Array [
+                                String("600200"),
+                                String("Some string 4"),
+                                String("200"),
+                            ],
+                            Array [
+                                String(""),
+                                String(""),
+                                String("Another string 2"),
+                            ],
+                        ],
+                    },
+                ],
                 mods: None,
             },
         ]

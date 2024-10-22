@@ -21,6 +21,8 @@ actix-web-lab = "0.23.0"
 anyhow = "1.0.89"
 async-stream = "0.3.6"
 byte-unit = "5.1.4"
+bytes = "1.8.0"
+calamine = "0.26.1"
 chrono = { version = "0.4.38", default-features = false }
 clap = "4.5.20"
 croner = "2.0.6"

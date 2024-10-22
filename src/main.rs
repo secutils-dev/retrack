@@ -74,8 +74,9 @@ mod tests {
         database::Database,
         network::{DnsResolver, Network},
     };
+    use bytes::Bytes;
     use lettre::transport::stub::AsyncStubTransport;
-    use std::{ops::Add, time::Duration};
+    use std::{fs, ops::Add, path::PathBuf, time::Duration};
     use time::OffsetDateTime;
     use trust_dns_resolver::proto::rr::Record;
     use url::Url;
@@ -191,5 +192,11 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(",")
         )
+    }
+
+    pub fn load_fixture(fixture_name: &str) -> anyhow::Result<Bytes> {
+        let mut fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        fixture_path.push(format!("dev/fixtures/{fixture_name}"));
+        Ok(fs::read(fixture_path).map(Bytes::from)?)
     }
 }

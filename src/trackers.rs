@@ -1,6 +1,7 @@
 mod api_ext;
 mod database_ext;
 
+mod parsers;
 mod tracker_data_revisions_diff;
 mod web_scraper;
 
