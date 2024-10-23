@@ -28,6 +28,11 @@ async fn main() -> Result<(), anyhow::Error> {
         tracing_subscriber::fmt::init();
     }
 
+    // Install default crypto provider.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install default RusTLS crypto provider.");
+
     let matches = Command::new("Retrack API server.")
         .version(crate_version!())
         .author(crate_authors!())

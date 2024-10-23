@@ -1,3 +1,5 @@
+@tracker = 0192b63b-2c69-7573-b0fc-51826414e69a
+
 ### Get trackers
 GET {{host}}/api/trackers
 Accept: application/json
@@ -6,12 +8,20 @@ Accept: application/json
 GET {{host}}/api/trackers?tag=app:retrack
 Accept: application/json
 
-### Get tracker
-GET {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592
+### Get tracker by ID
+GET {{host}}/api/trackers/{{tracker}}
 Accept: application/json
 
 ### Get tracker revisions
-GET {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592/revisions?calculateDiff=true
+GET {{host}}/api/trackers/{{tracker}}/revisions?calculateDiff=true
+Accept: application/json
+
+### Create tracker revision
+POST {{host}}/api/trackers/{{tracker}}/revisions
+Accept: application/json
+
+### Delete tracker revisions
+DELETE {{host}}/api/trackers/{{tracker}}/revisions
 Accept: application/json
 
 ### Create tracker (minimal)
@@ -155,7 +165,7 @@ Accept: application/json
 }
 
 ### Disable tracker
-PUT {{host}}/api/trackers/01922cdf-133e-72f2-9b35-f21f59e86324
+PUT {{host}}/api/trackers/{{tracker}}
 Content-Type: application/json
 Accept: application/json
 
@@ -164,7 +174,7 @@ Accept: application/json
 }
 
 ### Update tracker
-PUT {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592
+PUT {{host}}/api/trackers/{{tracker}}
 Content-Type: application/json
 Accept: application/json
 
@@ -189,7 +199,7 @@ Accept: application/json
   `;
   request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
 %}
-PUT {{host}}/api/trackers/0191c46b-bf1b-7d53-8d2d-be27f10b1592
+PUT {{host}}/api/trackers/{{tracker}}
 Content-Type: application/json
 Accept: application/json
 
