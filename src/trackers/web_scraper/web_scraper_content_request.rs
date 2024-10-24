@@ -12,6 +12,9 @@ pub struct WebScraperContentRequest<'a> {
     /// A script (Playwright scenario) used to extract web page content that needs to be tracked.
     pub extractor: &'a str,
 
+    /// Tags associated with the tracker.
+    pub tags: &'a Vec<String>,
+
     /// Optional user agent string to use for every request at the web page.
     pub user_agent: Option<&'a str>,
 
@@ -44,6 +47,7 @@ mod tests {
     fn serialization() -> anyhow::Result<()> {
         assert_json_snapshot!(WebScraperContentRequest {
             extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
+            tags: &vec!["tag1".to_string(), "tag2".to_string()],
             timeout: Some(Duration::from_millis(100)),
             previous_content: Some(&json!("some content")),
             user_agent: Some("Retrack/1.0.0"),
@@ -51,6 +55,10 @@ mod tests {
         }, @r###"
         {
           "extractor": "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
+          "tags": [
+            "tag1",
+            "tag2"
+          ],
           "userAgent": "Retrack/1.0.0",
           "ignoreHTTPSErrors": true,
           "timeout": 100,
@@ -75,6 +83,7 @@ mod tests {
         )?
         .with_target(TrackerTarget::Page(target.clone()))
         .with_timeout(Duration::from_millis(2500))
+        .with_tags(vec!["tag1".to_string(), "tag2".to_string()])
         .build();
 
         let request = WebScraperContentRequest::try_from(&tracker)?;
@@ -83,6 +92,7 @@ mod tests {
         assert_eq!(request.extractor, target.extractor.as_str());
         assert_eq!(request.user_agent, target.user_agent.as_deref());
         assert_eq!(request.ignore_https_errors, target.ignore_https_errors);
+        assert_eq!(request.tags, &tracker.tags);
 
         // Config properties.
         assert_eq!(request.timeout, Some(Duration::from_millis(2500)));

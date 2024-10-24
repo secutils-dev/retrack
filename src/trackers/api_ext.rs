@@ -756,6 +756,7 @@ where
         let extractor = self.get_script_content(tracker, &target.extractor).await?;
         let scraper_request = WebScraperContentRequest {
             extractor: extractor.as_ref(),
+            tags: &tracker.tags,
             user_agent: target.user_agent.as_deref(),
             ignore_https_errors: target.ignore_https_errors,
             timeout: tracker.config.timeout,
@@ -2865,7 +2866,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker_one = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()]),
+            )
             .await?;
         let tracker_two = trackers
             .create_tracker(TrackerCreateParams::new("name_two").with_schedule("0 0 * * * *"))

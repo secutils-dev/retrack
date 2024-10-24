@@ -101,6 +101,7 @@ pub mod tests {
             Ok(Self {
                 // Target properties.
                 extractor: target.extractor.as_str(),
+                tags: &tracker.tags,
                 user_agent: target.user_agent.as_deref(),
                 ignore_https_errors: target.ignore_https_errors,
                 // Config properties.
