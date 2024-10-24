@@ -43,6 +43,8 @@ export interface WorkerData {
   endpoint: BrowserEndpoint;
   // The extractor script that the worker should execute.
   extractor: string;
+  // Tags associated with the tracker.
+  tags: string[];
   // The previous content that the extractor script extracted previously.
   previousContent?: unknown;
   // The user agent that should be used for all requests.

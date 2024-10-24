@@ -42,6 +42,7 @@ export async function execute(page) {
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -68,6 +69,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
     url: '/api/web_page/execute',
     payload: {
       extractor: `export async function execute(page) { return 'success'; };`,
+      tags: [],
       userAgent: 'Retrack/1.0.0',
       ignoreHTTPSErrors: true,
     },
@@ -89,7 +91,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
   assert.strictEqual(response.statusCode, 200);
 });
 
-await test('[/api/web_page/execute] can provide previous content', async (t) => {
+await test('[/api/web_page/execute] can provide context', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
   const mockRoute = registerExecuteRoutes(
@@ -101,16 +103,17 @@ await test('[/api/web_page/execute] can provide previous content', async (t) => 
     payload: {
       previousContent: 'some previous content',
       extractor: `
-export async function execute(page, previousContent) {
-  return previousContent;
+export async function execute(page, context) {
+  return context;
 };
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: ['tag1', 'tag2'],
     },
   });
 
-  assert.strictEqual(response.body, 'some previous content');
+  assert.deepEqual(JSON.parse(response.body), { tags: ['tag1', 'tag2'], previousContent: 'some previous content' });
   assert.strictEqual(response.statusCode, 200);
 
   response = await mockRoute.inject({
@@ -119,16 +122,20 @@ export async function execute(page, previousContent) {
     payload: {
       previousContent: { a: 1 },
       extractor: `
-export async function execute(page, previousContent) {
-  return Object.entries(previousContent);
+export async function execute(page, context) {
+  return Object.fromEntries(Object.entries(context));
 };
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: ['tag1', 'tag2'],
     },
   });
 
-  assert.strictEqual(response.body, JSON.stringify([['a', 1]]));
+  assert.deepEqual(JSON.parse(response.body), {
+    previousContent: { a: 1 },
+    tags: ['tag1', 'tag2'],
+  });
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -148,6 +155,7 @@ export async function execute(page) {
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -171,6 +179,7 @@ export async function execute() {
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -199,6 +208,7 @@ export async function execute() {
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -229,6 +239,7 @@ export async function execute(page) {
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -252,6 +263,7 @@ export async function execute(page) {
     `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -275,6 +287,7 @@ export async function execute(page) {
     `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
     },
   });
 
@@ -305,6 +318,7 @@ export async function execute(page) {
   `
         .replaceAll('\n', '')
         .trim(),
+      tags: [],
       timeout: 5000,
     },
   });

@@ -14,7 +14,7 @@ if (!parentPort) {
 }
 
 // Load the extractor script as an ES module.
-const { endpoint, extractor, previousContent, userAgent, ignoreHTTPSErrors } = workerData as WorkerData;
+const { endpoint, extractor, tags, previousContent, userAgent, ignoreHTTPSErrors } = workerData as WorkerData;
 
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
 // `--frozen-intrinsics`. It DOES NOT protect against all prototype pollution vectors.
@@ -42,7 +42,7 @@ for (const Class of [
 // See https://github.com/nodejs/node/issues/47747 for more details.
 register(resolve(import.meta.dirname, './extractor_module_hooks.js'), pathToFileURL('./'));
 const extractorModule = (await import(`${EXTRACTOR_MODULE_PREFIX}${encodeURIComponent(extractor)}`)) as {
-  execute: (page: Page, previousContent?: unknown) => Promise<unknown>;
+  execute: (page: Page, context: { tags: string[]; previousContent?: unknown }) => Promise<unknown>;
 };
 if (typeof extractorModule?.execute !== 'function') {
   throw new Error('The extractor script must export a function named "execute".');
@@ -101,7 +101,7 @@ const page = await context.newPage();
 try {
   parentPort?.postMessage({
     type: WorkerMessageType.RESULT,
-    content: await extractorModule.execute(page, previousContent),
+    content: await extractorModule.execute(page, { tags, previousContent }),
   });
 } catch (err) {
   // Capture screenshots.

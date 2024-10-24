@@ -20,6 +20,11 @@ interface RequestBodyType {
   extractor: string;
 
   /**
+   * Tags associated with the tracker.
+   */
+  tags: string[];
+
+  /**
    * Optional web page content that has been extracted previously.
    */
   previousContent?: unknown;
@@ -49,12 +54,13 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
           type: 'object',
           properties: {
             extractor: { type: 'string' },
+            tags: { type: 'array', items: { type: 'string' } },
             previousContent: {},
             timeout: { type: 'number' },
             userAgent: { type: 'string' },
             ignoreHTTPSErrors: { type: 'boolean' },
           },
-          required: ['extractor'],
+          required: ['extractor', 'tags'],
         },
       },
     },
@@ -65,6 +71,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
       const workerData: WorkerData = {
         endpoint: await getBrowserEndpoint(),
         extractor: request.body.extractor,
+        tags: request.body.tags,
         previousContent: request.body.previousContent,
         userAgent: request.body.userAgent,
         ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
