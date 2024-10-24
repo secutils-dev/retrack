@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM trackers WHERE tags @> $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89376d892725ce131a46dcfa687875b33989ea19a910d3fb97380d9fb5f3230f"
+}

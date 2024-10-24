@@ -223,6 +223,19 @@ where
         self.trackers.remove_tracker(id).await
     }
 
+    /// Removes all trackers that have all specified tags. If `tags` is empty, all trackers are removed.
+    pub async fn remove_trackers(&self, params: TrackersListParams) -> anyhow::Result<u64> {
+        let normalized_tags = Self::normalize_tracker_tags(params.tags);
+        if normalized_tags.len() > MAX_TRACKER_TAGS_COUNT {
+            bail!(RetrackError::client(format!(
+                "Trackers filter params cannot use more than {MAX_TRACKER_TAGS_COUNT} tags."
+            )));
+        }
+        Self::validate_tracker_tags(&normalized_tags)?;
+
+        self.trackers.remove_trackers(&normalized_tags).await
+    }
+
     /// Fetches data revision for the specified tracker, and persists it if allowed by config and
     /// if the data has changed.
     pub async fn create_tracker_data_revision(
@@ -2597,7 +2610,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn properly_removes_trackers(pool: PgPool) -> anyhow::Result<()> {
+    async fn properly_removes_tracker(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
         let trackers = api.trackers();
@@ -2773,6 +2786,71 @@ mod tests {
             }).await),
             @r###""Trackers filter params cannot use more than 20 tags.""###
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_removes_all_trackers(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+
+        let trackers = api.trackers();
+
+        let tracker_one = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()])
+                    .with_actions(vec![
+                        TrackerAction::ServerLog,
+                        TrackerAction::Email(EmailAction {
+                            to: vec!["dev@retrack.dev".to_string()],
+                        }),
+                    ]),
+            )
+            .await?;
+        let tracker_two = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_two")
+                    .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag:2".to_string(), "tag:common".to_string()])
+                    .with_actions(vec![
+                        TrackerAction::ServerLog,
+                        TrackerAction::Email(EmailAction {
+                            to: vec!["dev@retrack.dev".to_string()],
+                        }),
+                    ]),
+            )
+            .await?;
+
+        assert_eq!(
+            trackers.get_trackers(Default::default()).await?,
+            vec![tracker_one.clone(), tracker_two.clone()],
+        );
+        assert_eq!(
+            trackers
+                .remove_trackers(TrackersListParams {
+                    tags: vec!["tag:2".to_string()]
+                })
+                .await?,
+            1
+        );
+        assert_eq!(
+            trackers.get_trackers(TrackersListParams::default()).await?,
+            vec![tracker_one.clone()],
+        );
+        assert_eq!(
+            trackers
+                .remove_trackers(TrackersListParams {
+                    tags: vec!["tag:1".to_string(), "tag:common".to_string()]
+                })
+                .await?,
+            1
+        );
+        assert!(trackers
+            .get_trackers(TrackersListParams::default())
+            .await?
+            .is_empty());
 
         Ok(())
     }

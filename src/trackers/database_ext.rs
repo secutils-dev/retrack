@@ -172,6 +172,19 @@ WHERE id = $1
         Ok(())
     }
 
+    /// Removes all trackers that have all specified tags. If `tags` is empty, all trackers are removed.
+    pub async fn remove_trackers(&self, tags: &[String]) -> anyhow::Result<u64> {
+        let result = if tags.is_empty() {
+            query!(r#"DELETE FROM trackers"#).execute(self.pool).await?
+        } else {
+            query!(r#"DELETE FROM trackers WHERE tags @> $1"#, tags)
+                .execute(self.pool)
+                .await?
+        };
+
+        Ok(result.rows_affected())
+    }
+
     /// Retrieves all tracked data for the specified tracker.
     pub async fn get_tracker_data(
         &self,
@@ -750,6 +763,36 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn can_bulk_remove_all_trackers(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let trackers_list = vec![
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000003"),
+                "some-name",
+                3,
+            )?
+            .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000004"),
+                "some-name-2",
+                3,
+            )?
+            .build(),
+        ];
+
+        let trackers = db.trackers();
+        for tracker in trackers_list.iter() {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        assert_eq!(trackers.remove_trackers(&[]).await?, 2);
+        assert!(trackers.get_trackers(&[]).await?.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn can_retrieve_trackers_by_tags(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -804,6 +847,70 @@ mod tests {
             ])
             .await?
             .is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_remove_trackers_by_tags(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let trackers_list = vec![
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                "some-name",
+                3,
+            )?
+            .with_tags(vec!["tag:1".to_string()])
+            .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                "some-name-2",
+                3,
+            )?
+            .with_tags(vec!["tag:1".to_string(), "tag:2".to_string()])
+            .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000003"),
+                "some-name-3",
+                3,
+            )?
+            .with_tags(vec!["tag:3".to_string()])
+            .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000004"),
+                "some-name-4",
+                3,
+            )?
+            .build(),
+        ];
+
+        let trackers = db.trackers();
+        for tracker in trackers_list.iter() {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+        assert_eq!(trackers.remove_trackers(&["tag:1".to_string()]).await?, 2);
+        assert_eq!(
+            trackers.get_trackers(&[]).await?,
+            vec![trackers_list[2].clone(), trackers_list[3].clone()]
+        );
+
+        assert_eq!(trackers.remove_trackers(&["tag:2".to_string()]).await?, 0);
+        assert_eq!(
+            trackers.get_trackers(&[]).await?,
+            vec![trackers_list[2].clone(), trackers_list[3].clone()]
+        );
+
+        assert_eq!(trackers.remove_trackers(&["tag:3".to_string()]).await?, 1);
+        assert_eq!(
+            trackers.get_trackers(&[]).await?,
+            vec![trackers_list[3].clone()]
+        );
+
+        assert_eq!(trackers.remove_trackers(&[]).await?, 1);
+        assert!(trackers.get_trackers(&[]).await?.is_empty());
 
         Ok(())
     }

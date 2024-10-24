@@ -211,4 +211,4 @@ Accept: application/json
 }
 
 ### Delete tracker
-DELETE {{host}}/api/trackers/0190acdd-6b11-71c0-be14-bfa8c7c4cce3
+DELETE {{host}}/api/trackers/{{tracker}}

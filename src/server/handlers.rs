@@ -1,4 +1,5 @@
 pub mod status_get;
+pub mod trackers_bulk_remove;
 pub mod trackers_clear_revisions;
 pub mod trackers_create;
 pub mod trackers_create_revision;
@@ -37,6 +38,7 @@ use utoipa::OpenApi;
         trackers_create::trackers_create,
         trackers_update::trackers_update,
         trackers_remove::trackers_remove,
+        trackers_bulk_remove::trackers_bulk_remove,
         trackers_list_revisions::trackers_list_revisions,
         trackers_create_revision::trackers_create_revision,
         trackers_clear_revisions::trackers_clear_revisions
