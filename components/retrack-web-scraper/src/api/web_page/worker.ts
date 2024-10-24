@@ -33,7 +33,6 @@ for (const Class of [
   ArrayBuffer,
   Response,
   Request,
-  WebSocket,
   URL,
 ]) {
   Object.seal(Class.prototype);
