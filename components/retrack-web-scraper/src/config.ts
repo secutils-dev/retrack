@@ -7,6 +7,7 @@ export interface Config {
   port: number;
   cacheTTLSec: number;
   browserTTLSec: number;
+  browserScreenshotsPath?: string;
   userAgent?: string;
 }
 
@@ -18,6 +19,7 @@ export function configure(): Config {
     port: +(process.env.RETRACK_WEB_SCRAPER_PORT ?? 0) || 7272,
     cacheTTLSec: +(process.env.RETRACK_WEB_SCRAPER_CACHE_TTL_SEC ?? 0) || 20 * 60,
     browserTTLSec: +(process.env.RETRACK_WEB_SCRAPER_BROWSER_TTL_SEC ?? 0) || 10 * 60,
+    browserScreenshotsPath: process.env.RETRACK_WEB_SCRAPER_BROWSER_SCREENSHOTS_PATH,
     userAgent: process.env.RETRACK_WEB_SCRAPER_USER_AGENT,
   };
 }

@@ -8,6 +8,7 @@ dist/
 .env
 
 components/retrack-types/Cargo.lock
+components/retrack-web-scraper/.screenshots
 
 # Local Retrack configuration file
 retrack.toml

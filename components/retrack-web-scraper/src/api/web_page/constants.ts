@@ -51,4 +51,6 @@ export interface WorkerData {
   userAgent?: string;
   // Whether to ignore HTTPS errors when sending network requests.
   ignoreHTTPSErrors?: boolean;
+  // Path to a folder where to save screenshots.
+  screenshotsPath?: string;
 }

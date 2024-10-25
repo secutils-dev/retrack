@@ -14,7 +14,8 @@ if (!parentPort) {
 }
 
 // Load the extractor script as an ES module.
-const { endpoint, extractor, tags, previousContent, userAgent, ignoreHTTPSErrors } = workerData as WorkerData;
+const { endpoint, extractor, tags, previousContent, userAgent, ignoreHTTPSErrors, screenshotsPath } =
+  workerData as WorkerData;
 
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
 // `--frozen-intrinsics`. It DOES NOT protect against all prototype pollution vectors.
@@ -112,7 +113,18 @@ try {
       pages.map((page) => ({ url: page.url() })),
       new Map(
         await Promise.all(
-          pages.map(async (page) => [page.url(), await page.screenshot({ fullPage: true })] as [string, Uint8Array]),
+          pages.map(
+            async (page) =>
+              [
+                page.url(),
+                await page.screenshot({
+                  fullPage: true,
+                  path: screenshotsPath
+                    ? `${screenshotsPath}/screenshot_${encodeURIComponent(page.url())}_${Date.now()}.png`
+                    : undefined,
+                }),
+              ] as [string, Uint8Array],
+          ),
         ),
       ),
     );

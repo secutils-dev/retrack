@@ -19,7 +19,10 @@ const server = fastify({
       ? { level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug' }
       : {
           level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug',
-          transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname' } },
+          transport: {
+            target: 'pino-pretty',
+            options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname,screenshot' },
+          },
         },
 }).addHook('onClose', () => stopBrowserServer());
 

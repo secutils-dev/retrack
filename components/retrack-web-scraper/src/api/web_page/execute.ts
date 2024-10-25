@@ -45,7 +45,7 @@ interface RequestBodyType {
   ignoreHTTPSErrors?: boolean;
 }
 
-export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRouteParams) {
+export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: ApiRouteParams) {
   return server.post<{ Body: RequestBodyType }>(
     '/api/web_page/execute',
     {
@@ -75,6 +75,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
         previousContent: request.body.previousContent,
         userAgent: request.body.userAgent,
         ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
+        screenshotsPath: config.browserScreenshotsPath,
       };
 
       try {
@@ -103,7 +104,7 @@ export function registerExecuteRoutes({ server, getBrowserEndpoint }: ApiRoutePa
               if (message.level === 'error') {
                 workerLog.error(message.message, message.args);
                 for (const [url, screenshot] of message.screenshots ?? []) {
-                  workerLog.error({ screenshot }, `Screenshot for ${url}.`);
+                  workerLog.error({ screenshot: Buffer.from(screenshot).toString('base64') }, `Screenshot for ${url}.`);
                 }
               } else {
                 workerLog.info(message.message, message.args);
