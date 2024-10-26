@@ -14,13 +14,14 @@ RUN set -x && npm run build --ws
 
 FROM node:22-alpine3.20
 ENV NODE_ENV=production \
-    RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium-browser"
+    RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium-browser" \
+    DISPLAY=:99
 WORKDIR /app
 EXPOSE 7272
 
 RUN set -x && apk update --no-cache && \
     apk upgrade --no-cache && \
-    apk add --no-cache dumb-init ttf-freefont font-noto-emoji font-wqy-zenhei chromium-swiftshader chromium
+    apk add --no-cache dumb-init ttf-freefont font-noto-emoji font-wqy-zenhei xvfb-run chromium-swiftshader chromium
 
 COPY ./dev/docker/chromium-local.conf /etc/fonts/local.conf
 RUN set -x && fc-cache -fv
@@ -36,4 +37,5 @@ RUN set -x && npm ci --production && npm cache clean --force && \
 USER node
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD [ "node", "src/index.js" ]
+CMD xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' node src/index.js
+
