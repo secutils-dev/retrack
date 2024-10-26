@@ -3907,6 +3907,7 @@ dependencies = [
  "chrono",
  "clap",
  "croner",
+ "csv",
  "ctor",
  "deno_core",
  "dotenvy",

@@ -19,7 +19,7 @@ use crate::{
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
     trackers::{
         database_ext::TrackersDatabaseExt,
-        parsers::XlsParser,
+        parsers::{CsvParser, XlsParser},
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
     },
@@ -905,6 +905,9 @@ where
         let response_bytes = match media_type {
             Some(ref media_type) if XlsParser::supports(media_type) => {
                 XlsParser::parse(&response_bytes)?
+            }
+            Some(ref media_type) if CsvParser::supports(media_type) => {
+                CsvParser::parse(&response_bytes)?
             }
             _ => response_bytes,
         };
@@ -3447,6 +3450,86 @@ mod tests {
                             ],
                         ],
                     },
+                ],
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_parser_csv(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/get-call").parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: Some("text/csv".parse()?),
+                        configurator: None,
+                        extractor: None,
+                    })),
+            )
+            .await?;
+
+        let tracker_data = trackers
+            .get_tracker_data(tracker.id, Default::default())
+            .await?;
+        assert!(tracker_data.is_empty());
+
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "text/csv;charset=UTF-8")
+                .body(load_fixture("csv_fixture.csv").unwrap());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        content_mock.assert();
+
+        let revs = trackers
+            .get_tracker_data(tracker.id, Default::default())
+            .await?;
+        assert_debug_snapshot!(
+            revs.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: Array [
+                    Array [
+                        String("Header N1"),
+                        String("Header N2"),
+                        String(""),
+                    ],
+                    Array [
+                        String("Some string"),
+                        String("100500"),
+                        String(""),
+                    ],
+                    Array [
+                        String("500100"),
+                        String("Some string 2"),
+                        String("100"),
+                    ],
+                    Array [
+                        String(""),
+                        String(""),
+                        String("Another string"),
+                    ],
                 ],
                 mods: None,
             },
