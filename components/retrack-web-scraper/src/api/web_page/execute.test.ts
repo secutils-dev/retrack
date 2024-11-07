@@ -54,7 +54,9 @@ export async function execute(page) {
 
   assert.strictEqual(
     response.body,
-    '<html lang="en"><head><title>Retrack.dev</title></head><body><div>Hello Retrack and world!</div></body></html>',
+    JSON.stringify(
+      '<html lang="en"><head><title>Retrack.dev</title></head><body><div>Hello Retrack and world!</div></body></html>',
+    ),
   );
   assert.strictEqual(response.statusCode, 200);
 });
@@ -87,7 +89,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
   assert.ok(userAgentOverrideMessage);
   assert.equal((userAgentOverrideMessage.params as { userAgent: string }).userAgent, 'Retrack/1.0.0');
 
-  assert.strictEqual(response.body, 'success');
+  assert.strictEqual(response.body, JSON.stringify('success'));
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -109,11 +111,16 @@ export async function execute(page, context) {
   `
         .replaceAll('\n', '')
         .trim(),
+      extractorParams: { param: 'value' },
       tags: ['tag1', 'tag2'],
     },
   });
 
-  assert.deepEqual(JSON.parse(response.body), { tags: ['tag1', 'tag2'], previousContent: 'some previous content' });
+  assert.deepEqual(JSON.parse(response.body), {
+    tags: ['tag1', 'tag2'],
+    previousContent: 'some previous content',
+    params: { param: 'value' },
+  });
   assert.strictEqual(response.statusCode, 200);
 
   response = await mockRoute.inject({
@@ -159,7 +166,7 @@ export async function execute(page) {
     },
   });
 
-  assert.strictEqual(response.body, "Map(2) { 'one' => 1, 'two' => 2 }");
+  assert.strictEqual(response.body, JSON.stringify("Map(2) { 'one' => 1, 'two' => 2 }"));
   assert.strictEqual(response.statusCode, 200);
 });
 

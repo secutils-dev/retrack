@@ -20,6 +20,11 @@ interface RequestBodyType {
   extractor: string;
 
   /**
+   * Optional parameters that are passed to the extractor script.
+   */
+  extractorParams?: unknown;
+
+  /**
    * Tags associated with the tracker.
    */
   tags: string[];
@@ -54,6 +59,7 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
           type: 'object',
           properties: {
             extractor: { type: 'string' },
+            extractorParams: {},
             tags: { type: 'array', items: { type: 'string' } },
             previousContent: {},
             timeout: { type: 'number' },
@@ -71,6 +77,7 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
       const workerData: WorkerData = {
         endpoint: await getBrowserEndpoint(),
         extractor: request.body.extractor,
+        extractorParams: request.body.extractorParams,
         tags: request.body.tags,
         previousContent: request.body.previousContent,
         userAgent: request.body.userAgent,
@@ -111,7 +118,7 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
               }
             } else {
               workerLog.debug(`Successfully executed extractor script.`);
-              successfulResult = message.content;
+              successfulResult = JSON.stringify(message.content);
             }
           });
 
