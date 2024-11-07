@@ -33,6 +33,7 @@ pub mod tests {
                 enabled: true,
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 }),
@@ -101,6 +102,7 @@ pub mod tests {
             Ok(Self {
                 // Target properties.
                 extractor: target.extractor.as_str(),
+                extractor_params: target.params.as_ref(),
                 tags: &tracker.tags,
                 user_agent: target.user_agent.as_deref(),
                 ignore_https_errors: target.ignore_https_errors,
@@ -130,6 +132,7 @@ pub mod tests {
                     job_id: None,
                     target: TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                        params: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         ignore_https_errors: false,
                     }),

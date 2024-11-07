@@ -10,6 +10,10 @@ pub struct PageTarget {
     /// A custom script (Playwright scenario) to extract data from the page.
     pub extractor: String,
 
+    /// Optional parameters to pass to the scripts as part of the context.
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+
     /// Specific user agent to use for the browser context.
     pub user_agent: Option<String>,
 
@@ -36,11 +40,13 @@ mod tests {
 
         let target = PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: Some(json!({ "param": "value" })),
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         };
         let target_json = json!({
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "params": { "param": "value" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         });

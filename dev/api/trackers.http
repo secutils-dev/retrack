@@ -1,4 +1,4 @@
-@tracker = 0192b63b-2c69-7573-b0fc-51826414e69a
+@tracker = 0193089e-f3b7-7502-8633-5871baa96106
 
 ### Get trackers
 GET {{host}}/api/trackers
@@ -102,6 +102,30 @@ Accept: application/json
       "schedule": "0 */1 * * * *"
     }
   },
+  "tags": ["app:test"]
+}
+
+### Create tracker (target: page, #2)
+< {%
+  const extractor = `
+    export async function execute(page, { params }) {
+      return params;
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[Test] Extractor with params",
+  "target": {
+    "type": "page",
+    "extractor": "{{extractor}}",
+    "params": "Hello, World!"
+  },
+  "actions": [{ "type": "log" }],
   "tags": ["app:test"]
 }
 

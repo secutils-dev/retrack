@@ -49,6 +49,7 @@ mod tests {
                 enabled: true,
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: None,
                     ignore_https_errors: false,
                 }),
@@ -79,6 +80,7 @@ mod tests {
                 enabled: false,
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: None,
                     ignore_https_errors: false,
                 }),
@@ -113,6 +115,7 @@ mod tests {
                 enabled: true,
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: None,
                     ignore_https_errors: false,
                 }),
@@ -134,6 +137,7 @@ mod tests {
         "target": {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "params": { "param": "value" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         },
@@ -164,6 +168,7 @@ mod tests {
                 enabled: true,
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: Some(serde_json::json!({ "param": "value" })),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 }),

@@ -756,6 +756,7 @@ where
         let extractor = self.get_script_content(tracker, &target.extractor).await?;
         let scraper_request = WebScraperContentRequest {
             extractor: extractor.as_ref(),
+            extractor_params: target.params.as_ref(),
             tags: &tracker.tags,
             user_agent: target.user_agent.as_deref(),
             ignore_https_errors: target.ignore_https_errors,
@@ -1178,6 +1179,7 @@ mod tests {
 
         let target = TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         });
@@ -1790,6 +1792,7 @@ mod tests {
                 enabled: true,
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 }),
@@ -2214,6 +2217,7 @@ mod tests {
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "".to_string(),
+                    params: None,
                     user_agent: None,
                     ignore_https_errors: false
                 })),
@@ -2227,6 +2231,7 @@ mod tests {
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1),
+                    params: None,
                     user_agent: None,
                     ignore_https_errors: false
                 })),
@@ -2240,6 +2245,7 @@ mod tests {
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: Some("".to_string()),
                     ignore_https_errors: false,
                 })),
@@ -2253,6 +2259,7 @@ mod tests {
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                    params: None,
                     user_agent: Some("a".repeat(201)),
                     ignore_https_errors: false,
                 })),
@@ -3266,7 +3273,7 @@ mod tests {
   const newBody = JSON.parse(Deno.core.decode(context.body));
   return {
     body: Deno.core.encode(
-      JSON.stringify(`${newBody}_modified_${JSON.stringify(context.previousContent)}`)
+      JSON.stringify({ name: `${newBody}_modified_${JSON.stringify(context.previousContent)}`, value: 1 })
     )
   };
 }})(context);"#
@@ -3297,7 +3304,7 @@ mod tests {
         assert_eq!(tracker_data[0].tracker_id, tracker.id);
         assert_eq!(
             tracker_data[0].data,
-            TrackerDataValue::new(json!("\"rev_1\"_modified_undefined"))
+            TrackerDataValue::new(json!({ "name": "\"rev_1\"_modified_undefined", "value": 1 }))
         );
 
         content_mock.assert();
@@ -3314,7 +3321,7 @@ mod tests {
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
         assert_eq!(
             revision.data.value(),
-            "\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}"
+            &json!({ "name": "\"rev_2\"_modified_{\"original\":{\"name\":\"\\\"rev_1\\\"_modified_undefined\",\"value\":1}}", "value": 1 })
         );
         content_mock.assert();
 
@@ -3333,11 +3340,14 @@ mod tests {
             @r###"
         [
             TrackerDataValue {
-                original: String("\"rev_1\"_modified_undefined"),
+                original: Object {
+                    "name": String("\"rev_1\"_modified_undefined"),
+                    "value": Number(1),
+                },
                 mods: None,
             },
             TrackerDataValue {
-                original: String("@@ -1 +1 @@\n-\"rev_1\"_modified_undefined\n+\"rev_2\"_modified_{\"original\":\"\\\"rev_1\\\"_modified_undefined\"}\n"),
+                original: String("@@ -1,4 +1,4 @@\n {\n-  \"name\": \"\\\"rev_1\\\"_modified_undefined\",\n+  \"name\": \"\\\"rev_2\\\"_modified_{\\\"original\\\":{\\\"name\\\":\\\"\\\\\\\"rev_1\\\\\\\"_modified_undefined\\\",\\\"value\\\":1}}\",\n   \"value\": 1\n }\n"),
                 mods: None,
             },
         ]
@@ -4113,6 +4123,7 @@ mod tests {
                     enabled: Some(true),
                     target: Some(TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/222'); return await p.content(); }".to_string(),
+                        params: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         ignore_https_errors: true,
                     })),
@@ -4196,6 +4207,7 @@ mod tests {
                     enabled: Some(true),
                     target: Some(TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/222'); return await p.content(); }".to_string(),
+                        params: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         ignore_https_errors: true,
                     })),
@@ -4273,6 +4285,7 @@ mod tests {
                     enabled: None,
                     target: Some(TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/222'); return await p.content(); }".to_string(),
+                        params: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         ignore_https_errors: true,
                     })),

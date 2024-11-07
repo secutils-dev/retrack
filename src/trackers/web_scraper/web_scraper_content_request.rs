@@ -12,6 +12,9 @@ pub struct WebScraperContentRequest<'a> {
     /// A script (Playwright scenario) used to extract web page content that needs to be tracked.
     pub extractor: &'a str,
 
+    /// Optional parameters to pass to the extractor scripts as part of the context.
+    pub extractor_params: Option<&'a JsonValue>,
+
     /// Tags associated with the tracker.
     pub tags: &'a Vec<String>,
 
@@ -47,6 +50,7 @@ mod tests {
     fn serialization() -> anyhow::Result<()> {
         assert_json_snapshot!(WebScraperContentRequest {
             extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
+            extractor_params: Some(&json!({ "param": "value" })),
             tags: &vec!["tag1".to_string(), "tag2".to_string()],
             timeout: Some(Duration::from_millis(100)),
             previous_content: Some(&json!("some content")),
@@ -55,6 +59,9 @@ mod tests {
         }, @r###"
         {
           "extractor": "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
+          "extractorParams": {
+            "param": "value"
+          },
           "tags": [
             "tag1",
             "tag2"
@@ -73,6 +80,7 @@ mod tests {
     fn from_tracker() -> anyhow::Result<()> {
         let target = PageTarget {
             extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }".to_string(),
+            params: Some(json!({ "param": "value" })),
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         };
@@ -90,6 +98,7 @@ mod tests {
 
         // Target properties.
         assert_eq!(request.extractor, target.extractor.as_str());
+        assert_eq!(request.extractor_params, target.params.as_ref());
         assert_eq!(request.user_agent, target.user_agent.as_deref());
         assert_eq!(request.ignore_https_errors, target.ignore_https_errors);
         assert_eq!(request.tags, &tracker.tags);

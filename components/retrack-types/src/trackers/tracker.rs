@@ -55,6 +55,7 @@ mod tests {
         )?
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: Some(serde_json::json!({ "param": "value" })),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -67,6 +68,9 @@ mod tests {
           "target": {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "params": {
+              "param": "value"
+            },
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -92,6 +96,7 @@ mod tests {
         )?
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -133,6 +138,7 @@ mod tests {
         )?
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -174,6 +180,7 @@ mod tests {
         )?
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: Some(serde_json::json!("Hello, World!")),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -187,6 +194,7 @@ mod tests {
           "target": {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "params": "Hello, World!",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
           },
@@ -215,6 +223,7 @@ mod tests {
         )?
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))

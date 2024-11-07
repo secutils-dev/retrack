@@ -60,6 +60,7 @@ enum RawTrackerTarget<'s> {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawPageTarget<'s> {
     extractor: Cow<'s, str>,
+    extractor_params: Option<Vec<u8>>,
     user_agent: Option<Cow<'s, str>>,
     ignore_https_errors: Option<bool>,
 }
@@ -143,6 +144,10 @@ impl TryFrom<RawTracker> for Tracker {
             target: match raw_config.target {
                 RawTrackerTarget::Page(target) => TrackerTarget::Page(PageTarget {
                     extractor: target.extractor.into_owned(),
+                    params: target
+                        .extractor_params
+                        .map(|body| serde_json::from_slice(&body))
+                        .transpose()?,
                     user_agent: target.user_agent.map(Cow::into_owned),
                     ignore_https_errors: target.ignore_https_errors.unwrap_or_default(),
                 }),
@@ -240,6 +245,11 @@ impl TryFrom<&Tracker> for RawTracker {
                 target: match &item.target {
                     TrackerTarget::Page(target) => RawTrackerTarget::Page(RawPageTarget {
                         extractor: Cow::Borrowed(target.extractor.as_ref()),
+                        extractor_params: target
+                            .params
+                            .as_ref()
+                            .map(serde_json::to_vec)
+                            .transpose()?,
                         user_agent: target
                             .user_agent
                             .as_ref()
@@ -371,6 +381,7 @@ mod tests {
             enabled: true,
             target: TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                params: None,
                 user_agent: None,
                 ignore_https_errors: false,
             }),
@@ -391,6 +402,7 @@ mod tests {
             enabled: false,
             target: TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                params: Some(json!({ "param": "value" })),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 ignore_https_errors: true,
             }),
