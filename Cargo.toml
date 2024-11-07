@@ -96,7 +96,6 @@ default = [
     "reqwest/json",
     "reqwest/rustls-tls-native-roots",
     "reqwest-middleware/json",
-    "serde_json/arbitrary_precision",
     "serde_with/time_0_3",
     "sqlx/json",
     "sqlx/macros",
