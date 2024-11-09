@@ -641,7 +641,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content(&json!("some-content")),
+                            .set_previous_content(&TrackerDataValue::new(json!("some-content"))),
                     )
                     .unwrap(),
                 );
@@ -797,7 +797,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content(&json!("some-content")),
+                            .set_previous_content(&TrackerDataValue::new(json!("some-content"))),
                     )
                     .unwrap(),
                 );
@@ -958,7 +958,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content(&json!("some-content")),
+                            .set_previous_content(&TrackerDataValue::new(json!("some-content"))),
                     )
                     .unwrap(),
                 );
@@ -1149,7 +1149,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content(&json!("some-content")),
+                            .set_previous_content(&TrackerDataValue::new(json!("some-content"))),
                     )
                     .unwrap(),
                 );
@@ -1208,7 +1208,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content(&json!("some-content")),
+                            .set_previous_content(&TrackerDataValue::new(json!("some-content"))),
                     )
                     .unwrap(),
                 );

@@ -761,7 +761,7 @@ where
             user_agent: target.user_agent.as_deref(),
             ignore_https_errors: target.ignore_https_errors,
             timeout: tracker.config.timeout,
-            previous_content: revisions.last().map(|rev| rev.data.original()),
+            previous_content: revisions.last().map(|rev| &rev.data),
         };
 
         let scraper_response = self.http_client()
@@ -2938,7 +2938,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker_one)
                             .unwrap()
-                            .set_previous_content(&json!("\"rev_1\"")),
+                            .set_previous_content(&TrackerDataValue::new(json!("\"rev_1\""))),
                     )
                     .unwrap(),
                 );
@@ -3781,7 +3781,7 @@ mod tests {
 
         let mut server_mock = server.mock(|when, then| {
             let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
-            scraper_request.previous_content = Some(content.value());
+            scraper_request.previous_content = Some(&content);
 
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/execute")
@@ -3817,7 +3817,7 @@ mod tests {
         let new_content = TrackerDataValue::new(json!("\"rev_2\""));
         let server_mock = server.mock(|when, then| {
             let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
-            scraper_request.previous_content = Some(content.value());
+            scraper_request.previous_content = Some(&content);
 
             when.method(httpmock::Method::POST)
                 .path("/api/web_page/execute")
@@ -3974,7 +3974,7 @@ mod tests {
                     serde_json::to_value(
                         WebScraperContentRequest::try_from(&tracker)
                             .unwrap()
-                            .set_previous_content(&json!("\"rev_1\"")),
+                            .set_previous_content(&TrackerDataValue::new(json!("\"rev_1\""))),
                     )
                     .unwrap(),
                 );

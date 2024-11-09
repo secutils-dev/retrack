@@ -19,9 +19,10 @@ pub mod tests {
     use anyhow::bail;
     use retrack_types::{
         scheduler::SchedulerJobConfig,
-        trackers::{PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerTarget},
+        trackers::{
+            PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerDataValue, TrackerTarget,
+        },
     };
-    use serde_json::Value as JsonValue;
     use std::time::Duration;
     use time::OffsetDateTime;
     use uuid::Uuid;
@@ -79,7 +80,7 @@ pub mod tests {
 
     impl<'a> WebScraperContentRequest<'a> {
         /// Sets the content that has been extracted from the page previously.
-        pub fn set_previous_content(self, previous_content: &'a JsonValue) -> Self {
+        pub fn set_previous_content(self, previous_content: &'a TrackerDataValue) -> Self {
             Self {
                 previous_content: Some(previous_content),
                 ..self

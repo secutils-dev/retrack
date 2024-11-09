@@ -1,3 +1,4 @@
+use retrack_types::trackers::TrackerDataValue;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
@@ -33,7 +34,7 @@ pub struct WebScraperContentRequest<'a> {
     pub timeout: Option<Duration>,
 
     /// Optional content of the web page that has been extracted previously.
-    pub previous_content: Option<&'a JsonValue>,
+    pub previous_content: Option<&'a TrackerDataValue>,
 }
 
 #[cfg(test)]
@@ -41,7 +42,7 @@ mod tests {
     use super::WebScraperContentRequest;
     use crate::tests::MockTrackerBuilder;
     use insta::assert_json_snapshot;
-    use retrack_types::trackers::{PageTarget, TrackerTarget};
+    use retrack_types::trackers::{PageTarget, TrackerDataValue, TrackerTarget};
     use serde_json::json;
     use std::time::Duration;
     use uuid::uuid;
@@ -53,7 +54,7 @@ mod tests {
             extractor_params: Some(&json!({ "param": "value" })),
             tags: &vec!["tag1".to_string(), "tag2".to_string()],
             timeout: Some(Duration::from_millis(100)),
-            previous_content: Some(&json!("some content")),
+            previous_content: Some(&TrackerDataValue::new(json!("some content"))),
             user_agent: Some("Retrack/1.0.0"),
             ignore_https_errors: true
         }, @r###"
@@ -69,7 +70,9 @@ mod tests {
           "userAgent": "Retrack/1.0.0",
           "ignoreHTTPSErrors": true,
           "timeout": 100,
-          "previousContent": "some content"
+          "previousContent": {
+            "original": "some content"
+          }
         }
         "###);
 
