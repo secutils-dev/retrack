@@ -261,7 +261,8 @@ pub mod tests {
     use deno_core::error::JsError;
     use http::{HeaderMap, HeaderName, HeaderValue};
     use retrack_types::trackers::{
-        ConfiguratorScriptArgs, ConfiguratorScriptResult, TrackerDataValue,
+        ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
+        ExtractorScriptResult, TrackerDataValue,
     };
     use serde::{Deserialize, Serialize};
     use serde_bytes::ByteBuf;
@@ -306,11 +307,11 @@ pub mod tests {
         // Supports known scripts.
         let result = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => {{ return { headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify(context)) }; }})();"#,
+                r#"(() => {{ return { request: { headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify({ ...context, body: JSON.parse(Deno.core.decode(context.body)) })) } }; } })();"#,
                 ConfiguratorScriptArgs {
                     tags: vec!["tag1".to_string(), "tag2".to_string()],
                     previous_content: Some(TrackerDataValue::new(json!({ "key": "content" }))),
-                    body: Some(json!({ "key": "body" })),
+                    body: Some(serde_json::to_vec(&json!({ "key": "body" }))?),
                 },
                 config,
             )
@@ -318,7 +319,7 @@ pub mod tests {
             .unwrap();
         assert_eq!(
             result,
-            ConfiguratorScriptResult {
+            ConfiguratorScriptResult::Request {
                 headers: Some(HeaderMap::from_iter([(
                     HeaderName::from_static("x-key"),
                     HeaderValue::from_static("x-value")
@@ -372,6 +373,63 @@ pub mod tests {
         assert_eq!(
             serde_json::from_slice::<ScriptParams>(&result)?,
             script_params
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn can_execute_api_target_scripts() -> anyhow::Result<()> {
+        let js_runtime = JsRuntime::init_platform(&JsRuntimeConfig::default())?;
+        let config = ScriptConfig {
+            max_heap_size: 10 * 1024 * 1024,
+            max_execution_time: std::time::Duration::from_secs(5),
+        };
+
+        // Supports extractor scripts.
+        let ExtractorScriptResult { body, ..} = js_runtime
+            .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
+                r#"(() => {{ return { body: Deno.core.encode(JSON.stringify({ key: "value" })) }; }})();"#,
+                ExtractorScriptArgs::default(),
+                config,
+            )
+            .await?
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body.unwrap())?,
+            json!({ "key": "value" })
+        );
+
+        // Supports configurator (overrides request) scripts.
+        let ConfiguratorScriptResult::Request { body, ..} = js_runtime
+            .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
+                r#"(() => {{ return { request: { body: Deno.core.encode(JSON.stringify({ key: "value" })) } }; }})();"#,
+                ConfiguratorScriptArgs::default(),
+                config,
+            )
+            .await?
+            .unwrap() else {
+            panic!("Expected ConfiguratorScriptResult::Request");
+        };
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body.unwrap())?,
+            json!({ "key": "value" })
+        );
+
+        // Supports configurator (overrides response) scripts.
+        let ConfiguratorScriptResult::Response { body, ..} = js_runtime
+            .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
+                r#"(() => {{ return { response: { body: Deno.core.encode(JSON.stringify({ key: "value" })) } }; }})();"#,
+                ConfiguratorScriptArgs::default(),
+                config,
+            )
+            .await?
+            .unwrap() else {
+            panic!("Expected ConfiguratorScriptResult::Response");
+        };
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body)?,
+            json!({ "key": "value" })
         );
 
         Ok(())

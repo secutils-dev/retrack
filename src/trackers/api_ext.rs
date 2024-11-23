@@ -829,76 +829,86 @@ where
 
         // Run configurator script, if specified to check if there are any overrides to the request
         // parameters need to be made.
-        let (body_override, headers_override) = if let Some(ref configurator) = target.configurator
-        {
-            let result = self
-                .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                    self.get_script_content(tracker, configurator).await?,
-                    ConfiguratorScriptArgs {
-                        tags: tracker.tags.clone(),
-                        previous_content: revisions.last().map(|rev| rev.data.clone()),
-                        body: target.body.clone(),
-                    },
-                )
-                .await
-                .context("Failed to execute \"configurator\" script.")?
-                .unwrap_or_default();
-            (result.body, result.headers)
-        } else {
-            (None, None)
-        };
-
-        let client = self.http_client();
-        let request_builder = client.request(
-            target.method.as_ref().unwrap_or(&Method::GET).clone(),
-            target.url.clone(),
-        );
-
-        // Add headers, if any.
-        let headers = headers_override.or_else(|| target.headers.clone());
-        let request_builder = if let Some(headers) = headers {
-            request_builder.headers(headers)
-        } else {
-            request_builder
-        };
-
-        // Add body, if any.
-        let body = body_override
-            .map(Ok)
-            .or_else(|| target.body.as_ref().map(serde_json::to_vec))
-            .transpose()?;
-        let request_builder = if let Some(body) = body {
-            request_builder.body(body)
-        } else {
-            request_builder
-        };
-
-        // Set timeout, if any.
-        let request_builder = if let Some(ref timeout) = tracker.config.timeout {
-            request_builder.timeout(*timeout)
-        } else {
-            request_builder
-        };
-
-        let api_response = client.execute(request_builder.build()?).await?;
-        if !api_response.status().is_success() {
-            let is_client_error = api_response.status().is_client_error();
-            if is_client_error {
-                bail!(RetrackError::client(api_response.text().await?));
+        let (request_body_override, request_headers_override, response_body_override) =
+            if let Some(ref configurator) = target.configurator {
+                let result = self
+                    .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
+                        self.get_script_content(tracker, configurator).await?,
+                        ConfiguratorScriptArgs {
+                            tags: tracker.tags.clone(),
+                            previous_content: revisions.last().map(|rev| rev.data.clone()),
+                            body: target.body.as_ref().map(serde_json::to_vec).transpose()?,
+                        },
+                    )
+                    .await
+                    .context("Failed to execute \"configurator\" script.")?;
+                match result {
+                    Some(ConfiguratorScriptResult::Request { headers, body }) => {
+                        (body, headers, None)
+                    }
+                    Some(ConfiguratorScriptResult::Response { body }) => (None, None, Some(body)),
+                    _ => (None, None, None),
+                }
             } else {
-                bail!(
-                    "Unexpected scraper error for the tracker ('{}'): {}",
-                    tracker.id,
-                    api_response.text().await?
-                );
-            }
-        }
+                (None, None, None)
+            };
 
-        // Read response, parse, and extract data with extractor script, if specified.
-        let response_bytes = api_response
-            .bytes()
-            .await
-            .context("Failed to read API response.")?;
+        let response_bytes = if let Some(response_body_override) = response_body_override {
+            response_body_override.into()
+        } else {
+            let client = self.http_client();
+            let request_builder = client.request(
+                target.method.as_ref().unwrap_or(&Method::GET).clone(),
+                target.url.clone(),
+            );
+
+            // Add headers, if any.
+            let headers = request_headers_override.or_else(|| target.headers.clone());
+            let request_builder = if let Some(headers) = headers {
+                request_builder.headers(headers)
+            } else {
+                request_builder
+            };
+
+            // Add body, if any.
+            let body = request_body_override
+                .map(Ok)
+                .or_else(|| target.body.as_ref().map(serde_json::to_vec))
+                .transpose()?;
+            let request_builder = if let Some(body) = body {
+                request_builder.body(body)
+            } else {
+                request_builder
+            };
+
+            // Set timeout, if any.
+            let request_builder = if let Some(ref timeout) = tracker.config.timeout {
+                request_builder.timeout(*timeout)
+            } else {
+                request_builder
+            };
+
+            let api_response = client.execute(request_builder.build()?).await?;
+            if !api_response.status().is_success() {
+                let is_client_error = api_response.status().is_client_error();
+                if is_client_error {
+                    bail!(RetrackError::client(api_response.text().await?));
+                } else {
+                    bail!(
+                        "Unexpected scraper error for the tracker ('{}'): {}",
+                        tracker.id,
+                        api_response.text().await?
+                    );
+                }
+            }
+
+            // Read response, parse, and extract data with extractor script, if specified.
+            api_response
+                .bytes()
+                .await
+                .context("Failed to read API response.")?
+        };
+
         let media_type = target
             .media_type
             .as_ref()
@@ -3088,7 +3098,7 @@ mod tests {
                         )])),
                         body: Some(json!({ "key": "value" })),
                         media_type: Some("application/json".parse()?),
-                        configurator: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: `overridden-${context.body.key}` })) }))(context);".to_string()),
+                        configurator: Some("((context) => ({ request: { body: Deno.core.encode(JSON.stringify({ key: `overridden-${JSON.parse(Deno.core.decode(context.body)).key}` })) } }))(context);".to_string()),
                         extractor: None
                     })),
             )
@@ -3358,6 +3368,102 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_configurator_response(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        url: server.url("/api/get-call").parse()?,
+                        method: None,
+                        headers: Some(HeaderMap::from_iter([(
+                            HeaderName::from_static("x-custom-header"),
+                            HeaderValue::from_static("x-custom-value"),
+                        )])),
+                        body: Some(serde_json::Value::String("rev_1".to_string())),
+                        media_type: Some("application/json".parse()?),
+                        configurator: Some(
+                            r#"
+((context) => {{
+  const newBody = JSON.parse(Deno.core.decode(context.body));
+  return {
+    response: {
+      body: Deno.core.encode(
+        JSON.stringify({ name: `${newBody}_modified_${JSON.stringify(context.previousContent)}`, value: 1 })
+      )
+    }
+  };
+}})(context);"#
+                                .to_string(),
+                        ),
+                        extractor: None
+                    })),
+            )
+            .await?;
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].tracker_id, tracker.id);
+        assert_eq!(
+            tracker_data[0].data,
+            TrackerDataValue::new(json!({ "name": "rev_1_modified_undefined", "value": 1 }))
+        );
+
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        assert_eq!(
+            revision.data.value(),
+            &json!({ "name": "rev_1_modified_{\"original\":{\"name\":\"rev_1_modified_undefined\",\"value\":1}}", "value": 1 })
+        );
+
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    calculate_diff: true,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 2);
+
+        assert_debug_snapshot!(
+            tracker_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: Object {
+                    "name": String("rev_1_modified_undefined"),
+                    "value": Number(1),
+                },
+                mods: None,
+            },
+            TrackerDataValue {
+                original: String("@@ -1,4 +1,4 @@\n {\n-  \"name\": \"rev_1_modified_undefined\",\n+  \"name\": \"rev_1_modified_{\\\"original\\\":{\\\"name\\\":\\\"rev_1_modified_undefined\\\",\\\"value\\\":1}}\",\n   \"value\": 1\n }\n"),
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn properly_saves_api_target_revision_with_parser_xlsx(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -3586,7 +3692,7 @@ mod tests {
                 .body(
                     r#"
 ((context) => ({
-  body: Deno.core.encode(JSON.stringify({ key: `overridden-${context.body.key}` }))
+  request: { body: Deno.core.encode(JSON.stringify({ key: `overridden-${JSON.parse(Deno.core.decode(context.body)).key}` })) }
  }))(context);"#,
                 );
         });

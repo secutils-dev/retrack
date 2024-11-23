@@ -13,8 +13,7 @@ pub struct ExtractorScriptArgs {
     /// Optional previous content.
     pub previous_content: Option<TrackerDataValue>,
 
-    /// Optional HTTP body to send with the request. If not specified, the default body of the `api`
-    /// target is used.
+    /// Optional HTTP body returned from the API.
     #[serde(with = "serde_bytes", default)]
     pub body: Option<Vec<u8>>,
 }

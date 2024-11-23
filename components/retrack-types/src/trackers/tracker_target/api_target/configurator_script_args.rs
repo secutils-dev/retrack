@@ -1,6 +1,5 @@
 use crate::trackers::TrackerDataValue;
 use serde::Serialize;
-use serde_json::Value as JsonValue;
 use serde_with::skip_serializing_none;
 
 /// Context available to the "configurator" scripts through global `context` variable.
@@ -15,7 +14,8 @@ pub struct ConfiguratorScriptArgs {
     pub previous_content: Option<TrackerDataValue>,
 
     /// Optional HTTP body configured for the request.
-    pub body: Option<JsonValue>,
+    #[serde(with = "serde_bytes", default)]
+    pub body: Option<Vec<u8>>,
 }
 
 #[cfg(test)]
@@ -39,7 +39,7 @@ mod tests {
             json!({ "tags": [], "previousContent": { "original": { "key": "value" } } });
         assert_eq!(serde_json::to_value(&context)?, context_json);
 
-        let body = json!({ "body": "value" });
+        let body = serde_json::to_vec(&json!({ "body": "value" }))?;
         let context = ConfiguratorScriptArgs {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             previous_content: Some(previous_content),
@@ -48,7 +48,7 @@ mod tests {
         let context_json = json!({
             "tags": ["tag1", "tag2"],
             "previousContent": { "original": { "key": "value" } },
-            "body": { "body": "value" },
+            "body": [123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125],
         });
         assert_eq!(serde_json::to_value(&context)?, context_json);
         Ok(())
