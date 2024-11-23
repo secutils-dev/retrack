@@ -32,10 +32,15 @@ impl XlsParser {
             data: Vec<Vec<String>>,
         }
 
-        let mut workbook = calamine::Xlsx::new(BufReader::new(Cursor::new(content)))?;
+        let worksheets = calamine::Xlsx::new(BufReader::new(Cursor::new(content)))
+            .map(|mut workbook| workbook.worksheets())
+            .or_else(|_| {
+                calamine::Xls::new(BufReader::new(Cursor::new(content)))
+                    .map(|mut workbook| workbook.worksheets())
+            })?;
 
         let mut sheets = vec![];
-        for (sheet_name, range) in workbook.worksheets() {
+        for (sheet_name, range) in worksheets {
             let mut sheet_rows = vec![];
             for row in range.rows() {
                 let mut sheet_cells = vec![];
@@ -86,8 +91,74 @@ mod tests {
     }
 
     #[test]
-    fn parse() -> anyhow::Result<()> {
+    fn parse_xlsx() -> anyhow::Result<()> {
         let fixture = load_fixture("xlsx_fixture.xlsx")?;
+        let parsed_data = XlsParser::parse(&fixture)?;
+
+        assert_json_snapshot!(
+            serde_json::from_slice::<serde_json::Value>(&parsed_data)?,
+            @r###"
+        [
+          {
+            "name": "Sheet N1",
+            "data": [
+              [
+                "Header N1",
+                "Header N2",
+                ""
+              ],
+              [
+                "Some string",
+                "100500",
+                ""
+              ],
+              [
+                "500100",
+                "Some string 2",
+                "100"
+              ],
+              [
+                "",
+                "",
+                "Another string"
+              ]
+            ]
+          },
+          {
+            "name": "Sheet N2",
+            "data": [
+              [
+                "Header N3",
+                "Header N4",
+                ""
+              ],
+              [
+                "Some string 3",
+                "100500",
+                ""
+              ],
+              [
+                "600200",
+                "Some string 4",
+                "200"
+              ],
+              [
+                "",
+                "",
+                "Another string 2"
+              ]
+            ]
+          }
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_xls() -> anyhow::Result<()> {
+        let fixture = load_fixture("xls_fixture.xls")?;
         let parsed_data = XlsParser::parse(&fixture)?;
 
         assert_json_snapshot!(
