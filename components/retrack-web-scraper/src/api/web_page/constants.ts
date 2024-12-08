@@ -3,7 +3,7 @@ import type { BrowserEndpoint } from '../../utilities/browser.js';
 /**
  * Default timeout for the extractor script, in ms.
  */
-export const DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS = 30000;
+export const DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS = 60000;
 
 // Every extractor script is represented as an ES module that is prefixed with this string.
 export const EXTRACTOR_MODULE_PREFIX = 'data:text/javascript,void("retrack");';
