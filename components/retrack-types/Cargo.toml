@@ -4,20 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-http = "1.1.0"
+http = "1.2.0"
 http-serde = "2.1.1"
 mediatype = "0.19.18"
-serde = "1.0.214"
+serde = "1.0.216"
 serde_bytes = "0.11.15"
-serde_json = "1.0.132"
+serde_json = "1.0.133"
 serde_with = "3.11.0"
-time = "0.3.36"
-url = "2.5.3"
+time = "0.3.37"
+url = "2.5.4"
 utoipa = "5.2.0"
 uuid = "1.11.0"
 
 [dev-dependencies]
-anyhow = "1.0.93"
+anyhow = "1.0.94"
 insta = "1.41.1"
 
 [features]
