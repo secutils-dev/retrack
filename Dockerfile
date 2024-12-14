@@ -1,12 +1,8 @@
-FROM rust:1.82-slim-bookworm AS builder
+FROM rust:1.83-slim-bookworm AS builder
 WORKDIR /app
 
 # Install dependencies.
-RUN set -x && apt-get update && apt-get install -y protobuf-compiler
-
-# Copy manifest and fetch dependencies.
-COPY ["./Cargo.lock", "./Cargo.toml", "./"]
-RUN set -x && cargo fetch
+RUN set -x && apt-get update && apt-get install -y protobuf-compiler curl
 
 # Copy source code and build.
 COPY [".", "./"]

@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS builder
+FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS builder
 WORKDIR /app
 
 # Copy workspace root `package.json` and `package-lock.json` files,
@@ -12,7 +12,7 @@ COPY ["./components/retrack-web-scraper", "./components/retrack-web-scraper"]
 RUN set -x && npm test --ws
 RUN set -x && npm run build --ws
 
-FROM node:22-alpine3.20
+FROM node:22-alpine3.21
 ENV NODE_ENV=production \
     RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH="/usr/bin/chromium-browser" \
     DISPLAY=:99

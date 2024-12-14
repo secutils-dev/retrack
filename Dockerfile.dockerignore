@@ -19,5 +19,5 @@ retrack.toml
 rustfmt.toml
 
 # Path that should be ignored by api Docker image
-/components
+/components/retrack-web-scraper
 *.json
