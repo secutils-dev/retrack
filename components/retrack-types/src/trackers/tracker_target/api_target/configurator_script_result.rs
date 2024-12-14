@@ -1,4 +1,4 @@
-use http::HeaderMap;
+use crate::trackers::ConfiguratorScriptRequest;
 use serde::Deserialize;
 
 /// Result of the "configurator" script execution.
@@ -6,17 +6,7 @@ use serde::Deserialize;
 #[serde(rename_all = "camelCase")]
 pub enum ConfiguratorScriptResult {
     /// Configurator script modifications for the request.
-    Request {
-        /// Optional HTTP headers to send with the request. If not specified, the default headers of the
-        /// `api` target are used.
-        #[serde(with = "http_serde::option::header_map", default)]
-        headers: Option<HeaderMap>,
-
-        /// Optional HTTP body to send with the request. If not specified, the default body of the `api`
-        /// target is used.
-        #[serde(with = "serde_bytes", default)]
-        body: Option<Vec<u8>>,
-    },
+    Requests(Vec<ConfiguratorScriptRequest>),
     /// Configurator script modifications for the response. If body is provided, the actual request
     /// is not sent and the response is returned immediately.
     Response {
@@ -28,7 +18,7 @@ pub enum ConfiguratorScriptResult {
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::ConfiguratorScriptResult;
+    use crate::trackers::{ConfiguratorScriptRequest, ConfiguratorScriptResult};
     use http::{header::CONTENT_TYPE, HeaderValue};
     use insta::assert_debug_snapshot;
 
@@ -38,23 +28,27 @@ mod tests {
             serde_json::from_str::<ConfiguratorScriptResult>(
                 r#"
 {
-    "request": {
+    "requests": [{
+        "url": "https://retrack.dev",
         "body": [1, 2 ,3],
         "headers": {
             "Content-Type": "text/plain"
         }
-    }
+    }]
 }
           "#
             )?,
-            ConfiguratorScriptResult::Request {
+            ConfiguratorScriptResult::Requests(vec![ConfiguratorScriptRequest {
+                url: "https://retrack.dev".parse()?,
+                method: None,
                 headers: Some(
                     vec![(CONTENT_TYPE, HeaderValue::from_static("text/plain"))]
                         .into_iter()
                         .collect()
                 ),
+                media_type: None,
                 body: Some(vec![1, 2, 3]),
-            }
+            }])
         );
 
         assert_eq!(
@@ -73,27 +67,25 @@ mod tests {
         );
 
         assert_eq!(
-            serde_json::from_str::<ConfiguratorScriptResult>(r#"{ "request": {} }"#)?,
-            ConfiguratorScriptResult::Request {
-                headers: None,
-                body: None,
-            }
+            serde_json::from_str::<ConfiguratorScriptResult>(r#"{ "requests": [] }"#)?,
+            ConfiguratorScriptResult::Requests(vec![])
         );
 
         assert_debug_snapshot!(serde_json::from_str::<ConfiguratorScriptResult>(
                 r#"
 {
-    "request": {
+    "requests": [{
+        "url": "https://retrack.dev",
         "headers": {
             "Content-Type": "text/plain"
         }
-    }
+    }],
     "response": {
         "body": [1, 2 ,3]
     }
 }
           "#
-            ).unwrap_err(), @r###"Error("expected value", line: 8, column: 4)"###);
+            ).unwrap_err(), @r###"Error("expected value", line: 8, column: 6)"###);
 
         Ok(())
     }

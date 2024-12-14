@@ -41,6 +41,7 @@ use retrack_types::{
         TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
+use serde_json::json;
 use std::{
     cmp::{max, min},
     collections::HashSet,
@@ -80,6 +81,9 @@ pub const MAX_TRACKER_TAGS_COUNT: usize = 20;
 
 /// Defines the maximum count of tracker actions.
 pub const MAX_TRACKER_ACTIONS_COUNT: usize = 10;
+
+/// Defines the maximum count of tracker target requests.
+pub const MAX_TRACKER_REQUEST_COUNT: usize = 10;
 
 /// Defines the maximum count of tracker email action recipients.
 pub const MAX_TRACKER_EMAIL_ACTION_RECIPIENTS_COUNT: usize = 10;
@@ -692,11 +696,26 @@ where
         config: &TrackersConfig,
         target: &ApiTarget,
     ) -> anyhow::Result<()> {
-        if config.restrict_to_public_urls && !self.api.network.is_public_web_url(&target.url).await
-        {
+        if target.requests.is_empty() {
             bail!(RetrackError::client(
-                format!("Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", target.url)
+                "Tracker target should have at least one request."
             ));
+        }
+
+        if target.requests.len() > MAX_TRACKER_REQUEST_COUNT {
+            bail!(RetrackError::client(format!(
+                "Tracker target cannot have more than {MAX_TRACKER_REQUEST_COUNT} requests."
+            )));
+        }
+
+        if config.restrict_to_public_urls {
+            for request in &target.requests {
+                if !self.api.network.is_public_web_url(&request.url).await {
+                    bail!(RetrackError::client(
+                        format!("Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", request.url)
+                    ));
+                }
+            }
         }
 
         if let Some(script) = &target.configurator {
@@ -829,129 +848,168 @@ where
 
         // Run configurator script, if specified to check if there are any overrides to the request
         // parameters need to be made.
-        let (request_body_override, request_headers_override, response_body_override) =
+        let (requests_override, response_body_override) =
             if let Some(ref configurator) = target.configurator {
+                // Prepare requests for the configurator script.
+                let mut configurator_requests = Vec::with_capacity(target.requests.len());
+                for request in &target.requests {
+                    configurator_requests.push(request.clone().try_into()?);
+                }
+
                 let result = self
                     .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
                         self.get_script_content(tracker, configurator).await?,
                         ConfiguratorScriptArgs {
                             tags: tracker.tags.clone(),
                             previous_content: revisions.last().map(|rev| rev.data.clone()),
-                            body: target.body.as_ref().map(serde_json::to_vec).transpose()?,
+                            requests: configurator_requests,
                         },
                     )
                     .await
                     .context("Failed to execute \"configurator\" script.")?;
                 match result {
-                    Some(ConfiguratorScriptResult::Request { headers, body }) => {
-                        (body, headers, None)
+                    Some(ConfiguratorScriptResult::Requests(configurator_requests)) => {
+                        // If the configurator script didn't return any request overrides, use the default requests.
+                        if configurator_requests.is_empty() {
+                            (None, None)
+                        } else {
+                            let mut requests = Vec::with_capacity(configurator_requests.len());
+                            for request in configurator_requests {
+                                requests.push(request.try_into()?);
+                            }
+                            (Some(requests), None)
+                        }
                     }
-                    Some(ConfiguratorScriptResult::Response { body }) => (None, None, Some(body)),
-                    _ => (None, None, None),
+                    Some(ConfiguratorScriptResult::Response { body }) => (None, Some(body)),
+                    _ => (None, None),
                 }
             } else {
-                (None, None, None)
+                (None, None)
             };
 
-        let response_bytes = if let Some(response_body_override) = response_body_override {
-            response_body_override.into()
+        // If configurator overrides the response body, use it instead of making any requests.
+        let responses = if let Some(response_body_override) = response_body_override {
+            vec![response_body_override]
         } else {
             let client = self.http_client();
-            let request_builder = client.request(
-                target.method.as_ref().unwrap_or(&Method::GET).clone(),
-                target.url.clone(),
-            );
 
-            // Add headers, if any.
-            let headers = request_headers_override.or_else(|| target.headers.clone());
-            let request_builder = if let Some(headers) = headers {
-                request_builder.headers(headers)
-            } else {
-                request_builder
-            };
+            let requests = requests_override.as_ref().unwrap_or(&target.requests);
+            let mut responses = Vec::with_capacity(requests.len());
+            for (request_index, request) in requests.iter().enumerate() {
+                let request_builder = client.request(
+                    request.method.as_ref().unwrap_or(&Method::GET).clone(),
+                    request.url.clone(),
+                );
 
-            // Add body, if any.
-            let body = request_body_override
-                .map(Ok)
-                .or_else(|| target.body.as_ref().map(serde_json::to_vec))
-                .transpose()?;
-            let request_builder = if let Some(body) = body {
-                request_builder.body(body)
-            } else {
-                request_builder
-            };
-
-            // Set timeout, if any.
-            let request_builder = if let Some(ref timeout) = tracker.config.timeout {
-                request_builder.timeout(*timeout)
-            } else {
-                request_builder
-            };
-
-            let api_response = client.execute(request_builder.build()?).await?;
-            if !api_response.status().is_success() {
-                let is_client_error = api_response.status().is_client_error();
-                if is_client_error {
-                    bail!(RetrackError::client(api_response.text().await?));
+                // Add headers, if any.
+                let request_builder = if let Some(ref headers) = request.headers {
+                    request_builder.headers(headers.clone())
                 } else {
-                    bail!(
-                        "Unexpected scraper error for the tracker ('{}'): {}",
-                        tracker.id,
-                        api_response.text().await?
-                    );
+                    request_builder
+                };
+
+                // Add body, if any.
+                let request_builder = if let Some(ref body) = request.body {
+                    request_builder.body(serde_json::to_vec(body).with_context(|| {
+                        format!(
+                            "Cannot serialize a body of the API target request ({request_index})."
+                        )
+                    })?)
+                } else {
+                    request_builder
+                };
+
+                // Set timeout, if any.
+                let request_builder = if let Some(ref timeout) = tracker.config.timeout {
+                    request_builder.timeout(*timeout)
+                } else {
+                    request_builder
+                };
+
+                let api_response = client.execute(request_builder.build()?).await?;
+                if !api_response.status().is_success() {
+                    let is_client_error = api_response.status().is_client_error();
+                    if is_client_error {
+                        bail!(RetrackError::client(format!(
+                            "Failed to execute API target request ({request_index}): {}",
+                            api_response.text().await?
+                        )));
+                    } else {
+                        bail!(
+                            "Unexpected API target request error ({request_index}): {}",
+                            api_response.text().await?
+                        );
+                    }
                 }
+
+                // Read response, parse, and extract data with extractor script, if specified.
+                let response_bytes = api_response.bytes().await.with_context(|| {
+                    format!("Failed to read API target request response ({request_index}).")
+                })?;
+
+                let media_type = request
+                    .media_type
+                    .as_ref()
+                    .map(|media_type| media_type.to_ref());
+                responses.push(
+                    (match media_type {
+                        Some(ref media_type) if XlsParser::supports(media_type) => {
+                            XlsParser::parse(&response_bytes)?
+                        }
+                        Some(ref media_type) if CsvParser::supports(media_type) => {
+                            CsvParser::parse(&response_bytes)?
+                        }
+                        _ => response_bytes,
+                    })
+                    .to_vec(),
+                );
             }
 
-            // Read response, parse, and extract data with extractor script, if specified.
-            api_response
-                .bytes()
-                .await
-                .context("Failed to read API response.")?
+            responses
         };
 
-        let media_type = target
-            .media_type
-            .as_ref()
-            .map(|media_type| media_type.to_ref());
-        let response_bytes = match media_type {
-            Some(ref media_type) if XlsParser::supports(media_type) => {
-                XlsParser::parse(&response_bytes)?
-            }
-            Some(ref media_type) if CsvParser::supports(media_type) => {
-                CsvParser::parse(&response_bytes)?
-            }
-            _ => response_bytes,
-        };
-
-        let response_bytes = if let Some(ref extractor) = target.extractor {
+        // Process the response with the extractor script, if specified.
+        let extractor_response_bytes = if let Some(ref extractor) = target.extractor {
             let result = self
                 .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
                     self.get_script_content(tracker, extractor).await?,
                     ExtractorScriptArgs {
                         tags: tracker.tags.clone(),
                         previous_content: revisions.last().map(|rev| rev.data.clone()),
-                        body: Some(response_bytes.to_vec()),
+                        responses: Some(responses.clone()),
                     },
                 )
                 .await
                 .context("Failed to execute \"extractor\" script.")?
                 .unwrap_or_default();
-            result.body.unwrap_or_else(|| response_bytes.to_vec())
+            result.body
         } else {
-            response_bytes.to_vec()
+            None
+        };
+
+        // Deserialize the response body or the extractor result.
+        let tracker_data_value = if let Some(response_bytes) = extractor_response_bytes {
+            serde_json::from_slice(&response_bytes).map_err(|err| {
+                anyhow!(
+                    "Could not deserialize API target extractor result for the tracker ('{}'): {err:?}",
+                    tracker.id
+                )
+            })?
+        } else if responses.len() == 1 {
+            serde_json::from_slice(&responses[0]).map_err(|err| {
+                anyhow!(
+                    "Could not deserialize API target response for the tracker ('{}'): {err:?}",
+                    tracker.id
+                )
+            })?
+        } else {
+            json!(&responses)
         };
 
         Ok(TrackerDataRevision {
             id: Uuid::now_v7(),
             tracker_id: tracker.id,
-            data: TrackerDataValue::new(serde_json::from_slice(&response_bytes).map_err(
-                |err| {
-                    anyhow!(
-                        "Could not deserialize API response for the tracker ('{}'): {err:?}",
-                        tracker.id
-                    )
-                },
-            )?),
+            data: TrackerDataValue::new(tracker_data_value),
             created_at: Database::utc_now()?,
         })
     }
@@ -1098,6 +1156,7 @@ mod tests {
         },
     };
     use actix_web::ResponseError;
+    use bytes::Bytes;
     use futures::StreamExt;
     use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
     use httpmock::MockServer;
@@ -1105,13 +1164,13 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
-            TrackerDataValue, TrackerTarget, WebhookAction,
+            ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction,
+            TrackerConfig, TrackerDataValue, TrackerTarget, WebhookAction,
         },
     };
     use serde_json::json;
     use sqlx::PgPool;
-    use std::{collections::HashMap, net::Ipv4Addr, str::FromStr, time::Duration};
+    use std::{collections::HashMap, iter, net::Ipv4Addr, str::FromStr, time::Duration};
     use time::OffsetDateTime;
     use trust_dns_resolver::{
         proto::rr::{rdata::A, RData, Record},
@@ -1153,16 +1212,18 @@ mod tests {
         let tracker = api
             .create_tracker(
                 TrackerCreateParams::new("name_two").with_target(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: Some(Method::POST),
-                    headers: Some(
-                        (&[(CONTENT_TYPE, "application/json".to_string())]
-                            .into_iter()
-                            .collect::<HashMap<_, _>>())
-                            .try_into()?,
-                    ),
-                    body: Some(json!({ "key": "value" })),
-                    media_type: Some("application/json".parse()?),
+                    requests: vec![TargetRequest {
+                        url: Url::parse("https://retrack.dev")?,
+                        method: Some(Method::POST),
+                        headers: Some(
+                            (&[(CONTENT_TYPE, "application/json".to_string())]
+                                .into_iter()
+                                .collect::<HashMap<_, _>>())
+                                .try_into()?,
+                        ),
+                        body: Some(json!({ "key": "value" })),
+                        media_type: Some("application/json".parse()?),
+                    }],
                     configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                     extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                 })),
@@ -1644,17 +1705,59 @@ mod tests {
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
+        // Too few requests.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![],
+                    configurator: None,
+                    extractor: None
+                }),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: actions.clone()
+            }).await),
+            @r###""Tracker target should have at least one request.""###
+        );
+
+        // Too many requests.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: iter::repeat(TargetRequest {
+                        url: "https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }).take(11).collect::<Vec<_>>(),
+                    configurator: None,
+                    extractor: None,
+                }),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: actions.clone()
+            }).await),
+            @r###""Tracker target cannot have more than 10 requests.""###
+        );
+
         // Invalid API target URL schema.
         assert_debug_snapshot!(
             create_and_fail(api.create_tracker(TrackerCreateParams {
                 name: "name".to_string(),
                 enabled: true,
                 target: TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("ftp://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"ftp://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: None
                 }),
@@ -1685,11 +1788,13 @@ mod tests {
                 name: "name".to_string(),
                 enabled: true,
                 target: TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://127.0.0.1")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://127.0.0.1".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: None
                 }),
@@ -1706,11 +1811,13 @@ mod tests {
                 name: "name".to_string(),
                 enabled: false,
                 target: TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: Some("".to_string()),
                     extractor: None
                 }),
@@ -1727,11 +1834,13 @@ mod tests {
                 name: "name".to_string(),
                 enabled: true,
                 target: TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
                     ),
@@ -1750,11 +1859,13 @@ mod tests {
                 name: "name".to_string(),
                 enabled: false,
                 target: TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: Some("".to_string())
                 }),
@@ -1771,11 +1882,13 @@ mod tests {
                 name: "name".to_string(),
                 enabled: true,
                 target: TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2426,15 +2539,49 @@ mod tests {
             @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
+        // Too few requests.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::Api(ApiTarget {
+                    requests: vec![],
+                    configurator: None,
+                    extractor: None
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker target should have at least one request.""###
+        );
+
+        // Too many requests.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                target: Some(TrackerTarget::Api(ApiTarget {
+                    requests: iter::repeat(TargetRequest {
+                        url: "https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }).take(11).collect::<Vec<_>>(),
+                    configurator: None,
+                    extractor: None
+                })),
+                ..Default::default()
+            }).await),
+            @r###""Tracker target cannot have more than 10 requests.""###
+        );
+
         // Invalid API target URL schema.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("ftp://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"ftp://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: None
                 })),
@@ -2447,11 +2594,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: Some("".to_string()),
                     extractor: None
                 })),
@@ -2464,11 +2613,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
                     ),
@@ -2483,11 +2634,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: Some("".to_string())
                 })),
@@ -2500,11 +2653,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://retrack.dev")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://retrack.dev".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2534,11 +2689,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    url: Url::parse("https://127.0.0.1")?,
-                    method: None,
-                    headers: None,
-                    body: None,
-                    media_type: None,
+                    requests: vec![TargetRequest {
+                        url:"https://127.0.0.1".parse()?,
+                        method: None,
+                        headers: None,
+                        body: None,
+                        media_type: None,
+                    }],
                     configurator: None,
                     extractor: None
                 })),
@@ -3072,14 +3229,16 @@ mod tests {
                 TrackerCreateParams::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/get-call").parse()?,
-                        method: None,
-                        headers: Some(HeaderMap::from_iter([(
-                            HeaderName::from_static("x-custom-header"),
-                            HeaderValue::from_static("x-custom-value"),
-                        )])),
-                        body: None,
-                        media_type: Some("application/json".parse()?),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: Some(HeaderMap::from_iter([(
+                                HeaderName::from_static("x-custom-header"),
+                                HeaderValue::from_static("x-custom-value"),
+                            )])),
+                            body: None,
+                            media_type: Some("application/json".parse()?),
+                        }],
                         configurator: None,
                         extractor: None,
                     })),
@@ -3090,15 +3249,14 @@ mod tests {
                 TrackerCreateParams::new("name_two")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/post-call").parse()?,
-                        method: Some(Method::POST),
-                        headers: Some(HeaderMap::from_iter([(
-                            HeaderName::from_static("x-custom-header"),
-                            HeaderValue::from_static("x-custom-value"),
-                        )])),
-                        body: Some(json!({ "key": "value" })),
-                        media_type: Some("application/json".parse()?),
-                        configurator: Some("((context) => ({ request: { body: Deno.core.encode(JSON.stringify({ key: `overridden-${JSON.parse(Deno.core.decode(context.body)).key}` })) } }))(context);".to_string()),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: None,
+                            body: Some(json!({ "key": "value" })),
+                            media_type: Some("application/json".parse()?),
+                        }],
+                        configurator: Some(format!("((context) => ({{ requests: [{{ url: '{}', method: 'POST', headers: {{ 'x-custom-header': 'x-custom-value' }}, body: Deno.core.encode(JSON.stringify({{ key: `overridden-${{JSON.parse(Deno.core.decode(context.requests[0].body)).key}}` }})) }}] }}))(context);", server.url("/api/post-call"))),
                         extractor: None
                     })),
             )
@@ -3268,19 +3426,21 @@ mod tests {
                 TrackerCreateParams::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/get-call").parse()?,
-                        method: None,
-                        headers: Some(HeaderMap::from_iter([(
-                            HeaderName::from_static("x-custom-header"),
-                            HeaderValue::from_static("x-custom-value"),
-                        )])),
-                        body: None,
-                        media_type: Some("application/json".parse()?),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: Some(HeaderMap::from_iter([(
+                                HeaderName::from_static("x-custom-header"),
+                                HeaderValue::from_static("x-custom-value"),
+                            )])),
+                            body: None,
+                            media_type: Some("application/json".parse()?),
+                        }],
                         configurator: None,
                         extractor: Some(
                             r#"
 ((context) => {{
-  const newBody = JSON.parse(Deno.core.decode(context.body));
+  const newBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0])));
   return {
     body: Deno.core.encode(
       JSON.stringify({ name: `${newBody}_modified_${JSON.stringify(context.previousContent)}`, value: 1 })
@@ -3382,18 +3542,20 @@ mod tests {
                 TrackerCreateParams::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/get-call").parse()?,
-                        method: None,
-                        headers: Some(HeaderMap::from_iter([(
-                            HeaderName::from_static("x-custom-header"),
-                            HeaderValue::from_static("x-custom-value"),
-                        )])),
-                        body: Some(serde_json::Value::String("rev_1".to_string())),
-                        media_type: Some("application/json".parse()?),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: Some(HeaderMap::from_iter([(
+                                HeaderName::from_static("x-custom-header"),
+                                HeaderValue::from_static("x-custom-value"),
+                            )])),
+                            body: Some(serde_json::Value::String("rev_1".to_string())),
+                            media_type: Some("application/json".parse()?),
+                        }],
                         configurator: Some(
                             r#"
 ((context) => {{
-  const newBody = JSON.parse(Deno.core.decode(context.body));
+  const newBody = JSON.parse(Deno.core.decode(context.requests[0].body));
   return {
     response: {
       body: Deno.core.encode(
@@ -3478,14 +3640,16 @@ mod tests {
                 TrackerCreateParams::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/get-call").parse()?,
-                        method: None,
-                        headers: None,
-                        body: None,
-                        media_type: Some(
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                .parse()?,
-                        ),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: None,
+                            body: None,
+                            media_type: Some(
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    .parse()?,
+                            ),
+                        }],
                         configurator: None,
                         extractor: None,
                     })),
@@ -3591,11 +3755,13 @@ mod tests {
                 TrackerCreateParams::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/get-call").parse()?,
-                        method: None,
-                        headers: None,
-                        body: None,
-                        media_type: Some("text/csv".parse()?),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: None,
+                            body: None,
+                            media_type: Some("text/csv".parse()?),
+                        }],
                         configurator: None,
                         extractor: None,
                     })),
@@ -3657,6 +3823,105 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_multiple_requests(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParams::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![
+                            TargetRequest {
+                                url: server.url("/api/csv-call").parse()?,
+                                method: None,
+                                headers: None,
+                                body: None,
+                                media_type: Some("text/csv".parse()?),
+                            },
+                            TargetRequest {
+                                url: server.url("/api/json-call").parse()?,
+                                method: Some(Method::POST),
+                                headers: Some(HeaderMap::from_iter([(
+                                    HeaderName::from_static("x-custom-header"),
+                                    HeaderValue::from_static("x-custom-value"),
+                                )])),
+                                body: Some(json!({ "key": "value" })),
+                                media_type: Some("application/json".parse()?),
+                            },
+                        ],
+                        configurator: None,
+                        extractor: Some(
+                            r#"
+((context) => {{
+  const csvResponse = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0])));
+  const jsonResponse = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[1])));
+  return {
+    body: Deno.core.encode(
+      JSON.stringify({ csv: csvResponse[0][1], json: jsonResponse.key })
+    )
+  };
+}})(context);"#
+                                .to_string(),
+                        ),
+                    })),
+            )
+            .await?;
+
+        let tracker_data = trackers
+            .get_tracker_data(tracker.id, Default::default())
+            .await?;
+        assert!(tracker_data.is_empty());
+
+        let csv_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/csv-call");
+            then.status(200)
+                .header("Content-Type", "text/csv;charset=UTF-8")
+                .body(Bytes::from("key,csv-value"));
+        });
+
+        let json_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/json-call")
+                .header("x-custom-header", "x-custom-value")
+                .json_body(json!({ "key": "value" }));
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&json!({ "key": "json-value" }));
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        csv_mock.assert();
+        json_mock.assert();
+
+        let revs = trackers
+            .get_tracker_data(tracker.id, Default::default())
+            .await?;
+        assert_debug_snapshot!(
+            revs.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
+            @r###"
+        [
+            TrackerDataValue {
+                original: Object {
+                    "csv": String("csv-value"),
+                    "json": String("json-value"),
+                },
+                mods: None,
+            },
+        ]
+        "###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn properly_saves_api_target_revision_with_remote_scripts(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -3671,14 +3936,16 @@ mod tests {
                 TrackerCreateParams::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        url: server.url("/api/get-call").parse()?,
-                        method: Some(Method::POST),
-                        headers: Some(HeaderMap::from_iter([(
-                            HeaderName::from_static("x-custom-header"),
-                            HeaderValue::from_static("x-custom-value"),
-                        )])),
-                        body: Some(json!({ "key": "value" })),
-                        media_type: Some("application/json".parse()?),
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: Some(Method::POST),
+                            headers: Some(HeaderMap::from_iter([(
+                                HeaderName::from_static("x-custom-header"),
+                                HeaderValue::from_static("x-custom-value"),
+                            )])),
+                            body: Some(json!({ "key": "value" })),
+                            media_type: Some("application/json".parse()?),
+                        }],
                         configurator: Some(server.url("/configurator.js")),
                         extractor: Some(server.url("/extractor.js")),
                     })),
@@ -3692,7 +3959,7 @@ mod tests {
                 .body(
                     r#"
 ((context) => ({
-  request: { body: Deno.core.encode(JSON.stringify({ key: `overridden-${JSON.parse(Deno.core.decode(context.body)).key}` })) }
+  requests: [{ ...context.requests[0], body: Deno.core.encode(JSON.stringify({ key: `overridden-${JSON.parse(Deno.core.decode(context.requests[0].body)).key}` })) }]
  }))(context);"#,
                 );
         });
@@ -3714,7 +3981,7 @@ mod tests {
                 .body(
                     r#"
 ((context) => {{
-  const newBody = JSON.parse(Deno.core.decode(context.body));
+  const newBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0])));
   return {
     body: Deno.core.encode(
       JSON.stringify(`${newBody}_modified_${JSON.stringify(context.previousContent)}`)

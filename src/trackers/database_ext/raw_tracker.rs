@@ -3,8 +3,8 @@ use mediatype::MediaType;
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
-        ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerTarget,
-        WebhookAction,
+        ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction, TrackerConfig,
+        TrackerTarget, WebhookAction,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -67,6 +67,14 @@ struct RawPageTarget<'s> {
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawApiTarget<'s> {
+    #[serde(borrow)]
+    requests: Vec<RawApiTargetRequest<'s>>,
+    configurator: Option<Cow<'s, str>>,
+    extractor: Option<Cow<'s, str>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+struct RawApiTargetRequest<'s> {
     url: Cow<'s, str>,
     #[serde(with = "http_serde::option::method", default)]
     method: Option<Method>,
@@ -74,8 +82,6 @@ struct RawApiTarget<'s> {
     body: Option<Vec<u8>>,
     #[serde(borrow)]
     media_type: Option<MediaType<'s>>,
-    configurator: Option<Cow<'s, str>>,
-    extractor: Option<Cow<'s, str>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -152,23 +158,33 @@ impl TryFrom<RawTracker> for Tracker {
                     ignore_https_errors: target.ignore_https_errors.unwrap_or_default(),
                 }),
                 RawTrackerTarget::Api(target) => TrackerTarget::Api(ApiTarget {
-                    url: target.url.into_owned().parse()?,
-                    method: target.method,
-                    headers: if let Some(headers) = target.headers {
-                        let mut header_map = HeaderMap::new();
-                        for (k, v) in headers {
-                            header_map
-                                .insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
-                        }
-                        Some(header_map)
-                    } else {
-                        None
-                    },
-                    body: target
-                        .body
-                        .map(|body| serde_json::from_slice(&body))
-                        .transpose()?,
-                    media_type: target.media_type.map(|media_type| media_type.into()),
+                    requests: target
+                        .requests
+                        .into_iter()
+                        .map(|request| {
+                            Ok(TargetRequest {
+                                url: request.url.into_owned().parse()?,
+                                method: request.method,
+                                headers: if let Some(headers) = request.headers {
+                                    let mut header_map = HeaderMap::new();
+                                    for (k, v) in headers {
+                                        header_map.insert(
+                                            HeaderName::from_str(&k)?,
+                                            HeaderValue::from_str(&v)?,
+                                        );
+                                    }
+                                    Some(header_map)
+                                } else {
+                                    None
+                                },
+                                body: request
+                                    .body
+                                    .map(|body| serde_json::from_slice(&body))
+                                    .transpose()?,
+                                media_type: request.media_type.map(|media_type| media_type.into()),
+                            })
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?,
                     configurator: target.configurator.map(Cow::into_owned),
                     extractor: target.extractor.map(Cow::into_owned),
                 }),
@@ -261,24 +277,36 @@ impl TryFrom<&Tracker> for RawTracker {
                         },
                     }),
                     TrackerTarget::Api(target) => RawTrackerTarget::Api(RawApiTarget {
-                        url: target.url.as_str().into(),
-                        method: target.method.clone(),
-                        headers: target.headers.as_ref().map(|headers| {
-                            headers
-                                .iter()
-                                .map(|(k, v)| {
-                                    (
-                                        Cow::Borrowed(k.as_str()),
-                                        String::from_utf8_lossy(v.as_bytes()),
-                                    )
+                        requests: target
+                            .requests
+                            .iter()
+                            .map(|request| {
+                                Ok(RawApiTargetRequest {
+                                    url: request.url.as_str().into(),
+                                    method: request.method.clone(),
+                                    headers: request.headers.as_ref().map(|headers| {
+                                        headers
+                                            .iter()
+                                            .map(|(k, v)| {
+                                                (
+                                                    Cow::Borrowed(k.as_str()),
+                                                    String::from_utf8_lossy(v.as_bytes()),
+                                                )
+                                            })
+                                            .collect()
+                                    }),
+                                    body: request
+                                        .body
+                                        .as_ref()
+                                        .map(serde_json::to_vec)
+                                        .transpose()?,
+                                    media_type: request
+                                        .media_type
+                                        .as_ref()
+                                        .map(|media_type| media_type.to_ref()),
                                 })
-                                .collect()
-                        }),
-                        body: target.body.as_ref().map(serde_json::to_vec).transpose()?,
-                        media_type: target
-                            .media_type
-                            .as_ref()
-                            .map(|media_type| media_type.to_ref()),
+                            })
+                            .collect::<anyhow::Result<Vec<_>>>()?,
                         configurator: target
                             .configurator
                             .as_ref()
@@ -327,7 +355,7 @@ impl<'s> From<&'s TrackerAction> for RawTrackerAction<'s> {
     }
 }
 
-impl<'s> TryFrom<RawTrackerAction<'s>> for TrackerAction {
+impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTrackerAction) -> Result<Self, Self::Error> {
@@ -364,8 +392,8 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
-            TrackerTarget, WebhookAction,
+            ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction,
+            TrackerConfig, TrackerTarget, WebhookAction,
         },
     };
     use serde_json::json;
@@ -438,11 +466,7 @@ mod tests {
 
         let tracker = Tracker {
             target: TrackerTarget::Api(ApiTarget {
-                url: "https://retrack.dev/".parse()?,
-                method: None,
-                headers: None,
-                body: None,
-                media_type: None,
+                requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
                 configurator: None,
                 extractor: None,
             }),
@@ -455,16 +479,20 @@ mod tests {
 
         let tracker = Tracker {
             target: TrackerTarget::Api(ApiTarget {
-                url: "https://retrack.dev/".parse()?,
-                method: Some(Method::POST),
-                headers: Some(
-                    (&[(CONTENT_TYPE, "application/json".to_string())]
-                        .into_iter()
-                        .collect::<HashMap<_, _>>())
-                        .try_into()?,
-                ),
-                body: Some(json!({ "key": "value" })),
-                media_type: Some("application/json".parse()?),
+                requests: vec![TargetRequest {
+                    url: "https://retrack.dev/".parse()?,
+                    method: Some(Method::POST),
+                    headers: Some(
+                        (&[
+                            (CONTENT_TYPE, "application/json".to_string()),
+                        ]
+                            .into_iter()
+                            .collect::<HashMap<_, _>>())
+                            .try_into()?,
+                    ),
+                    body: Some(json!({ "key": "value" })),
+                    media_type: Some("application/json".parse()?),
+                }],
                 configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                 extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context)) })();".to_string())
             }),

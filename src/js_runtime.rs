@@ -259,14 +259,15 @@ pub mod tests {
     use super::{JsRuntime, ScriptConfig};
     use crate::config::JsRuntimeConfig;
     use deno_core::error::JsError;
-    use http::{HeaderMap, HeaderName, HeaderValue};
+    use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
     use retrack_types::trackers::{
-        ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, TrackerDataValue,
+        ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
+        ExtractorScriptArgs, ExtractorScriptResult, TrackerDataValue,
     };
     use serde::{Deserialize, Serialize};
     use serde_bytes::ByteBuf;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn can_execute_scripts() -> anyhow::Result<()> {
@@ -307,11 +308,24 @@ pub mod tests {
         // Supports known scripts.
         let result = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => {{ return { request: { headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify({ ...context, body: JSON.parse(Deno.core.decode(context.body)) })) } }; } })();"#,
+                r#"(() => {{ return { requests: [{ url: "https://retrack.dev/x-url", method: "POST", mediaType: "application/json", headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify({ ...context, requests: [{...context.requests[0], body: JSON.parse(Deno.core.decode(context.requests[0].body))}] })) }] }; } })();"#,
                 ConfiguratorScriptArgs {
                     tags: vec!["tag1".to_string(), "tag2".to_string()],
                     previous_content: Some(TrackerDataValue::new(json!({ "key": "content" }))),
-                    body: Some(serde_json::to_vec(&json!({ "key": "body" }))?),
+                    requests: vec![ConfiguratorScriptRequest {
+                        url: "https://retrack.dev".parse()?,
+                        method: Some(Method::PUT),
+                        headers: Some(
+                            (&[
+                                (CONTENT_TYPE, "application/json".to_string()),
+                            ]
+                                .into_iter()
+                                .collect::<HashMap<_, _>>())
+                                .try_into()?,
+                        ),
+                        body: Some(serde_json::to_vec(&json!({ "key": "body" }))?),
+                        media_type: Some("text/plain; charset=UTF-8".parse()?),
+                    }],
                 },
                 config,
             )
@@ -319,7 +333,9 @@ pub mod tests {
             .unwrap();
         assert_eq!(
             result,
-            ConfiguratorScriptResult::Request {
+            ConfiguratorScriptResult::Requests(vec![ConfiguratorScriptRequest {
+                url: "https://retrack.dev/x-url".parse()?,
+                method: Some(Method::POST),
                 headers: Some(HeaderMap::from_iter([(
                     HeaderName::from_static("x-key"),
                     HeaderValue::from_static("x-value")
@@ -327,9 +343,10 @@ pub mod tests {
                 body: Some(serde_json::to_vec(&json!({
                     "tags": ["tag1", "tag2"],
                     "previousContent": { "original": { "key": "content" } },
-                    "body": { "key": "body" }
+                    "requests": [{ "url": "https://retrack.dev/", "method": "PUT", "headers": { "content-type": "application/json" }, "mediaType": "text/plain; charset=UTF-8", "body": { "key": "body" } }]
                 }))?),
-            }
+                media_type: Some("application/json".parse()?),
+            }])
         );
 
         // Can do basic math.
@@ -389,8 +406,11 @@ pub mod tests {
         // Supports extractor scripts.
         let ExtractorScriptResult { body, ..} = js_runtime
             .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
-                r#"(() => {{ return { body: Deno.core.encode(JSON.stringify({ key: "value" })) }; }})();"#,
-                ExtractorScriptArgs::default(),
+                r#"(() => {{ return { body: Deno.core.encode(Deno.core.decode(new Uint8Array(context.responses[0]))) }; }})();"#,
+                ExtractorScriptArgs {
+                    responses: Some(vec![serde_json::to_vec(&json!({ "key": "value" }))?]),
+                    ..Default::default()
+                },
                 config,
             )
             .await?
@@ -401,9 +421,9 @@ pub mod tests {
         );
 
         // Supports configurator (overrides request) scripts.
-        let ConfiguratorScriptResult::Request { body, ..} = js_runtime
+        let ConfiguratorScriptResult::Requests(requests) = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => {{ return { request: { body: Deno.core.encode(JSON.stringify({ key: "value" })) } }; }})();"#,
+                r#"(() => {{ return { requests: [{ url: "https://retrack.dev/one", body: Deno.core.encode(JSON.stringify({ key: "value" })) }, { url: "https://retrack.dev/two", body: Deno.core.encode(JSON.stringify({ key: "value_2" })) }] }; }})();"#,
                 ConfiguratorScriptArgs::default(),
                 config,
             )
@@ -412,8 +432,23 @@ pub mod tests {
             panic!("Expected ConfiguratorScriptResult::Request");
         };
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body.unwrap())?,
-            json!({ "key": "value" })
+            requests,
+            vec![
+                ConfiguratorScriptRequest {
+                    url: "https://retrack.dev/one".parse()?,
+                    method: None,
+                    headers: None,
+                    media_type: None,
+                    body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
+                },
+                ConfiguratorScriptRequest {
+                    url: "https://retrack.dev/two".parse()?,
+                    method: None,
+                    headers: None,
+                    media_type: None,
+                    body: Some(serde_json::to_vec(&json!({ "key": "value_2" }))?),
+                }
+            ]
         );
 
         // Supports configurator (overrides response) scripts.

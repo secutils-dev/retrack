@@ -14,8 +14,8 @@ pub struct ExtractorScriptArgs {
     pub previous_content: Option<TrackerDataValue>,
 
     /// Optional HTTP body returned from the API.
-    #[serde(with = "serde_bytes", default)]
-    pub body: Option<Vec<u8>>,
+    #[serde(default)]
+    pub responses: Option<Vec<Vec<u8>>>,
 }
 
 #[cfg(test)]
@@ -33,7 +33,7 @@ mod tests {
         let context = ExtractorScriptArgs {
             tags: vec![],
             previous_content: Some(previous_content.clone()),
-            body: None,
+            responses: None,
         };
         let context_json =
             json!({ "tags": [], "previousContent": { "original": { "key": "value" } } });
@@ -43,12 +43,12 @@ mod tests {
         let context = ExtractorScriptArgs {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             previous_content: Some(previous_content),
-            body: Some(serde_json::to_vec(&body)?),
+            responses: Some(vec![serde_json::to_vec(&body)?]),
         };
         let context_json = json!({
             "tags": ["tag1", "tag2"],
             "previousContent": { "original": { "key": "value" } },
-            "body": [123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125],
+            "responses": [[123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125]],
         });
         assert_eq!(serde_json::to_value(&context)?, context_json);
 

@@ -16,7 +16,7 @@ use crate::{
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
-        ApiTarget, EmailAction, PageTarget, Tracker, TrackerAction, TrackerConfig,
+        ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction, TrackerConfig,
         TrackerDataRevision, TrackerDataValue, TrackerTarget, WebhookAction,
     },
 };
@@ -49,6 +49,7 @@ use utoipa::OpenApi;
         SchedulerJobConfig,
         SchedulerJobRetryStrategy,
         Status,
+        TargetRequest,
         Tracker,
         TrackerAction,
         TrackerConfig,

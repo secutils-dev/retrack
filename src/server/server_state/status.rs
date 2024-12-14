@@ -11,7 +11,7 @@ pub struct Status<'s> {
     pub scheduler: SchedulerStatus,
 }
 
-impl<'s> Status<'s> {
+impl Status<'_> {
     /// Checks if the API server and all its components are operational.
     pub fn is_operational(&self) -> bool {
         self.scheduler.operational

@@ -207,7 +207,7 @@ mod tests {
             &app,
             TestRequest::with_uri(&format!("https://retrack.dev/api/trackers/{}", tracker.id))
                 .method(Method::PUT)
-                .set_json(json!({ "target": { "type": "api", "url": "https://localhost/app" } }))
+                .set_json(json!({ "target": { "type": "api", "requests": [{ "url": "https://localhost/app" }] } }))
                 .to_request(),
         )
         .await;

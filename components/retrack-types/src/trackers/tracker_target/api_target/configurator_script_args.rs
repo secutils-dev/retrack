@@ -1,4 +1,4 @@
-use crate::trackers::TrackerDataValue;
+use crate::trackers::{ConfiguratorScriptRequest, TrackerDataValue};
 use serde::Serialize;
 use serde_with::skip_serializing_none;
 
@@ -13,42 +13,45 @@ pub struct ConfiguratorScriptArgs {
     /// Optional previous content.
     pub previous_content: Option<TrackerDataValue>,
 
-    /// Optional HTTP body configured for the request.
-    #[serde(with = "serde_bytes", default)]
-    pub body: Option<Vec<u8>>,
+    /// A list of HTTP requests configured for the target.
+    pub requests: Vec<ConfiguratorScriptRequest>,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::{ConfiguratorScriptArgs, TrackerDataValue};
+    use crate::trackers::{ConfiguratorScriptArgs, ConfiguratorScriptRequest, TrackerDataValue};
     use serde_json::json;
 
     #[test]
     fn serialization() -> anyhow::Result<()> {
         let context = ConfiguratorScriptArgs::default();
-        let context_json = json!({ "tags": [] });
+        let context_json = json!({ "tags": [], "requests": [] });
         assert_eq!(serde_json::to_value(&context)?, context_json);
 
         let previous_content = TrackerDataValue::new(json!({"key": "value"}));
         let context = ConfiguratorScriptArgs {
             tags: vec![],
             previous_content: Some(previous_content.clone()),
-            body: None,
+            requests: vec![],
         };
-        let context_json =
-            json!({ "tags": [], "previousContent": { "original": { "key": "value" } } });
+        let context_json = json!({ "tags": [], "previousContent": { "original": { "key": "value" } }, "requests": [] });
         assert_eq!(serde_json::to_value(&context)?, context_json);
 
-        let body = serde_json::to_vec(&json!({ "body": "value" }))?;
         let context = ConfiguratorScriptArgs {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             previous_content: Some(previous_content),
-            body: Some(body),
+            requests: vec![ConfiguratorScriptRequest {
+                url: "https://retrack.dev".parse()?,
+                method: None,
+                headers: None,
+                media_type: None,
+                body: Some(serde_json::to_vec(&json!({ "body": "value" }))?),
+            }],
         };
         let context_json = json!({
             "tags": ["tag1", "tag2"],
             "previousContent": { "original": { "key": "value" } },
-            "body": [123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125],
+            "requests": [{ "url": "https://retrack.dev/", "body": [123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125] }],
         });
         assert_eq!(serde_json::to_value(&context)?, context_json);
         Ok(())

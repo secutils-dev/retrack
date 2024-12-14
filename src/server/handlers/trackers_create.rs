@@ -221,7 +221,7 @@ mod tests {
                     "name": "my-minimal-tracker".to_string(),
                     "target": {
                         "type": "api",
-                        "url": "https://127.0.0.1/app",
+                        "requests": [{ "url": "https://127.0.0.1/app" }]
                     },
                     "config": {
                         "revisions": 5,

@@ -3,8 +3,8 @@ mod page_target;
 
 pub use self::{
     api_target::{
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult,
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
+        ExtractorScriptArgs, ExtractorScriptResult, TargetRequest,
     },
     page_target::PageTarget,
 };
@@ -26,7 +26,7 @@ pub enum TrackerTarget {
 #[cfg(test)]
 mod tests {
     use super::TrackerTarget;
-    use crate::trackers::{ApiTarget, PageTarget};
+    use crate::trackers::{ApiTarget, PageTarget, TargetRequest};
     use http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
         Method,
@@ -72,15 +72,11 @@ mod tests {
         );
 
         let target = TrackerTarget::Api(ApiTarget {
-            url: url::Url::parse("https://retrack.dev/")?,
-            method: None,
-            headers: None,
-            body: None,
-            media_type: None,
+            requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
             configurator: None,
             extractor: None,
         });
-        let target_json = json!({ "type": "api", "url": "https://retrack.dev/" });
+        let target_json = json!({ "type": "api", "requests": [{ "url": "https://retrack.dev/" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(
             serde_json::from_value::<TrackerTarget>(target_json)?,
@@ -88,15 +84,14 @@ mod tests {
         );
 
         let target = TrackerTarget::Api(ApiTarget {
-            url: url::Url::parse("https://retrack.dev/")?,
-            method: Some(Method::PUT),
-            headers: None,
-            body: None,
-            media_type: None,
+            requests: vec![TargetRequest {
+                method: Some(Method::PUT),
+                ..TargetRequest::new("https://retrack.dev/".parse()?)
+            }],
             configurator: None,
             extractor: None,
         });
-        let target_json = json!({ "type": "api", "url": "https://retrack.dev/", "method": "PUT" });
+        let target_json = json!({ "type": "api", "requests": [{ "url": "https://retrack.dev/", "method": "PUT" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(
             serde_json::from_value::<TrackerTarget>(target_json)?,
@@ -104,27 +99,29 @@ mod tests {
         );
 
         let target = TrackerTarget::Api(ApiTarget {
-            url: url::Url::parse("https://retrack.dev/")?,
-            method: Some(Method::PUT),
-            headers: Some(
-                (&[
-                    (CONTENT_TYPE, "application/json".to_string()),
-                    (AUTHORIZATION, "Bearer token".to_string()),
-                ]
-                .into_iter()
-                .collect::<HashMap<_, _>>())
-                    .try_into()?,
-            ),
-            body: None,
-            media_type: None,
+            requests: vec![TargetRequest {
+                method: Some(Method::PUT),
+                headers: Some(
+                    (&[
+                        (CONTENT_TYPE, "application/json".to_string()),
+                        (AUTHORIZATION, "Bearer token".to_string()),
+                    ]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>())
+                        .try_into()?,
+                ),
+                ..TargetRequest::new("https://retrack.dev/".parse()?)
+            }],
             configurator: None,
             extractor: None,
         });
         let target_json = json!({
             "type": "api",
-            "url": "https://retrack.dev/",
-            "method": "PUT",
-            "headers": { "content-type": "application/json", "authorization": "Bearer token" }
+            "requests": [{
+                "url": "https://retrack.dev/",
+                "method": "PUT",
+                "headers": { "content-type": "application/json", "authorization": "Bearer token" }
+            }]
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(

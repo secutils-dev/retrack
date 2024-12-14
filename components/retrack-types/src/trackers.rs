@@ -12,8 +12,8 @@ pub use self::{
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
     tracker_target::{
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, PageTarget, TrackerTarget,
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
+        ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest, TrackerTarget,
     },
 };
 
