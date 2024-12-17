@@ -947,6 +947,13 @@ where
                     format!("Failed to read API target request response ({request_index}).")
                 })?;
 
+                debug!(
+                    tracker.id = %tracker.id,
+                    tracker.name = tracker.name,
+                    "Fetched API target request response ({request_index}) with {} bytes.",
+                    response_bytes.len()
+                );
+
                 let media_type = request
                     .media_type
                     .as_ref()

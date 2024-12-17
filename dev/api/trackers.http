@@ -138,13 +138,15 @@ Accept: application/json
   "name": "[Test] Counter (api)",
   "target": {
     "type": "api",
-    "url": "https://retrack-demo.webhooks.secutils.dev/test/json",
-    "headers": {
-      "x-header-name": "x-header-value"
-    },
-    "body": {
-      "key": "value"
-    }
+    "requests": [{
+      "url": "https://retrack-demo.webhooks.secutils.dev/test/json",
+      "headers": {
+        "x-header-name": "x-header-value"
+      },
+      "body": {
+        "key": "value"
+      }
+    }]
   },
   "actions": [
     { "type": "log" }
@@ -167,13 +169,15 @@ Accept: application/json
   "name": "[Test] Counter (api)",
   "target": {
     "type": "api",
-    "url": "https://retrack-demo.webhooks.secutils.dev/test/json",
-    "headers": {
-      "x-header-name": "x-header-value"
-    },
-    "body": {
-      "key": "value"
-    },
+    "requests": [{
+      "url": "https://retrack-demo.webhooks.secutils.dev/test/json",
+      "headers": {
+        "x-header-name": "x-header-value"
+      },
+      "body": {
+        "key": "value"
+      }
+    }],
     "extractor": "((context) => ({ body: Deno.core.encode(JSON.stringify({...JSON.parse(Deno.core.decode(context.body)), ts: Date.now() })) }))(context);"
   },
   "actions": [

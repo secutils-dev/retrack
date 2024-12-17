@@ -123,7 +123,7 @@ impl JsRuntime {
     ) -> Result<Option<ScriptResult>, anyhow::Error> {
         let mut runtime = deno_core::JsRuntime::new(RuntimeOptions {
             create_params: Some(
-                v8::Isolate::create_params().heap_limits(1024, config.max_heap_size),
+                v8::Isolate::create_params().heap_limits(1_048_576, config.max_heap_size),
             ),
             // Disable certain built-in operations.
             extensions: vec![Extension {
