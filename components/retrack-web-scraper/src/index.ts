@@ -19,10 +19,7 @@ const server = fastify({
       ? { level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug' }
       : {
           level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug',
-          transport: {
-            target: 'pino-pretty',
-            options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname,screenshot' },
-          },
+          transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname' } },
         },
 }).addHook('onClose', () => stopBrowserServer());
 
@@ -58,8 +55,10 @@ async function launchBrowserServer() {
     const localServer = await chromium.launchServer({
       executablePath,
       headless,
+      channel: 'chromium',
       chromiumSandbox,
-      args: ['--disable-web-security'],
+      args: ['--disable-web-security', '--disable-blink-features=AutomationControlled'],
+      ignoreDefaultArgs: ['--enable-automation'],
     });
     server.log.info(
       `Browser server is running locally at ${browserServer.cachedEndpoint.url} (headless: ${headless}, sandbox: ${chromiumSandbox}).`,

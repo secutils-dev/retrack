@@ -23,7 +23,6 @@ export interface WorkerLogMessage {
   type: WorkerMessageType.LOG;
   message: string;
   level?: string;
-  screenshots?: Map<string, Uint8Array>;
   args?: ReadonlyArray<object>;
 }
 

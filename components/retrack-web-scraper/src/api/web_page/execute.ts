@@ -110,9 +110,6 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
             if (message.type === WorkerMessageType.LOG) {
               if (message.level === 'error') {
                 workerLog.error(message.message, message.args);
-                for (const [url, screenshot] of message.screenshots ?? []) {
-                  workerLog.error({ screenshot: Buffer.from(screenshot).toString('base64') }, `Screenshot for ${url}.`);
-                }
               } else {
                 workerLog.info(message.message, message.args);
               }

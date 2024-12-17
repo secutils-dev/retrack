@@ -53,8 +53,8 @@ if (typeof extractorModule?.execute !== 'function') {
 const log = {
   info: (message: string, args?: ReadonlyArray<object>) =>
     parentPort?.postMessage({ type: WorkerMessageType.LOG, message, args }),
-  error: (message: string, args?: ReadonlyArray<object>, screenshots?: Map<string, Uint8Array>) =>
-    parentPort?.postMessage({ type: WorkerMessageType.LOG, level: 'error', message, args, screenshots }),
+  error: (message: string, args?: ReadonlyArray<object>) =>
+    parentPort?.postMessage({ type: WorkerMessageType.LOG, level: 'error', message, args }),
 };
 
 const { connectToBrowser } = await import('../../utilities/browser.js');
@@ -76,7 +76,7 @@ try {
   throw new Error('Failed to connect to a browser.');
 }
 
-const context = await browser.newContext({ ignoreHTTPSErrors, userAgent });
+const context = await browser.newContext({ ignoreHTTPSErrors, userAgent, viewport: null });
 
 // SECURITY: Ideally, the extractor script shouldn't have access to the browser instance, as it could close the browser
 // and access other contexts. Unfortunately, the browser instance and context are accessible through various Playwright
@@ -109,32 +109,19 @@ try {
   });
 } catch (err) {
   // Capture screenshots.
-  try {
+  if (screenshotsPath) {
     const pages = browser?.contexts().flatMap((context) => context.pages()) ?? [];
-    log.error(
-      'Diagnostics screenshots.',
-      pages.map((page) => ({ url: page.url() })),
-      new Map(
-        await Promise.all(
-          pages.map(
-            async (page) =>
-              [
-                page.url(),
-                await page.screenshot({
-                  fullPage: true,
-                  path: screenshotsPath
-                    ? `${screenshotsPath}/screenshot_${encodeURIComponent(page.url())}_${Date.now()}.png`
-                    : undefined,
-                }),
-              ] as [string, Uint8Array],
-          ),
-        ),
-      ),
-    );
-  } catch (err) {
-    log.error(
-      `Failed to capture browser screenshots (protocol: ${endpoint.protocol}): ${Diagnostics.errorMessage(err)}.`,
-    );
+    for (const page of pages) {
+      const screenshotPath = `${screenshotsPath}/screenshot_${encodeURIComponent(page.url())}_${Date.now()}.png`;
+      try {
+        await page.screenshot({ fullPage: true, path: screenshotPath });
+        log.error(`Captured page screenshot for ${page.url()}: ${screenshotPath}`);
+      } catch (err) {
+        log.error(
+          `Failed to capture browser screenshot for ${page.url()} (protocol: ${endpoint.protocol}): ${Diagnostics.errorMessage(err)}.`,
+        );
+      }
+    }
   }
   throw err;
 } finally {
