@@ -1,6 +1,6 @@
-use crate::{error::Error as RetrackError, server::ServerState, trackers::TrackerCreateParams};
+use crate::{error::Error as RetrackError, server::ServerState};
 use actix_web::{post, web, HttpResponse};
-use retrack_types::trackers::Tracker;
+use retrack_types::trackers::{Tracker, TrackerCreateParams};
 use tracing::error;
 
 /// Creates a new tracker with the specified parameters.

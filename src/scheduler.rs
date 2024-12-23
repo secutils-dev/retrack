@@ -220,8 +220,7 @@ pub mod tests {
     use crate::{
         config::{Config, DatabaseConfig},
         scheduler::{scheduler_job::SchedulerJob, Scheduler, SchedulerJobMetadata},
-        tests::{mock_api_with_config, mock_config},
-        trackers::TrackerCreateParams,
+        tests::{mock_api_with_config, mock_config, TrackerCreateParamsBuilder},
     };
     use anyhow::anyhow;
     use futures::StreamExt;
@@ -327,7 +326,11 @@ pub mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 6"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker-one")
+                    .with_schedule("1 2 3 4 5 6")
+                    .build(),
+            )
             .await?;
         api.trackers()
             .update_tracker_job(tracker.id, Some(trackers_trigger_job_id))

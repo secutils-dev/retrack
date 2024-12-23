@@ -33,7 +33,7 @@ mod tests {
         server::{
             handlers::trackers_remove::trackers_remove, server_state::tests::mock_server_state,
         },
-        trackers::TrackerCreateParams,
+        tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
         http::Method,
@@ -69,7 +69,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
         let trackers = server_state
             .api

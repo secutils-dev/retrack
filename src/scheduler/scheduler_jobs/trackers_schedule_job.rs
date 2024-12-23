@@ -133,8 +133,10 @@ mod tests {
     use super::TrackersScheduleJob;
     use crate::{
         scheduler::{scheduler_job::SchedulerJob, SchedulerJobMetadata},
-        tests::{mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job},
-        trackers::TrackerCreateParams,
+        tests::{
+            mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job,
+            TrackerCreateParamsBuilder,
+        },
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
@@ -240,13 +242,25 @@ mod tests {
         // Create trackers and tracker jobs.
         let trackers = api.trackers();
         let tracker_one = trackers
-            .create_tracker(TrackerCreateParams::new("tracker-one").with_schedule("1 2 3 4 5 4"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker-one")
+                    .with_schedule("1 2 3 4 5 4")
+                    .build(),
+            )
             .await?;
         let tracker_two = trackers
-            .create_tracker(TrackerCreateParams::new("tracker-two").with_schedule("1 2 3 4 5 5"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker-two")
+                    .with_schedule("1 2 3 4 5 5")
+                    .build(),
+            )
             .await?;
         let tracker_three = trackers
-            .create_tracker(TrackerCreateParams::new("tracker-three").with_schedule("1 2 3 4 5 6"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker-three")
+                    .with_schedule("1 2 3 4 5 6")
+                    .build(),
+            )
             .await?;
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
@@ -313,7 +327,7 @@ mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("tracker-one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker-one").build())
             .await?;
 
         assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
@@ -356,12 +370,13 @@ mod tests {
         let tracker = api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("tracker-one")
+                TrackerCreateParamsBuilder::new("tracker-one")
                     .with_config(TrackerConfig {
                         revisions: 0,
                         ..Default::default()
                     })
-                    .with_schedule("1 2 3 4 5 6"),
+                    .with_schedule("1 2 3 4 5 6")
+                    .build(),
             )
             .await?;
 
@@ -405,9 +420,10 @@ mod tests {
         let tracker = api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("tracker-one")
+                TrackerCreateParamsBuilder::new("tracker-one")
                     .with_schedule("1 2 3 4 5 6")
-                    .disable(),
+                    .disable()
+                    .build(),
             )
             .await?;
 

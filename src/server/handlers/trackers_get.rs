@@ -34,7 +34,7 @@ pub async fn trackers_get(
 mod tests {
     use crate::{
         server::{handlers::trackers_get::trackers_get, server_state::tests::mock_server_state},
-        trackers::TrackerCreateParams,
+        tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
         body::MessageBody,
@@ -53,7 +53,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
         let app = init_service(
@@ -87,7 +87,7 @@ mod tests {
         server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
         let app = init_service(

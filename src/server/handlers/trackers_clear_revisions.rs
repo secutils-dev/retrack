@@ -35,7 +35,7 @@ mod tests {
             handlers::trackers_clear_revisions::trackers_clear_revisions,
             server_state::tests::mock_server_state,
         },
-        trackers::TrackerCreateParams,
+        tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
         http::Method,
@@ -74,7 +74,7 @@ mod tests {
         // Create tracker.
         let trackers_api = server_state.api.trackers();
         let tracker = trackers_api
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
         // Tracker without revisions.

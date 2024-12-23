@@ -1,13 +1,3 @@
-mod tracker_create_params;
-mod tracker_list_revisions_params;
-mod tracker_update_params;
-mod trackers_list_params;
-
-pub use self::{
-    tracker_create_params::TrackerCreateParams,
-    tracker_list_revisions_params::TrackerListRevisionsParams,
-    tracker_update_params::TrackerUpdateParams, trackers_list_params::TrackersListParams,
-};
 use crate::{
     api::Api,
     config::TrackersConfig,
@@ -37,8 +27,9 @@ use retrack_types::{
     scheduler::SchedulerJobRetryStrategy,
     trackers::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, PageTarget, Tracker, TrackerAction, TrackerDataRevision,
-        TrackerDataValue, TrackerTarget, WebhookAction,
+        ExtractorScriptResult, PageTarget, Tracker, TrackerAction, TrackerCreateParams,
+        TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams, TrackerTarget,
+        TrackerUpdateParams, TrackersListParams, WebhookAction,
     },
 };
 use serde_json::json;
@@ -1155,11 +1146,8 @@ mod tests {
         tests::{
             load_fixture, mock_api, mock_api_with_config, mock_api_with_network, mock_config,
             mock_network_with_records, mock_scheduler_job, mock_upsert_scheduler_job,
-            RawSchedulerJobStoredData, WebScraperContentRequest, WebScraperErrorResponse,
-        },
-        trackers::{
-            TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams,
-            TrackersListParams,
+            RawSchedulerJobStoredData, TrackerCreateParamsBuilder, WebScraperContentRequest,
+            WebScraperErrorResponse,
         },
     };
     use actix_web::ResponseError;
@@ -1172,7 +1160,8 @@ mod tests {
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
             ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction,
-            TrackerConfig, TrackerDataValue, TrackerTarget, WebhookAction,
+            TrackerConfig, TrackerCreateParams, TrackerDataValue, TrackerListRevisionsParams,
+            TrackerTarget, TrackerUpdateParams, TrackersListParams, WebhookAction,
         },
     };
     use serde_json::json;
@@ -1193,7 +1182,7 @@ mod tests {
 
         let tracker = api
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_config(TrackerConfig {
                         revisions: 3,
                         timeout: Some(Duration::from_millis(2500)),
@@ -1209,7 +1198,8 @@ mod tests {
                         "tag".to_string(),
                         "TAG".to_string(),
                         " tag".to_string(),
-                    ]),
+                    ])
+                    .build(),
             )
             .await?;
 
@@ -1218,7 +1208,7 @@ mod tests {
 
         let tracker = api
             .create_tracker(
-                TrackerCreateParams::new("name_two").with_target(TrackerTarget::Api(ApiTarget {
+                TrackerCreateParamsBuilder::new("name_two").with_target(TrackerTarget::Api(ApiTarget {
                     requests: vec![TargetRequest {
                         url: Url::parse("https://retrack.dev")?,
                         method: Some(Method::POST),
@@ -1233,7 +1223,7 @@ mod tests {
                     }],
                     configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                     extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
-                })),
+                })).build(),
             )
             .await?;
 
@@ -2150,17 +2140,19 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one").with_config(TrackerConfig {
-                    timeout: Some(Duration::from_millis(2500)),
-                    job: Some(SchedulerJobConfig {
-                        schedule: "@hourly".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                            interval: Duration::from_secs(120),
-                            max_attempts: 5,
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_config(TrackerConfig {
+                        timeout: Some(Duration::from_millis(2500)),
+                        job: Some(SchedulerJobConfig {
+                            schedule: "@hourly".to_string(),
+                            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                                interval: Duration::from_secs(120),
+                                max_attempts: 5,
+                            }),
                         }),
-                    }),
-                    ..Default::default()
-                }),
+                        ..Default::default()
+                    })
+                    .build(),
             )
             .await?;
 
@@ -2720,7 +2712,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         // Set job ID.
@@ -2800,10 +2796,18 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker_one = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
         let tracker_two = trackers
-            .create_tracker(TrackerCreateParams::new("name_two").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_two")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         assert_eq!(
@@ -2836,7 +2840,11 @@ mod tests {
             .is_none());
 
         let tracker_one = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
         assert_eq!(
             trackers.get_tracker(tracker_one.id).await?,
@@ -2844,7 +2852,11 @@ mod tests {
         );
 
         let tracker_two = trackers
-            .create_tracker(TrackerCreateParams::new("name_two").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_two")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         assert_eq!(
@@ -2864,7 +2876,7 @@ mod tests {
 
         let tracker_one = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
@@ -2872,7 +2884,8 @@ mod tests {
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
                         }),
-                    ]),
+                    ])
+                    .build(),
             )
             .await?;
         assert_eq!(
@@ -2881,7 +2894,7 @@ mod tests {
         );
         let tracker_two = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_two")
+                TrackerCreateParamsBuilder::new("name_two")
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:2".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
@@ -2889,7 +2902,8 @@ mod tests {
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
                         }),
-                    ]),
+                    ])
+                    .build(),
             )
             .await?;
 
@@ -2983,7 +2997,7 @@ mod tests {
 
         let tracker_one = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
@@ -2991,12 +3005,13 @@ mod tests {
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
                         }),
-                    ]),
+                    ])
+                    .build(),
             )
             .await?;
         let tracker_two = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_two")
+                TrackerCreateParamsBuilder::new("name_two")
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:2".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
@@ -3004,7 +3019,8 @@ mod tests {
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
                         }),
-                    ]),
+                    ])
+                    .build(),
             )
             .await?;
 
@@ -3051,13 +3067,18 @@ mod tests {
         let trackers = api.trackers();
         let tracker_one = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
-                    .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()]),
+                    .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()])
+                    .build(),
             )
             .await?;
         let tracker_two = trackers
-            .create_tracker(TrackerCreateParams::new("name_two").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_two")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         let tracker_one_data = trackers
@@ -3233,7 +3254,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker_one = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3248,12 +3269,13 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: None,
-                    })),
+                    }))
+                    .build(),
             )
             .await?;
         let tracker_two = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_two")
+                TrackerCreateParamsBuilder::new("name_two")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3265,7 +3287,7 @@ mod tests {
                         }],
                         configurator: Some(format!("((context) => ({{ requests: [{{ url: '{}', method: 'POST', headers: {{ 'x-custom-header': 'x-custom-value' }}, body: Deno.core.encode(JSON.stringify({{ key: `overridden-${{JSON.parse(Deno.core.decode(context.requests[0].body)).key}}` }})) }}] }}))(context);", server.url("/api/post-call"))),
                         extractor: None
-                    })),
+                    })).build(),
             )
             .await?;
 
@@ -3430,7 +3452,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3456,7 +3478,7 @@ mod tests {
 }})(context);"#
                                 .to_string(),
                         ),
-                    })),
+                    })).build(),
             )
             .await?;
 
@@ -3546,7 +3568,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3574,7 +3596,7 @@ mod tests {
                                 .to_string(),
                         ),
                         extractor: None
-                    })),
+                    })).build(),
             )
             .await?;
 
@@ -3644,7 +3666,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3659,7 +3681,8 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: None,
-                    })),
+                    }))
+                    .build(),
             )
             .await?;
 
@@ -3759,7 +3782,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3771,7 +3794,8 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: None,
-                    })),
+                    }))
+                    .build(),
             )
             .await?;
 
@@ -3841,7 +3865,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![
@@ -3877,7 +3901,8 @@ mod tests {
 }})(context);"#
                                 .to_string(),
                         ),
-                    })),
+                    }))
+                    .build(),
             )
             .await?;
 
@@ -3940,7 +3965,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("name_one")
+                TrackerCreateParamsBuilder::new("name_one")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
                         requests: vec![TargetRequest {
@@ -3955,7 +3980,8 @@ mod tests {
                         }],
                         configurator: Some(server.url("/configurator.js")),
                         extractor: Some(server.url("/extractor.js")),
-                    })),
+                    }))
+                    .build(),
             )
             .await?;
 
@@ -4054,7 +4080,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParams::new("tracker")
+                TrackerCreateParamsBuilder::new("tracker")
                     .with_schedule("0 0 * * * *")
                     .with_actions(vec![
                         TrackerAction::Email(EmailAction {
@@ -4071,7 +4097,8 @@ mod tests {
                                 HeaderValue::from_static("text/plain"),
                             )])),
                         }),
-                    ]),
+                    ])
+                    .build(),
             )
             .await?;
 
@@ -4273,7 +4300,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         let content_mock = server.mock(|when, then| {
@@ -4320,7 +4351,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         let tracker_content = trackers
@@ -4385,7 +4420,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         let tracker_content = trackers
@@ -4436,7 +4475,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         let tracker_content = trackers
@@ -4481,7 +4524,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
         api.trackers()
             .update_tracker_job(
@@ -4565,7 +4612,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
         api.trackers()
             .update_tracker_job(
@@ -4643,7 +4694,11 @@ mod tests {
 
         let trackers = api.trackers();
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
         api.trackers()
             .update_tracker_job(
@@ -4724,7 +4779,11 @@ mod tests {
         assert!(unscheduled_trackers.is_empty());
 
         let tracker = trackers
-            .create_tracker(TrackerCreateParams::new("name_one").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
@@ -4819,7 +4878,9 @@ mod tests {
         for n in 0..=2 {
             trackers
                 .create_tracker(
-                    TrackerCreateParams::new(format!("name_{}", n)).with_schedule("0 0 * * * *"),
+                    TrackerCreateParamsBuilder::new(format!("name_{}", n))
+                        .with_schedule("0 0 * * * *")
+                        .build(),
                 )
                 .await?;
         }

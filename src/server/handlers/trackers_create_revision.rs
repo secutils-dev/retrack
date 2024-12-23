@@ -37,8 +37,7 @@ mod tests {
             handlers::trackers_create_revision::trackers_create_revision,
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
-        tests::{mock_config, WebScraperContentRequest},
-        trackers::{TrackerCreateParams, TrackerListRevisionsParams},
+        tests::{mock_config, TrackerCreateParamsBuilder, WebScraperContentRequest},
     };
     use actix_web::{
         body::MessageBody,
@@ -48,7 +47,9 @@ mod tests {
     };
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
-    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
+    use retrack_types::trackers::{
+        TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams,
+    };
     use serde_json::json;
     use sqlx::PgPool;
     use std::str::from_utf8;
@@ -65,7 +66,7 @@ mod tests {
         // Create tracker.
         let trackers_api = server_state.api.trackers();
         let tracker = trackers_api
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
         let app = init_service(

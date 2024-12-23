@@ -1,6 +1,6 @@
-use crate::{error::Error as RetrackError, server::ServerState, trackers::TrackerUpdateParams};
+use crate::{error::Error as RetrackError, server::ServerState};
 use actix_web::{put, web, HttpResponse};
-use retrack_types::trackers::Tracker;
+use retrack_types::trackers::{Tracker, TrackerUpdateParams};
 use tracing::error;
 use uuid::Uuid;
 
@@ -43,8 +43,7 @@ mod tests {
             handlers::trackers_update::trackers_update,
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
-        tests::mock_config,
-        trackers::TrackerCreateParams,
+        tests::{mock_config, TrackerCreateParamsBuilder},
     };
     use actix_web::{
         body::MessageBody,
@@ -71,7 +70,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
         let trackers = server_state
             .api
@@ -175,7 +174,7 @@ mod tests {
         let tracker = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
         let trackers = server_state
             .api

@@ -1,20 +1,28 @@
 mod tracker;
 mod tracker_action;
 mod tracker_config;
+mod tracker_create_params;
 mod tracker_data_revision;
 mod tracker_data_value;
+mod tracker_list_revisions_params;
 mod tracker_target;
+mod tracker_update_params;
+mod trackers_list_params;
 
 pub use self::{
     tracker::Tracker,
     tracker_action::{EmailAction, TrackerAction, WebhookAction},
     tracker_config::TrackerConfig,
+    tracker_create_params::TrackerCreateParams,
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
+    tracker_list_revisions_params::TrackerListRevisionsParams,
     tracker_target::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
         ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest, TrackerTarget,
     },
+    tracker_update_params::TrackerUpdateParams,
+    trackers_list_params::TrackersListParams,
 };
 
 #[cfg(test)]

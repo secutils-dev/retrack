@@ -262,9 +262,8 @@ mod tests {
         tests::{
             mock_api_with_config, mock_config, mock_get_scheduler_job, mock_schedule_in_sec,
             mock_schedule_in_secs, mock_scheduler, mock_scheduler_job, SmtpCatchAllConfig,
-            WebScraperContentRequest, WebScraperErrorResponse,
+            TrackerCreateParamsBuilder, WebScraperContentRequest, WebScraperErrorResponse,
         },
-        trackers::TrackerCreateParams,
     };
     use futures::StreamExt;
     use httpmock::MockServer;
@@ -370,12 +369,13 @@ mod tests {
         let tracker = api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("tracker")
+                TrackerCreateParamsBuilder::new("tracker")
                     .with_config(TrackerConfig {
                         revisions: 0,
                         ..Default::default()
                     })
-                    .with_schedule("0 0 * * * *"),
+                    .with_schedule("0 0 * * * *")
+                    .build(),
             )
             .await?;
         api.trackers()
@@ -424,9 +424,10 @@ mod tests {
         let tracker = api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("tracker")
+                TrackerCreateParamsBuilder::new("tracker")
                     .with_schedule("0 0 * * * *")
-                    .disable(),
+                    .disable()
+                    .build(),
             )
             .await?;
         api.trackers()

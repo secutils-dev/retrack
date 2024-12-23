@@ -111,8 +111,10 @@ mod tests {
     use super::TrackersTriggerJob;
     use crate::{
         scheduler::scheduler_job::SchedulerJob,
-        tests::{mock_api, mock_get_scheduler_job, mock_scheduler, mock_scheduler_job},
-        trackers::TrackerCreateParams,
+        tests::{
+            mock_api, mock_get_scheduler_job, mock_scheduler, mock_scheduler_job,
+            TrackerCreateParamsBuilder,
+        },
     };
     use insta::assert_debug_snapshot;
     use retrack_types::trackers::Tracker;
@@ -164,7 +166,11 @@ mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("tracker").with_schedule("0 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
             .await?;
         api.trackers()
             .update_tracker_job(tracker.id, Some(job_id))
@@ -221,7 +227,11 @@ mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("tracker").with_schedule("1 0 * * * *"))
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("1 0 * * * *")
+                    .build(),
+            )
             .await?;
         api.trackers()
             .update_tracker_job(tracker.id, Some(job_id))
@@ -261,7 +271,7 @@ mod tests {
         // Create tracker and tracker job.
         let tracker = api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("tracker"))
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
             .await?;
         api.trackers()
             .update_tracker_job(tracker.id, Some(job_id))

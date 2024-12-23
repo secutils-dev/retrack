@@ -37,6 +37,34 @@ Accept: application/json
   }
 }
 
+### Create tracker (bot detection)
+< {%
+  const extractor = `
+    export async function execute(page, previousContent) {
+      const baseUrl = 'https://deviceandbrowserinfo.com';
+
+      const requestPromise = page.waitForRequest(baseUrl + '/fingerprint_bot_test');
+      const responsePromise = page.waitForResponse(baseUrl + '/fingerprint_bot_test');
+
+      await page.goto(baseUrl + '/are_you_a_bot');
+
+      return { request: (await requestPromise).postDataJSON(), response: await (await responsePromise).json() };
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "Bot Detection",
+  "target": {
+    "type": "page",
+    "extractor": "{{extractor}}"
+  }
+}
+
 ### Create tracker (target: page)
 < {%
   const extractor = `

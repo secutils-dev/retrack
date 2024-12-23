@@ -1,8 +1,6 @@
-use crate::{
-    error::Error as RetrackError, server::ServerState, trackers::TrackerListRevisionsParams,
-};
+use crate::{error::Error as RetrackError, server::ServerState};
 use actix_web::{get, web, HttpResponse};
-use retrack_types::trackers::TrackerDataRevision;
+use retrack_types::trackers::{TrackerDataRevision, TrackerListRevisionsParams};
 use tracing::error;
 use uuid::Uuid;
 
@@ -44,8 +42,7 @@ mod tests {
             handlers::trackers_list_revisions::trackers_list_revisions,
             server_state::tests::mock_server_state,
         },
-        tests::tracker_data_revisions_diff,
-        trackers::TrackerCreateParams,
+        tests::{tracker_data_revisions_diff, TrackerCreateParamsBuilder},
     };
     use actix_web::{
         body::MessageBody,
@@ -67,7 +64,7 @@ mod tests {
         // Create tracker.
         let trackers_api = server_state.api.trackers();
         let tracker = trackers_api
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
         let app = init_service(

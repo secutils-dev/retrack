@@ -1,7 +1,7 @@
-use crate::{error::Error as RetrackError, server::ServerState, trackers::TrackersListParams};
+use crate::{error::Error as RetrackError, server::ServerState};
 use actix_web::{get, web, HttpResponse};
 use actix_web_lab::extract::Query;
-use retrack_types::trackers::Tracker;
+use retrack_types::trackers::{Tracker, TrackersListParams};
 use tracing::error;
 
 /// Gets a list of active trackers.
@@ -30,7 +30,7 @@ pub async fn trackers_list(
 mod tests {
     use crate::{
         server::{handlers::trackers_list::trackers_list, server_state::tests::mock_server_state},
-        trackers::TrackerCreateParams,
+        tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
         body::MessageBody,
@@ -66,7 +66,7 @@ mod tests {
         let tracker_1 = server_state
             .api
             .trackers()
-            .create_tracker(TrackerCreateParams::new("name_one"))
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
         let response = call_service(
@@ -85,11 +85,12 @@ mod tests {
             .api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("name_two")
+                TrackerCreateParamsBuilder::new("name_two")
                     .with_tags(vec!["tag_two".to_string()])
                     .with_actions(vec![TrackerAction::Email(EmailAction {
                         to: vec!["dev@retrack.dev".to_string()],
-                    })]),
+                    })])
+                    .build(),
             )
             .await?;
 
@@ -133,8 +134,9 @@ mod tests {
             .api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("name_one")
-                    .with_tags(vec!["app:retrack".to_string(), "User:1".to_string()]),
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_tags(vec!["app:retrack".to_string(), "User:1".to_string()])
+                    .build(),
             )
             .await?;
 
@@ -143,8 +145,9 @@ mod tests {
             .api
             .trackers()
             .create_tracker(
-                TrackerCreateParams::new("name_two")
-                    .with_tags(vec!["app:retrack".to_string(), "User:2".to_string()]),
+                TrackerCreateParamsBuilder::new("name_two")
+                    .with_tags(vec!["app:retrack".to_string(), "User:2".to_string()])
+                    .build(),
             )
             .await?;
 

@@ -5,13 +5,8 @@ mod parsers;
 mod tracker_data_revisions_diff;
 mod web_scraper;
 
-pub use self::api_ext::{
-    TrackerCreateParams, TrackerListRevisionsParams, TrackerUpdateParams, TrackersListParams,
-};
-
 #[cfg(test)]
 pub mod tests {
-    use crate::trackers::TrackerCreateParams;
     pub use crate::trackers::{
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
@@ -20,52 +15,58 @@ pub mod tests {
     use retrack_types::{
         scheduler::SchedulerJobConfig,
         trackers::{
-            PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerDataValue, TrackerTarget,
+            PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
+            TrackerDataValue, TrackerTarget,
         },
     };
     use std::time::Duration;
     use time::OffsetDateTime;
     use uuid::Uuid;
 
-    impl TrackerCreateParams {
+    pub struct TrackerCreateParamsBuilder {
+        params: TrackerCreateParams,
+    }
+    impl TrackerCreateParamsBuilder {
         pub fn new(name: impl Into<String>) -> Self {
             Self {
-                name: name.into(),
-                enabled: true,
-                target: TrackerTarget::Page(PageTarget {
-                    extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    params: None,
-                    user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
-                }),
-                config: Default::default(),
-                tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog],
+                params: TrackerCreateParams {
+                    name: name.into(),
+                    enabled: true,
+                    target: TrackerTarget::Page(PageTarget {
+                        extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+                        params: None,
+                        user_agent: Some("Retrack/1.0.0".to_string()),
+                        ignore_https_errors: true,
+                    }),
+                    config: Default::default(),
+                    tags: vec!["tag".to_string()],
+                    actions: vec![TrackerAction::ServerLog],
+                }
             }
         }
 
         pub fn with_config(mut self, config: TrackerConfig) -> Self {
-            self.config = config;
+            self.params.config = config;
             self
         }
 
         pub fn with_target(mut self, target: TrackerTarget) -> Self {
-            self.target = target;
+            self.params.target = target;
             self
         }
 
         pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-            self.tags = tags;
+            self.params.tags = tags;
             self
         }
 
         pub fn with_actions(mut self, actions: Vec<TrackerAction>) -> Self {
-            self.actions = actions;
+            self.params.actions = actions;
             self
         }
 
         pub fn with_schedule<S: Into<String>>(mut self, schedule: S) -> Self {
-            self.config.job = Some(SchedulerJobConfig {
+            self.params.config.job = Some(SchedulerJobConfig {
                 schedule: schedule.into(),
                 retry_strategy: None,
             });
@@ -73,8 +74,12 @@ pub mod tests {
         }
 
         pub fn disable(mut self) -> Self {
-            self.enabled = false;
+            self.params.enabled = false;
             self
+        }
+
+        pub fn build(self) -> TrackerCreateParams {
+            self.params
         }
     }
 
