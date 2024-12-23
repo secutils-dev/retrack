@@ -35,7 +35,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn can_serialization_and_deserialize() -> anyhow::Result<()> {
+    fn can_serialize_and_deserialize() -> anyhow::Result<()> {
         let target = TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: None,
