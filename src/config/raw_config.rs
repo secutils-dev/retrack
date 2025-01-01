@@ -2,7 +2,7 @@ use crate::config::{
     database_config::DatabaseConfig, CacheConfig, ComponentsConfig, JsRuntimeConfig,
     SchedulerJobsConfig, SmtpConfig, TrackersConfig,
 };
-use figment::{providers, providers::Format, value, Figment, Metadata, Profile, Provider};
+use figment::{providers, providers::Format, Figment};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -32,10 +32,12 @@ pub struct RawConfig {
 impl RawConfig {
     /// Reads the configuration from the file (TOML) and merges it with the default values.
     pub fn read_from_file(path: &str) -> anyhow::Result<Self> {
-        Ok(Figment::from(RawConfig::default())
-            .merge(providers::Toml::file(path))
-            .merge(providers::Env::prefixed("RETRACK_").split("__"))
-            .extract()?)
+        Ok(
+            Figment::from(providers::Serialized::defaults(Self::default()))
+                .merge(providers::Toml::file(path))
+                .merge(providers::Env::prefixed("RETRACK_").split("__"))
+                .extract()?,
+        )
     }
 }
 
@@ -54,16 +56,6 @@ impl Default for RawConfig {
             smtp: None,
             cache: CacheConfig::default(),
         }
-    }
-}
-
-impl Provider for RawConfig {
-    fn metadata(&self) -> Metadata {
-        Metadata::named("Retrack API server main configuration")
-    }
-
-    fn data(&self) -> Result<value::Map<Profile, value::Dict>, figment::Error> {
-        providers::Serialized::defaults(Self::default()).data()
     }
 }
 
