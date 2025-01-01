@@ -36,21 +36,21 @@ http = "1.2.0"
 http-cache-reqwest = "0.15.0"
 http-serde = "2.1.1"
 humantime = "2.1.0"
-itertools = "0.13.0"
+itertools = "0.14.0"
 lettre = { version = "0.11.11", default-features = false }
 mediatype = "0.19.18"
 postcard = { version = "1.1.1", default-features = false }
 regex = "1.11.1"
-reqwest = { version = "0.12.9", default-features = false }
+reqwest = { version = "0.12.12", default-features = false }
 reqwest-middleware = "0.4.0"
 reqwest-tracing = "0.5.5"
 retrack-types = { path = "components/retrack-types" }
 rust-embed = "8.5.0"
 rustls = "0.23.20"
-serde = "1.0.216"
+serde = "1.0.217"
 serde_bytes = "0.11.15"
 serde_json = "1.0.134"
-serde_with = "3.11.0"
+serde_with = "3.12.0"
 similar = "2.6.0"
 sqlx = { version = "0.8.2", default-features = false }
 thiserror = "2.0.9"
