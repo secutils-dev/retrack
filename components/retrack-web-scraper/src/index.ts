@@ -1,5 +1,3 @@
-import * as process from 'process';
-
 import { fastify } from 'fastify';
 import type { BrowserServer } from 'playwright-core';
 import { chromium } from 'playwright-core';
@@ -11,13 +9,12 @@ import type { BrowserEndpoint } from './utilities/browser.js';
 
 const config = configure();
 const server = fastify({
-  logger:
-    process.env.NODE_ENV === 'production'
-      ? { level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug' }
-      : {
-          level: process.env.RETRACK_WEB_SCRAPER_LOG_LEVEL ?? 'debug',
-          transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname' } },
-        },
+  logger: config.isDev
+    ? {
+        level: config.logLevel,
+        transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss Z', ignore: 'pid,hostname' } },
+      }
+    : { level: config.logLevel },
 }).addHook('onClose', () => stopBrowserServer());
 
 server.log.debug(`Configuration: ${JSON.stringify(config, null, 2)}.`);
@@ -39,33 +36,30 @@ const browserServer: {
   // In this case communication between Playwright client and server will be done over the special Playwright protocol,
   // and then the Playwright Server would be talking to the browser over normal CDP.
   // See https://github.com/microsoft/playwright/issues/15265#issuecomment-1172860134 for more details.
-  cachedEndpoint: process.env.RETRACK_WEB_SCRAPER_BROWSER_CDP_WS_ENDPOINT
-    ? { protocol: 'cdp', url: process.env.RETRACK_WEB_SCRAPER_BROWSER_CDP_WS_ENDPOINT }
+  cachedEndpoint: config.browser.cdpEndpoint
+    ? { protocol: 'cdp', url: config.browser.cdpEndpoint }
     : { protocol: 'playwright', url: '' },
 };
 
 async function launchBrowserServer() {
-  const headless = process.env.RETRACK_WEB_SCRAPER_BROWSER_NO_HEADLESS !== 'true';
-  const chromiumSandbox = !(process.env.RETRACK_WEB_SCRAPER_BROWSER_NO_SANDBOX === 'true');
-  const executablePath = process.env.RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH || undefined;
-  server.log.info(`Browser server will be run locally (headless: ${headless}, sandbox: ${chromiumSandbox}).`);
+  server.log.info(`Browser server will be run locally (config: ${JSON.stringify(config.browser)}).`);
 
   try {
     const localServer = await chromium.launchServer({
-      executablePath,
-      headless,
+      executablePath: config.browser.executablePath,
+      headless: config.browser.headless,
       channel: 'chromium',
-      chromiumSandbox,
+      chromiumSandbox: config.browser.sandbox,
       args: ['--disable-web-security', '--disable-blink-features=AutomationControlled'],
       ignoreDefaultArgs: ['--enable-automation'],
     });
     server.log.info(
-      `Browser server is running locally at ${browserServer.cachedEndpoint.url} (headless: ${headless}, sandbox: ${chromiumSandbox}).`,
+      `Browser server is running locally at ${browserServer.cachedEndpoint.url} (config: ${JSON.stringify(config.browser)}).`,
     );
     return localServer;
   } catch (err) {
     server.log.error(
-      `Failed to run browser server locally (headless: ${headless}, sandbox: ${chromiumSandbox}): ${Diagnostics.errorMessage(err)}`,
+      `Failed to run browser server locally (config: ${JSON.stringify(config.browser)}): ${Diagnostics.errorMessage(err)}`,
     );
     throw err;
   }
@@ -101,7 +95,7 @@ registerRoutes({
       if (browserServer.shutdownTimer) {
         clearTimeout(browserServer.shutdownTimer);
       }
-      browserServer.shutdownTimer = setTimeout(() => stopBrowserServer().catch(() => {}), config.browserTTLSec * 1000);
+      browserServer.shutdownTimer = setTimeout(() => stopBrowserServer().catch(() => {}), config.browser.ttlSec * 1000);
     }
 
     if (browserServer.cachedEndpoint.url || !launchServer) {

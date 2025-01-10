@@ -82,7 +82,7 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
         previousContent: request.body.previousContent,
         userAgent: request.body.userAgent,
         ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
-        screenshotsPath: config.browserScreenshotsPath,
+        screenshotsPath: config.browser.screenshotsPath,
       };
 
       try {
