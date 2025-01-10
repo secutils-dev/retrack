@@ -16,7 +16,7 @@
     "build": "tsc --project ./",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "watch": "NODE_OPTIONS=--import=./register.js RETRACK_WEB_SCRAPER_ENV_PATH=../../.env nodemon src/index.ts",
+    "watch": "NODE_OPTIONS=--import=./register.js RETRACK_WEB_SCRAPER_ENV_PATH=../../.env node --watch src/index.ts",
     "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test ./src/tests.ts",
     "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test --watch ./src/tests.ts"
   },
@@ -35,7 +35,6 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "globals": "^15.14.0",
-    "nodemon": "^3.1.9",
     "pino-pretty": "^13.0.0",
     "prettier": "^3.4.2",
     "ts-node": "^10.9.2",
