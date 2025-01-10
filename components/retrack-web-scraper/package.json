@@ -24,7 +24,6 @@
     "@fastify/compress": "^8.0.1",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.0",
-    "node-cache": "^5.1.2",
     "playwright-core": "npm:rebrowser-playwright-core@1.49.1"
   },
   "devDependencies": {

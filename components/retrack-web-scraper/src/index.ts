@@ -1,7 +1,6 @@
 import * as process from 'process';
 
 import { fastify } from 'fastify';
-import NodeCache from 'node-cache';
 import type { BrowserServer } from 'playwright-core';
 import { chromium } from 'playwright-core';
 
@@ -11,8 +10,6 @@ import { configure } from './config.js';
 import type { BrowserEndpoint } from './utilities/browser.js';
 
 const config = configure();
-
-const cache = new NodeCache({ stdTTL: config.cacheTTLSec });
 const server = fastify({
   logger:
     process.env.NODE_ENV === 'production'
@@ -95,7 +92,6 @@ async function stopBrowserServer() {
 
 registerRoutes({
   server,
-  cache,
   config,
   getBrowserEndpoint: async ({ launchServer = true }: { launchServer?: boolean } = {}) => {
     // For local browser server, we will stop it after a certain period of inactivity to free up resources.

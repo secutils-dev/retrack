@@ -9,7 +9,7 @@ await test('[/api/status] can successfully create route', () => {
 });
 
 await test('[/api/status] returns version from the config', async () => {
-  const configMock = { version: '1.0.0-rc.100', browserTTLSec: 1, cacheTTLSec: 2, port: 3 };
+  const configMock = { version: '1.0.0-rc.100', browserTTLSec: 1, port: 3 };
   const response = await registerStatusGetRoutes(createMock({ config: configMock })).inject({
     method: 'GET',
     url: '/api/status',
