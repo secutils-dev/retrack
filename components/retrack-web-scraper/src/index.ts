@@ -20,6 +20,8 @@ const server = fastify({
         },
 }).addHook('onClose', () => stopBrowserServer());
 
+server.log.debug(`Configuration: ${JSON.stringify(config, null, 2)}.`);
+
 await server.register(import('@fastify/compress'));
 
 const browserServer: {

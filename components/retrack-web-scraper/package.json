@@ -16,13 +16,12 @@
     "build": "tsc --project ./",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "watch": "NODE_OPTIONS=--import=./register.js RETRACK_WEB_SCRAPER_ENV_PATH=../../.env node --watch src/index.ts",
+    "watch": "NODE_OPTIONS=--import=./register.js node --env-file=../../.env --watch src/index.ts",
     "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test ./src/tests.ts",
     "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test --watch ./src/tests.ts"
   },
   "dependencies": {
     "@fastify/compress": "^8.0.1",
-    "dotenv": "^16.4.7",
     "fastify": "^5.2.0",
     "playwright-core": "npm:rebrowser-playwright-core@1.49.1"
   },
