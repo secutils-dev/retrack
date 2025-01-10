@@ -968,6 +968,11 @@ where
 
         // Process the response with the extractor script, if specified.
         let extractor_response_bytes = if let Some(ref extractor) = target.extractor {
+            debug!(
+                tracker.id = %tracker.id,
+                tracker.name = tracker.name,
+                "Extracting data with the API target extractor script ({extractor})."
+            );
             let result = self
                 .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
                     self.get_script_content(tracker, extractor).await?,
@@ -987,6 +992,12 @@ where
 
         // Deserialize the response body or the extractor result.
         let tracker_data_value = if let Some(response_bytes) = extractor_response_bytes {
+            debug!(
+                tracker.id = %tracker.id,
+                tracker.name = tracker.name,
+                "Extracted data from the API target extractor script with {} bytes.",
+                response_bytes.len()
+            );
             serde_json::from_slice(&response_bytes).map_err(|err| {
                 anyhow!(
                     "Could not deserialize API target extractor result for the tracker ('{}'): {err:?}",
