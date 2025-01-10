@@ -6,7 +6,7 @@ RUN set -x && apt-get update && apt-get install -y protobuf-compiler curl
 
 # Copy source code and build.
 COPY [".", "./"]
-RUN --mount=type=cache,target=/app/target cargo build --release && cp ./target/release/retrack ./
+RUN --mount=type=cache,target=/app/target cargo build --release && cp ./target/release/retrack ./ && strip ./retrack
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 EXPOSE 7676
