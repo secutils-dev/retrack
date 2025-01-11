@@ -91,6 +91,7 @@ mod tests {
 
         [trackers]
         max_revisions = 30
+        max_timeout = 300000
         min_schedule_interval = 10000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
@@ -137,6 +138,7 @@ mod tests {
         [trackers]
         schedules = ['@hourly']
         max_revisions = 11
+        max_timeout = 300_000
         min_schedule_interval = 10_000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
@@ -205,6 +207,7 @@ mod tests {
             },
             trackers: TrackersConfig {
                 max_revisions: 11,
+                max_timeout: 300s,
                 schedules: Some(
                     {
                         "@hourly",

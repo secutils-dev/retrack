@@ -151,6 +151,7 @@ pub mod tests {
             },
             trackers: TrackersConfig {
                 max_revisions: 30,
+                max_timeout: 300s,
                 schedules: None,
                 min_schedule_interval: 10s,
                 restrict_to_public_urls: true,

@@ -49,9 +49,6 @@ const MAX_JOBS_PAGE_SIZE: usize = 1000;
 /// Defines the maximum length of the user agent string.
 const MAX_TRACKER_PAGE_USER_AGENT_LENGTH: usize = 200;
 
-/// We currently wait up to 300 seconds for extractor script to execute.
-const MAX_TRACKER_EXTRACTOR_TIMEOUT: Duration = Duration::from_secs(300);
-
 /// We currently support up to 10 retry attempts for the tracker.
 const MAX_TRACKER_RETRY_ATTEMPTS: u32 = 10;
 
@@ -493,10 +490,10 @@ where
         }
 
         if let Some(ref timeout) = tracker.config.timeout {
-            if timeout > &MAX_TRACKER_EXTRACTOR_TIMEOUT {
+            if timeout > &config.max_timeout {
                 bail!(RetrackError::client(format!(
                     "Tracker timeout cannot be greater than {}ms.",
-                    MAX_TRACKER_EXTRACTOR_TIMEOUT.as_millis()
+                    config.max_timeout.as_millis()
                 )));
             }
         }
