@@ -112,7 +112,7 @@ try {
   if (screenshotsPath) {
     const pages = browser?.contexts().flatMap((context) => context.pages()) ?? [];
     for (const page of pages) {
-      const screenshotPath = `${screenshotsPath}/screenshot_${encodeURIComponent(page.url())}_${Date.now()}.png`;
+      const screenshotPath = `${screenshotsPath}/screenshot_${Date.now()}.png`;
       try {
         await page.screenshot({ fullPage: true, path: screenshotPath });
         log.error(`Captured page screenshot for ${page.url()}: ${screenshotPath}`);
