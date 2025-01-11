@@ -74,6 +74,14 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
       const log = server.log.child({ provider: 'web_page_execute' });
       const workerLog = log.child({ provider: 'worker' });
 
+      log.debug('Executing extractor script with the following parameters', {
+        extractorParams: request.body.extractorParams,
+        tags: request.body.tags,
+        timeout: request.body.timeout,
+        userAgent: request.body.userAgent,
+        ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
+      });
+
       const workerData: WorkerData = {
         endpoint: await getBrowserEndpoint(),
         extractor: request.body.extractor,
