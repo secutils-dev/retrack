@@ -10,7 +10,7 @@ pub use self::{
     script_task::ScriptTask,
 };
 use crate::{config::JsRuntimeConfig, js_runtime::script::ScriptDefinition};
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use deno_core::{serde_v8, v8, Extension, RuntimeOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -192,21 +192,25 @@ impl JsRuntime {
             }
         });
 
-        let handle_error = |err: anyhow::Error| match ScriptExecutionStatus::from(
+        let handle_error = |err: deno_core::error::CoreError| match ScriptExecutionStatus::from(
             script_status.load(Ordering::Relaxed),
         ) {
             ScriptExecutionStatus::ReachedMemoryLimit => {
-                err.context("Script exceeded memory limit.")
+                anyhow!(err).context("Script exceeded memory limit.")
             }
-            ScriptExecutionStatus::ReachedTimeLimit => err.context("Script exceeded time limit."),
+            ScriptExecutionStatus::ReachedTimeLimit => {
+                anyhow!(err).context("Script exceeded time limit.")
+            }
             ScriptExecutionStatus::Running => {
                 script_status.store(
                     ScriptExecutionStatus::ExecutionCompleted as usize,
                     Ordering::Relaxed,
                 );
-                err
+                anyhow!(err).context("Script was running.")
             }
-            ScriptExecutionStatus::ExecutionCompleted => err,
+            ScriptExecutionStatus::ExecutionCompleted => {
+                anyhow!(err).context("Script execution completed.")
+            }
         };
 
         // Retrieve the result `Promise`.
@@ -258,7 +262,7 @@ impl JsRuntime {
 pub mod tests {
     use super::{JsRuntime, ScriptConfig};
     use crate::config::JsRuntimeConfig;
-    use deno_core::error::JsError;
+    use deno_core::error::CoreError;
     use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
     use retrack_types::trackers::{
         ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
@@ -375,8 +379,15 @@ pub mod tests {
             )
             .await
             .unwrap_err()
-            .downcast::<JsError>()?;
-        assert_eq!(result.exception_message, "Uncaught Error: Uh oh.");
+            .downcast::<CoreError>()?;
+        if let CoreError::Js(js_err) = result {
+            assert_eq!(
+                js_err.exception_message,
+                "Uncaught Error: Uh oh.".to_string()
+            );
+        } else {
+            panic!("Expected CoreError::Js, got: {:?}", result);
+        }
 
         // Can access script context (async).
         let result = js_runtime
