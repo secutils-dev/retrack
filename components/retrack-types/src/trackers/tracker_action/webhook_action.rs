@@ -22,6 +22,13 @@ pub struct WebhookAction {
     #[serde(with = "http_serde::option::header_map", default)]
     #[schema(value_type = HashMap<String, String>)]
     pub headers: Option<HeaderMap>,
+
+    /// Optional custom script (Deno) to format tracker revision content for action. The script
+    /// accept both previous and current tracker revision content as arguments and should return
+    /// a serializable value that will be consumed by the action. If the script is not provided or
+    /// returns `null` or `undefined`, the action will receive the current tracker revision content
+    /// as is.
+    pub formatter: Option<String>,
 }
 
 #[cfg(test)]
@@ -39,6 +46,7 @@ mod tests {
             url: Url::parse("https://retrack.dev")?,
             method: None,
             headers: None,
+            formatter: None,
         };
         assert_json_snapshot!(action, @r###"
         {
@@ -50,6 +58,7 @@ mod tests {
             url: Url::parse("https://retrack.dev")?,
             method: Some(Method::GET),
             headers: None,
+            formatter: None,
         };
         assert_json_snapshot!(action, @r###"
         {
@@ -67,6 +76,7 @@ mod tests {
                     .collect::<HashMap<_, _>>())
                     .try_into()?,
             ),
+            formatter: None,
         };
         assert_json_snapshot!(action, @r###"
         {
@@ -75,6 +85,30 @@ mod tests {
           "headers": {
             "content-type": "application/json"
           }
+        }
+        "###);
+
+        let action = WebhookAction {
+            url: Url::parse("https://retrack.dev")?,
+            method: Some(Method::PUT),
+            headers: Some(
+                (&[(CONTENT_TYPE, "application/json".to_string())]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>())
+                    .try_into()?,
+            ),
+            formatter: Some(
+                "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string(),
+            ),
+        };
+        assert_json_snapshot!(action, @r###"
+        {
+          "url": "https://retrack.dev/",
+          "method": "PUT",
+          "headers": {
+            "content-type": "application/json"
+          },
+          "formatter": "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();"
         }
         "###);
 
@@ -87,6 +121,7 @@ mod tests {
             url: Url::parse("https://retrack.dev")?,
             method: None,
             headers: None,
+            formatter: None,
         };
         assert_eq!(
             serde_json::from_str::<WebhookAction>(
@@ -99,6 +134,7 @@ mod tests {
             url: Url::parse("https://retrack.dev")?,
             method: Some(Method::GET),
             headers: None,
+            formatter: None,
         };
         assert_eq!(
             serde_json::from_str::<WebhookAction>(
@@ -116,6 +152,7 @@ mod tests {
                     .collect::<HashMap<_, _>>())
                     .try_into()?,
             ),
+            formatter: None,
         };
         assert_eq!(
             serde_json::from_str::<WebhookAction>(
@@ -123,6 +160,32 @@ mod tests {
                     "url": "https://retrack.dev",
                     "method": "PUT",
                     "headers": { "content-type": "application/json" }
+                })
+                .to_string()
+            )?,
+            action
+        );
+
+        let action = WebhookAction {
+            url: Url::parse("https://retrack.dev")?,
+            method: Some(Method::PUT),
+            headers: Some(
+                (&[(CONTENT_TYPE, "application/json".to_string())]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>())
+                    .try_into()?,
+            ),
+            formatter: Some(
+                "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string(),
+            ),
+        };
+        assert_eq!(
+            serde_json::from_str::<WebhookAction>(
+                &json!({
+                    "url": "https://retrack.dev",
+                    "method": "PUT",
+                    "headers": { "content-type": "application/json" },
+                    "formatter": "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();"
                 })
                 .to_string()
             )?,

@@ -1,5 +1,6 @@
 use retrack_types::trackers::{
     ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs, ExtractorScriptResult,
+    FormatterScriptArgs, FormatterScriptResult,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_bytes::ByteBuf;
@@ -12,6 +13,8 @@ pub enum Script {
     ApiTargetConfigurator(ScriptDefinition<ConfiguratorScriptArgs, ConfiguratorScriptResult>),
     /// A script to preprocess response for API tracker target.
     ApiTargetExtractor(ScriptDefinition<ExtractorScriptArgs, ExtractorScriptResult>),
+    /// A script to preprocess content for the tracker action.
+    ActionFormatter(ScriptDefinition<FormatterScriptArgs, FormatterScriptResult>),
     /// A custom script for ad-hoc purposes.
     Custom(ScriptDefinition<ByteBuf, ByteBuf>),
 }
@@ -61,6 +64,24 @@ impl ScriptBuilder<ExtractorScriptArgs, ExtractorScriptResult> for ExtractorScri
     ) -> (Script, PhantomData<ExtractorScriptArgs>) {
         (
             Script::ApiTargetExtractor(ScriptDefinition {
+                src: src.into(),
+                args: Some(self),
+                result,
+            }),
+            PhantomData,
+        )
+    }
+}
+
+/// Implementation for action "formatter" script.
+impl ScriptBuilder<FormatterScriptArgs, FormatterScriptResult> for FormatterScriptArgs {
+    fn build(
+        self,
+        src: impl Into<String>,
+        result: ScriptResultSender<FormatterScriptResult>,
+    ) -> (Script, PhantomData<FormatterScriptArgs>) {
+        (
+            Script::ActionFormatter(ScriptDefinition {
                 src: src.into(),
                 args: Some(self),
                 result,

@@ -196,10 +196,11 @@ mod tests {
                 }),
             }),
             tags: Some(vec!["tag1".to_string(), "tag2".to_string()]),
-            actions: Some(vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+            actions: Some(vec![TrackerAction::ServerLog(Default::default()), TrackerAction::Webhook(WebhookAction {
                 url: url::Url::parse("https://retrack.dev")?,
                 method: None,
                 headers: None,
+                formatter: None,
             })])
         };
         assert_eq!(
@@ -440,10 +441,11 @@ mod tests {
                     }),
                 }),
                 tags: Some(vec!["tag1".to_string(), "tag2".to_string()]),
-                actions: Some(vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+                actions: Some(vec![TrackerAction::ServerLog(Default::default()), TrackerAction::Webhook(WebhookAction {
                     url: url::Url::parse("https://retrack.dev")?,
                     method: None,
                     headers: None,
+                    formatter: None,
                 })])
             }
         );

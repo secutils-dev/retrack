@@ -139,7 +139,11 @@ mod tests {
         "###);
         assert_debug_snapshot!(tracker.actions, @r###"
         [
-            ServerLog,
+            ServerLog(
+                ServerLogAction {
+                    formatter: None,
+                },
+            ),
             Webhook(
                 WebhookAction {
                     url: Url {
@@ -159,6 +163,7 @@ mod tests {
                     },
                     method: None,
                     headers: None,
+                    formatter: None,
                 },
             ),
         ]

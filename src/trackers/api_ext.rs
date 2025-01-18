@@ -27,13 +27,15 @@ use retrack_types::{
     scheduler::SchedulerJobRetryStrategy,
     trackers::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, PageTarget, Tracker, TrackerAction, TrackerCreateParams,
-        TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams, TrackerTarget,
-        TrackerUpdateParams, TrackersListParams, WebhookAction,
+        ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult, PageTarget,
+        ServerLogAction, Tracker, TrackerAction, TrackerCreateParams, TrackerDataRevision,
+        TrackerDataValue, TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams,
+        TrackersListParams, WebhookAction,
     },
 };
 use serde_json::json;
 use std::{
+    borrow::Cow,
     cmp::{max, min},
     collections::HashSet,
     str::FromStr,
@@ -351,32 +353,79 @@ where
         &self,
         tracker: &Tracker,
         action: &TrackerAction,
-        latest_data_value: &mut TrackerDataValue,
+        new_data_value: &mut TrackerDataValue,
         previous_data_value: Option<&TrackerDataValue>,
     ) -> anyhow::Result<()> {
         // If the latest data value has no modifications, use previous original value as
         // previous value. Otherwise, use the modification from the previous data value based on
         // the highest index of the latest data value modifications.
         let previous_value = previous_data_value.and_then(|previous_data_value| {
-            if latest_data_value.mods().is_none() {
+            if new_data_value.mods().is_none() {
                 Some(previous_data_value.original())
             } else {
                 previous_data_value
                     .mods()?
-                    .get(latest_data_value.mods()?.len() - 1)
+                    .get(new_data_value.mods()?.len() - 1)
             }
         });
 
-        let latest_value = latest_data_value.value();
+        let new_value = new_data_value.value();
         let changed = if let Some(previous_value) = previous_value {
-            previous_value != latest_value
+            previous_value != new_value
         } else {
             true
         };
 
+        if !changed {
+            debug!(
+                tracker.id = %tracker.id,
+                tracker.name = tracker.name,
+                "Skipping action `{}` for a new data revision since content hasn't changed.",
+                action.type_tag()
+            );
+            return Ok(());
+        }
+
+        // Format action payload, if needed. If formatter specified, but returns `null`, action
+        // should be skipped.
+        let action_payload = if let Some(formatter) = action.formatter() {
+            let formatter_result = self
+                .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
+                    formatter,
+                    FormatterScriptArgs {
+                        action: action.type_tag(),
+                        new_content: new_value.clone(),
+                        previous_content: previous_value.cloned(),
+                    },
+                )
+                .await
+                .context("Failed to execute action \"formatter\" script.")
+                .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
+            match formatter_result {
+                // Formatter empty content that means we should abort action.
+                Some(FormatterScriptResult { content: None }) => {
+                    debug!(
+                        tracker.id = %tracker.id,
+                        tracker.name = tracker.name,
+                        "Skipping action `{}` for a new data revision as requested by action formatter.",
+                        action.type_tag()
+                    );
+                    return Ok(());
+                }
+                // Formatter returned a content, use it as an action payload.
+                Some(FormatterScriptResult {
+                    content: Some(content),
+                }) => Cow::Owned(content),
+                // Formatter didn't return any content, use the new value as an action payload.
+                None => Cow::Borrowed(new_value),
+            }
+        } else {
+            Cow::Borrowed(new_value)
+        };
+
         let tasks_api = self.api.tasks();
         match action {
-            TrackerAction::Email(action) if changed => {
+            TrackerAction::Email(action) => {
                 let task = tasks_api
                     .schedule_task(
                         TaskType::Email(EmailTaskType {
@@ -384,7 +433,7 @@ where
                             content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                                 tracker_id: tracker.id,
                                 tracker_name: tracker.name.clone(),
-                                result: Ok(latest_value.to_string()),
+                                result: Ok(action_payload.to_string()),
                             }),
                         }),
                         Database::utc_now()?,
@@ -397,14 +446,14 @@ where
                     "Scheduled email task."
                 );
             }
-            TrackerAction::Webhook(action) if changed => {
+            TrackerAction::Webhook(action) => {
                 let task = tasks_api
                     .schedule_task(
                         TaskType::Http(HttpTaskType {
                             url: action.url.clone(),
                             method: action.method.clone().unwrap_or(Method::POST),
                             headers: action.headers.clone(),
-                            body: Some(serde_json::to_vec(&latest_value)?),
+                            body: Some(serde_json::to_vec(&action_payload)?),
                         }),
                         Database::utc_now()?,
                     )
@@ -416,20 +465,11 @@ where
                     "Scheduled HTTP task."
                 );
             }
-            TrackerAction::ServerLog => {
+            TrackerAction::ServerLog(_) => {
                 info!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
-                    "Fetched new data revision (data changed: {changed}): {:?}",
-                    latest_value
-                );
-            }
-            _ => {
-                debug!(
-                    tracker.id = %tracker.id,
-                    tracker.name = tracker.name,
-                    "Skipping action `{action:?}` for a new data revision (data changed: {changed}): {:?}",
-                    latest_value
+                    "Fetched new data revision: {action_payload:?}"
                 );
             }
         };
@@ -470,7 +510,7 @@ where
             )));
         }
 
-        Self::validate_tracker_actions(&tracker.actions)?;
+        self.validate_tracker_actions(&tracker.actions).await?;
         Self::validate_tracker_tags(&tracker.tags)?;
 
         let config = &self.api.config.trackers;
@@ -590,7 +630,7 @@ where
     }
 
     /// Validates tracker actions.
-    fn validate_tracker_actions(actions: &[TrackerAction]) -> anyhow::Result<()> {
+    async fn validate_tracker_actions(&self, actions: &[TrackerAction]) -> anyhow::Result<()> {
         for action in actions {
             match action {
                 TrackerAction::Email(action) => {
@@ -614,9 +654,17 @@ where
                             )));
                         }
                     }
+
+                    if let Some(script) = &action.formatter {
+                        self.validate_script(script, "email action formatter")
+                            .await?;
+                    }
                 }
                 TrackerAction::Webhook(WebhookAction {
-                    method, headers, ..
+                    method,
+                    headers,
+                    formatter,
+                    ..
                 }) => {
                     if let Some(method) = method {
                         if method != Method::GET && method != Method::POST && method != Method::PUT
@@ -634,8 +682,18 @@ where
                             )));
                         }
                     }
+
+                    if let Some(script) = &formatter {
+                        self.validate_script(script, "webhook action formatter")
+                            .await?;
+                    }
                 }
-                _ => {}
+                TrackerAction::ServerLog(ServerLogAction { formatter }) => {
+                    if let Some(script) = &formatter {
+                        self.validate_script(script, "server log action formatter")
+                            .await?;
+                    }
+                }
             }
         }
 
@@ -644,22 +702,8 @@ where
 
     /// Validates tracker's web page target parameters.
     async fn validate_page_target(&self, target: &PageTarget) -> anyhow::Result<()> {
-        if target.extractor.is_empty() {
-            bail!(RetrackError::client(
-                "Tracker target extractor script cannot be empty."
-            ));
-        }
-
-        let extractor_size = Byte::from_u64(target.extractor.len() as u64);
-        if extractor_size > self.api.config.trackers.max_script_size {
-            bail!(RetrackError::client(format!(
-                "Tracker target extractor script cannot be larger than {} bytes.",
-                self.api.config.trackers.max_script_size
-            )));
-        }
-
-        // Check if configurator script is URL pointing to a remote script.
-        self.validate_script_url(&target.extractor, "extractor")
+        // Validate extractor script.
+        self.validate_script(&target.extractor, "target extractor")
             .await?;
 
         if let Some(ref user_agent) = target.user_agent {
@@ -707,42 +751,14 @@ where
             }
         }
 
+        // Validate configurator script.
         if let Some(script) = &target.configurator {
-            if script.is_empty() {
-                bail!(RetrackError::client(
-                    "Tracker target configurator script cannot be empty."
-                ));
-            }
-
-            let script_size = Byte::from_u64(script.len() as u64);
-            if script_size > config.max_script_size {
-                bail!(RetrackError::client(format!(
-                    "Tracker target configurator script cannot be larger than {} bytes.",
-                    config.max_script_size
-                )));
-            }
-
-            // Check if configurator script is URL pointing to a remote script.
-            self.validate_script_url(script, "configurator").await?;
+            self.validate_script(script, "target configurator").await?;
         }
 
+        // Validate extractor script.
         if let Some(script) = &target.extractor {
-            if script.is_empty() {
-                bail!(RetrackError::client(
-                    "Tracker target extractor script cannot be empty."
-                ));
-            }
-
-            let script_size = Byte::from_u64(script.len() as u64);
-            if script_size > config.max_script_size {
-                bail!(RetrackError::client(format!(
-                    "Tracker target extractor script cannot be larger than {} bytes.",
-                    config.max_script_size
-                )));
-            }
-
-            // Check if extractor script is URL pointing to a remote script.
-            self.validate_script_url(script, "extractor").await?;
+            self.validate_script(script, "target extractor").await?;
         }
 
         Ok(())
@@ -1061,21 +1077,36 @@ where
     }
 
     /// Validates remote script reference.
-    async fn validate_script_url(&self, url: &str, script_ref: &str) -> anyhow::Result<()> {
+    async fn validate_script(&self, script: &str, script_ref: &str) -> anyhow::Result<()> {
+        let config = &self.api.config.trackers;
+        if script.is_empty() {
+            bail!(RetrackError::client(format!(
+                "Tracker {script_ref} script cannot be empty."
+            )));
+        }
+
+        let script_size = Byte::from_u64(script.len() as u64);
+        if script_size > config.max_script_size {
+            bail!(RetrackError::client(format!(
+                "Tracker {script_ref} script cannot be larger than {} bytes.",
+                config.max_script_size
+            )));
+        }
+
         // No need to parse the URL if we don't restrict to public URLs.
-        if !self.api.config.trackers.restrict_to_public_urls {
+        if !config.restrict_to_public_urls {
             return Ok(());
         }
 
         // Try to parse the URL and check if it's a valid URL. If it's not, script will be treated
         // as a script content.
-        let Ok(url) = Url::parse(url) else {
+        let Ok(script_url) = Url::parse(script) else {
             return Ok(());
         };
 
-        if !self.api.network.is_public_web_url(&url).await {
+        if !self.api.network.is_public_web_url(&script_url).await {
             bail!(RetrackError::client(
-                format!("Tracker target {script_ref} script URL must be either `http` or `https` and have a valid public reachable domain name, but received {url}.")
+                format!("Tracker {script_ref} script URL must be either `http` or `https` and have a valid public reachable domain name, but received {script_url}.")
             ));
         }
 
@@ -1170,9 +1201,10 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction,
-            TrackerConfig, TrackerCreateParams, TrackerDataValue, TrackerListRevisionsParams,
-            TrackerTarget, TrackerUpdateParams, TrackersListParams, WebhookAction,
+            ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker,
+            TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
+            TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
+            WebhookAction,
         },
     };
     use serde_json::json;
@@ -1268,7 +1300,7 @@ mod tests {
             job: None,
         };
         let tags = vec!["tag".to_string()];
-        let actions = vec![TrackerAction::ServerLog];
+        let actions = vec![TrackerAction::ServerLog(Default::default())];
 
         let create_and_fail = |result: anyhow::Result<_>| -> RetrackError {
             result.unwrap_err().downcast::<RetrackError>().unwrap()
@@ -1363,7 +1395,9 @@ mod tests {
                 target: target.clone(),
                 config: config.clone(),
                 tags: tags.clone(),
-                actions: [const { TrackerAction::ServerLog }; 11].into_iter().collect()
+                actions: iter::repeat(
+                    TrackerAction::ServerLog(Default::default())
+                ).take(11).collect()
             }).await),
             @r###""Tracker cannot have more than 10 actions.""###
         );
@@ -1377,7 +1411,8 @@ mod tests {
                 config: config.clone(),
                 tags: tags.clone(),
                 actions: vec![TrackerAction::Email(EmailAction {
-                    to: vec!["".to_string()]
+                    to: vec!["".to_string()],
+                    formatter: None
                 })],
             }).await),
             @r###""Tracker email action recipient ('') is not a valid email address.""###
@@ -1392,7 +1427,8 @@ mod tests {
                 config: config.clone(),
                 tags: tags.clone(),
                 actions: vec![TrackerAction::Email(EmailAction {
-                    to: vec!["alpha-beta-gamma".to_string()]
+                    to: vec!["alpha-beta-gamma".to_string()],
+                    formatter: None
                 })],
             }).await),
             @r###""Tracker email action recipient ('alpha-beta-gamma') is not a valid email address.""###
@@ -1407,10 +1443,43 @@ mod tests {
                 config: config.clone(),
                 tags: tags.clone(),
                 actions: vec![TrackerAction::Email(EmailAction {
-                    to: vec!["dev@retrack.dev".to_string(); 11]
+                    to: vec!["dev@retrack.dev".to_string(); 11],
+                    formatter: None
                 })],
             }).await),
             @r###""Tracker email action cannot have more than 10 recipients.""###
+        );
+
+        // Empty email action formatter.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: false,
+                target: target.clone(),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: vec![TrackerAction::Email(EmailAction {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    formatter: Some("".to_string())
+                })],
+            }).await),
+            @r###""Tracker email action formatter script cannot be empty.""###
+        );
+
+        // Very long email action formatter.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: target.clone(),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: vec![TrackerAction::Email(EmailAction {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    formatter: Some("a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1))
+                })],
+            }).await),
+            @r###""Tracker email action formatter script cannot be larger than 4096 bytes.""###
         );
 
         // Invalid webhook action method.
@@ -1424,7 +1493,8 @@ mod tests {
                 actions: vec![TrackerAction::Webhook(WebhookAction {
                     url: "https://retrack.dev".parse()?,
                     method: Some(Method::PATCH),
-                    headers: None
+                    headers: None,
+                    formatter: None
                 })],
             }).await),
             @r###""Tracker webhook action method must be either `GET`, `POST`, or `PUT`.""###
@@ -1448,9 +1518,76 @@ mod tests {
                     url: "https://retrack.dev".parse()?,
                     method: None,
                     headers: Some((&headers.into_iter().collect::<HashMap<_, _>>()).try_into()?),
+                    formatter: None
                 })],
             }).await),
             @r###""Tracker webhook action cannot have more than 20 headers.""###
+        );
+
+        // Empty webhook action formatter.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: false,
+                target: target.clone(),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: vec![TrackerAction::Webhook(WebhookAction {
+                    url: "https://retrack.dev".parse()?,
+                    method: None,
+                    headers: None,
+                    formatter: Some("".to_string())
+                })],
+            }).await),
+            @r###""Tracker webhook action formatter script cannot be empty.""###
+        );
+
+        // Very long webhook action formatter.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: target.clone(),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: vec![TrackerAction::Webhook(WebhookAction {
+                    url: "https://retrack.dev".parse()?,
+                    method: None,
+                    headers: None,
+                    formatter: Some("a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1))
+                })],
+            }).await),
+            @r###""Tracker webhook action formatter script cannot be larger than 4096 bytes.""###
+        );
+
+        // Empty server log action formatter.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: false,
+                target: target.clone(),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: vec![TrackerAction::ServerLog(ServerLogAction {
+                    formatter: Some("".to_string())
+                })],
+            }).await),
+            @r###""Tracker server log action formatter script cannot be empty.""###
+        );
+
+        // Very long server log action formatter.
+        assert_debug_snapshot!(
+            create_and_fail(api.create_tracker(TrackerCreateParams {
+                name: "name".to_string(),
+                enabled: true,
+                target: target.clone(),
+                config: config.clone(),
+                tags: tags.clone(),
+                actions: vec![TrackerAction::ServerLog(ServerLogAction {
+                    formatter: Some("a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1))
+                })],
+            }).await),
+            @r###""Tracker server log action formatter script cannot be larger than 4096 bytes.""###
         );
 
         // Too long timeout.
@@ -1933,7 +2070,7 @@ mod tests {
                     job: None,
                 },
                 tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog],
+                actions: vec![TrackerAction::ServerLog(Default::default())],
             })
             .await?;
 
@@ -2262,7 +2399,9 @@ mod tests {
         // Too many actions.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                actions: Some([const { TrackerAction::ServerLog }; 11].into_iter().collect()),
+                actions: Some(iter::repeat(
+                    TrackerAction::ServerLog(Default::default())
+                ).take(11).collect()),
                 ..Default::default()
             }).await),
             @r###""Tracker cannot have more than 10 actions.""###
@@ -2272,7 +2411,8 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 actions: Some(vec![TrackerAction::Email(EmailAction {
-                    to: vec!["".to_string()]
+                    to: vec!["".to_string()],
+                    formatter: None
                 })]),
                 ..Default::default()
             }).await),
@@ -2283,7 +2423,8 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 actions: Some(vec![TrackerAction::Email(EmailAction {
-                    to: vec!["alpha-beta-gamma".to_string()]
+                    to: vec!["alpha-beta-gamma".to_string()],
+                    formatter: None
                 })]),
                 ..Default::default()
             }).await),
@@ -2294,11 +2435,36 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 actions: Some(vec![TrackerAction::Email(EmailAction {
-                    to: vec!["dev@retrack.dev".to_string(); 11]
+                    to: vec!["dev@retrack.dev".to_string(); 11],
+                    formatter: None
                 })]),
                 ..Default::default()
             }).await),
             @r###""Tracker email action cannot have more than 10 recipients.""###
+        );
+
+        // Empty email action formatter.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                actions: Some(vec![TrackerAction::Email(EmailAction {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    formatter: Some("".to_string())
+                })]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker email action formatter script cannot be empty.""###
+        );
+
+        // Very long email action formatter.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                actions: Some(vec![TrackerAction::Email(EmailAction {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    formatter: Some("a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1))
+                })]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker email action formatter script cannot be larger than 4096 bytes.""###
         );
 
         // Invalid webhook action method.
@@ -2307,7 +2473,8 @@ mod tests {
                 actions: Some(vec![TrackerAction::Webhook(WebhookAction {
                     url: "https://retrack.dev".parse()?,
                     method: Some(Method::PATCH),
-                    headers: None
+                    headers: None,
+                    formatter: None
                 })]),
                 ..Default::default()
             }).await),
@@ -2324,13 +2491,64 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 actions: Some(vec![TrackerAction::Webhook(WebhookAction {
-                   url: "https://retrack.dev".parse()?,
+                    url: "https://retrack.dev".parse()?,
                     method: None,
                     headers: Some((&headers.into_iter().collect::<HashMap<_, _>>()).try_into()?),
+                    formatter: None
                 })]),
                 ..Default::default()
             }).await),
             @r###""Tracker webhook action cannot have more than 20 headers.""###
+        );
+
+        // Empty webhook action formatter.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                actions: Some(vec![TrackerAction::Webhook(WebhookAction {
+                    url: "https://retrack.dev".parse()?,
+                    method: None,
+                    headers: None,
+                    formatter: Some("".to_string())
+                })]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker webhook action formatter script cannot be empty.""###
+        );
+
+        // Very long webhook action formatter.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                actions: Some(vec![TrackerAction::Webhook(WebhookAction {
+                    url: "https://retrack.dev".parse()?,
+                    method: None,
+                    headers: None,
+                    formatter: Some("a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1))
+                })]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker webhook action formatter script cannot be larger than 4096 bytes.""###
+        );
+
+        // Empty server log action formatter.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                actions: Some(vec![TrackerAction::ServerLog(ServerLogAction {
+                    formatter: Some("".to_string())
+                })]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker server log action formatter script cannot be empty.""###
+        );
+
+        // Very long server log action formatter.
+        assert_debug_snapshot!(
+            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
+                actions: Some(vec![TrackerAction::ServerLog(ServerLogAction {
+                    formatter: Some("a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1))
+                })]),
+                ..Default::default()
+            }).await),
+            @r###""Tracker server log action formatter script cannot be larger than 4096 bytes.""###
         );
 
         // Too long timeout.
@@ -2891,9 +3109,10 @@ mod tests {
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
-                        TrackerAction::ServerLog,
+                        TrackerAction::ServerLog(Default::default()),
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
+                            formatter: None,
                         }),
                     ])
                     .build(),
@@ -2909,9 +3128,10 @@ mod tests {
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:2".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
-                        TrackerAction::ServerLog,
+                        TrackerAction::ServerLog(Default::default()),
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
+                            formatter: None,
                         }),
                     ])
                     .build(),
@@ -3012,9 +3232,10 @@ mod tests {
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:1".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
-                        TrackerAction::ServerLog,
+                        TrackerAction::ServerLog(Default::default()),
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
+                            formatter: None,
                         }),
                     ])
                     .build(),
@@ -3026,9 +3247,10 @@ mod tests {
                     .with_schedule("0 0 * * * *")
                     .with_tags(vec!["tag:2".to_string(), "tag:common".to_string()])
                     .with_actions(vec![
-                        TrackerAction::ServerLog,
+                        TrackerAction::ServerLog(Default::default()),
                         TrackerAction::Email(EmailAction {
                             to: vec!["dev@retrack.dev".to_string()],
+                            formatter: None,
                         }),
                     ])
                     .build(),
@@ -4099,6 +4321,7 @@ mod tests {
                                 "dev@retrack.dev".to_string(),
                                 "dev-2@retrack.dev".to_string(),
                             ],
+                            formatter: None,
                         }),
                         TrackerAction::Webhook(WebhookAction {
                             url: "https://retrack.dev".parse()?,
@@ -4107,6 +4330,7 @@ mod tests {
                                 CONTENT_TYPE,
                                 HeaderValue::from_static("text/plain"),
                             )])),
+                            formatter: None,
                         }),
                     ])
                     .build(),
@@ -4295,6 +4519,233 @@ mod tests {
                     HeaderValue::from_static("text/plain"),
                 )])),
                 body: Some(serde_json::to_vec(&json!("\"rev_2\""))?),
+            })
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_execute_tracker_actions_with_formatter(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("0 0 * * * *")
+                    .with_actions(vec![
+                        TrackerAction::Email(EmailAction {
+                            to: vec![
+                                "dev@retrack.dev".to_string(),
+                                "dev-2@retrack.dev".to_string(),
+                            ],
+                            formatter: Some(
+                                "(() => ({ content: `${context.newContent}_${context.action}` }))();".to_string(),
+                            ),
+                        }),
+                        TrackerAction::Webhook(WebhookAction {
+                            url: "https://retrack.dev".parse()?,
+                            method: None,
+                            headers: Some(HeaderMap::from_iter([(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static("text/plain"),
+                            )])),
+                            formatter: Some(
+                                "(() => ({ content: `${context.newContent}_${context.action}$` }))();".to_string(),
+                            ),
+                        }),
+                    ])
+                    .build(),
+            )
+            .await?;
+
+        let content = TrackerDataValue::new(json!("\"rev_1\""));
+        let mut server_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        let scheduled_before_or_at = OffsetDateTime::now_utc()
+            .checked_add(time::Duration::days(1))
+            .unwrap();
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        server_mock.delete();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 2);
+
+        let email_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            email_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec![
+                    "dev@retrack.dev".to_string(),
+                    "dev-2@retrack.dev".to_string(),
+                ],
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: Ok(json!("\"rev_1\"_email").to_string()),
+                }),
+            })
+        );
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(&json!("\"rev_1\"_webhook$"))?),
+            })
+        );
+
+        // Clear action tasks.
+        api.db.remove_task(email_task.id).await?;
+        api.db.remove_task(http_task.id).await?;
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        let mut server_mock = server.mock(|when, then| {
+            let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
+            scraper_request.previous_content = Some(&content);
+
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        server_mock.delete();
+
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        // Now, let's change content.
+        let new_content = TrackerDataValue::new(json!("\"rev_2\""));
+        let server_mock = server.mock(|when, then| {
+            let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
+            scraper_request.previous_content = Some(&content);
+
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(new_content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 2);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_2\""));
+
+        server_mock.assert();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 2);
+
+        let email_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            email_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec![
+                    "dev@retrack.dev".to_string(),
+                    "dev-2@retrack.dev".to_string(),
+                ],
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: Ok(json!("\"rev_2\"_email").to_string()),
+                }),
+            })
+        );
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(&json!("\"rev_2\"_webhook$"))?),
             })
         );
 
@@ -4579,7 +5030,7 @@ mod tests {
                         })
                     }),
                     tags: Some(vec!["tag".to_string()]),
-                    actions: Some(vec![TrackerAction::ServerLog]),
+                    actions: Some(vec![TrackerAction::ServerLog(Default::default())]),
                 },
             )
             .await?;
@@ -4668,7 +5119,8 @@ mod tests {
                     }),
                     tags: Some(vec!["tag_two".to_string()]),
                     actions: Some(vec![TrackerAction::Email(EmailAction {
-                        to: vec!["dev@retrack.dev".to_string()]
+                        to: vec!["dev@retrack.dev".to_string()],
+                        formatter: None,
                     })])
                 },
             )
@@ -4750,7 +5202,8 @@ mod tests {
                     }),
                     tags: Some(vec!["tag_two".to_string()]),
                     actions: Some(vec![TrackerAction::Email(EmailAction {
-                        to: vec!["dev@retrack.dev".to_string()]
+                        to: vec!["dev@retrack.dev".to_string()],
+                        formatter: None,
                     })])
                 },
             )

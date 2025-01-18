@@ -3,8 +3,8 @@ use mediatype::MediaType;
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
-        ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction, TrackerConfig,
-        TrackerTarget, WebhookAction,
+        ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker, TrackerAction,
+        TrackerConfig, TrackerTarget, WebhookAction,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -88,14 +88,18 @@ struct RawApiTargetRequest<'s> {
 enum RawTrackerAction<'s> {
     Email {
         to: Cow<'s, Vec<String>>,
+        formatter: Option<Cow<'s, str>>,
     },
     Webhook {
         url: String,
         #[serde(with = "http_serde::option::method", default)]
         method: Option<Method>,
         headers: Option<HashMap<Cow<'s, str>, Cow<'s, str>>>,
+        formatter: Option<Cow<'s, str>>,
     },
-    ServerLog,
+    ServerLog {
+        formatter: Option<Cow<'s, str>>,
+    },
 }
 
 impl TryFrom<RawTracker> for Tracker {
@@ -334,6 +338,10 @@ impl<'s> From<&'s TrackerAction> for RawTrackerAction<'s> {
         match action {
             TrackerAction::Email(config) => Self::Email {
                 to: Cow::Borrowed(config.to.as_ref()),
+                formatter: config
+                    .formatter
+                    .as_ref()
+                    .map(|formatter| Cow::Borrowed(formatter.as_ref())),
             },
             TrackerAction::Webhook(config) => Self::Webhook {
                 url: config.url.to_string(),
@@ -349,8 +357,17 @@ impl<'s> From<&'s TrackerAction> for RawTrackerAction<'s> {
                         })
                         .collect()
                 }),
+                formatter: config
+                    .formatter
+                    .as_ref()
+                    .map(|formatter| Cow::Borrowed(formatter.as_ref())),
             },
-            TrackerAction::ServerLog => Self::ServerLog,
+            TrackerAction::ServerLog(config) => Self::ServerLog {
+                formatter: config
+                    .formatter
+                    .as_ref()
+                    .map(|formatter| Cow::Borrowed(formatter.as_ref())),
+            },
         }
     }
 }
@@ -360,13 +377,15 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
 
     fn try_from(raw: RawTrackerAction) -> Result<Self, Self::Error> {
         Ok(match raw {
-            RawTrackerAction::Email { to } => TrackerAction::Email(EmailAction {
+            RawTrackerAction::Email { to, formatter } => TrackerAction::Email(EmailAction {
                 to: to.into_owned(),
+                formatter: formatter.map(Cow::into_owned),
             }),
             RawTrackerAction::Webhook {
                 url,
                 method,
                 headers,
+                formatter,
             } => TrackerAction::Webhook(WebhookAction {
                 url: url.parse()?,
                 method,
@@ -379,8 +398,13 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
                 } else {
                     None
                 },
+                formatter: formatter.map(Cow::into_owned),
             }),
-            RawTrackerAction::ServerLog => TrackerAction::ServerLog,
+            RawTrackerAction::ServerLog { formatter } => {
+                TrackerAction::ServerLog(ServerLogAction {
+                    formatter: formatter.map(Cow::into_owned),
+                })
+            }
         })
     }
 }
@@ -392,8 +416,8 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, PageTarget, TargetRequest, Tracker, TrackerAction,
-            TrackerConfig, TrackerTarget, WebhookAction,
+            ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker,
+            TrackerAction, TrackerConfig, TrackerTarget, WebhookAction,
         },
     };
     use serde_json::json;
@@ -447,8 +471,15 @@ mod tests {
                     })
                 }),
             },
-            actions: vec![TrackerAction::ServerLog, TrackerAction::Email(EmailAction {
+            actions: vec![TrackerAction::ServerLog(ServerLogAction {
+                formatter: Some(
+                    "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string(),
+                )
+            }), TrackerAction::Email(EmailAction {
                 to: vec!["dev@retrack.dev".to_string()],
+                formatter: Some(
+                    "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string(),
+                )
             }), TrackerAction::Webhook(WebhookAction {
                 url: "https://retrack.dev".parse()?,
                 method: Some(Method::GET),
@@ -458,6 +489,9 @@ mod tests {
                         .collect::<HashMap<_, _>>())
                         .try_into()?,
                 ),
+                formatter: Some(
+                    "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string(),
+                )
             })],
             job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
             ..tracker.clone()
@@ -471,7 +505,7 @@ mod tests {
                 extractor: None,
             }),
             config: TrackerConfig::default(),
-            actions: vec![TrackerAction::ServerLog],
+            actions: vec![TrackerAction::ServerLog(Default::default())],
             job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
             ..tracker.clone()
         };
@@ -497,7 +531,11 @@ mod tests {
                 extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context)) })();".to_string())
             }),
             config: TrackerConfig::default(),
-            actions: vec![TrackerAction::ServerLog],
+            actions: vec![TrackerAction::ServerLog(ServerLogAction {
+                formatter: Some(
+                    "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string(),
+                )
+            })],
             job_id: Some(uuid!("00000000-0000-0000-0000-000000000003")),
             ..tracker.clone()
         };

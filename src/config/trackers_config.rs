@@ -18,7 +18,7 @@ pub struct TrackersConfig {
     pub min_schedule_interval: Duration,
     /// Indicates whether to restrict the tracker to publicly reachable HTTP and HTTPS URLs only.
     pub restrict_to_public_urls: bool,
-    /// The maximum size of any give tracker script (configurators, extractors etc.).
+    /// The maximum size of any give tracker script (configurators, extractors, formatters etc.).
     pub max_script_size: Byte,
 }
 

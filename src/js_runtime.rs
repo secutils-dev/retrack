@@ -71,6 +71,9 @@ impl JsRuntime {
                         Script::ApiTargetExtractor(def) => {
                             JsRuntime::handle_script(&task.config, def).await;
                         }
+                        Script::ActionFormatter(def) => {
+                            JsRuntime::handle_script(&task.config, def).await;
+                        }
                         Script::Custom(def) => {
                             JsRuntime::handle_script(&task.config, def).await;
                         }
@@ -267,7 +270,8 @@ pub mod tests {
     use insta::assert_json_snapshot;
     use retrack_types::trackers::{
         ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
-        ExtractorScriptArgs, ExtractorScriptResult, TrackerDataValue,
+        ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
+        TrackerDataValue,
     };
     use serde::{Deserialize, Serialize};
     use serde_bytes::ByteBuf;
@@ -488,6 +492,64 @@ pub mod tests {
             )
             .await?;
         assert!(configurator_result.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn can_execute_action_formatter_script() -> anyhow::Result<()> {
+        let js_runtime = JsRuntime::init_platform(&JsRuntimeConfig::default())?;
+        let config = ScriptConfig {
+            max_heap_size: 10 * 1024 * 1024,
+            max_execution_time: std::time::Duration::from_secs(5),
+        };
+
+        // Supports formatter scripts.
+        let FormatterScriptResult { content } = js_runtime
+            .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
+                r#"(() => {{ return { content: { key: `${context.newContent.key}_${context.previousContent.key}_result_${context.action}` } }; }})();"#,
+                FormatterScriptArgs {
+                    action: "log",
+                    previous_content: Some(json!({ "key": "old-value" })),
+                    new_content: json!({ "key": "value" }),
+                },
+                config,
+            )
+            .await?
+            .unwrap();
+        assert_eq!(
+            content,
+            Some(json!({ "key": "value_old-value_result_log" }))
+        );
+
+        // Supports formatter scripts returning empty value.
+        let FormatterScriptResult { content } = js_runtime
+            .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
+                r#"(() => {{ return {}; }})();"#,
+                FormatterScriptArgs {
+                    action: "log",
+                    previous_content: None,
+                    new_content: json!({ "key": "value" }),
+                },
+                config,
+            )
+            .await?
+            .unwrap();
+        assert!(content.is_none());
+
+        // Supports formatter scripts that don't return anything.
+        let result = js_runtime
+            .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
+                r#"(() => {{ return; }})();"#,
+                FormatterScriptArgs {
+                    action: "log",
+                    previous_content: None,
+                    new_content: json!({ "key": "value" }),
+                },
+                config,
+            )
+            .await?;
+        assert!(result.is_none());
 
         Ok(())
     }

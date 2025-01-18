@@ -166,10 +166,11 @@ mod tests {
                 }),
             },
             tags: vec!["tag".to_string()],
-            actions: vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+            actions: vec![TrackerAction::ServerLog(Default::default()), TrackerAction::Webhook(WebhookAction {
                 url: "https://retrack.dev".parse()?,
                 method: None,
                 headers: None,
+                formatter: None,
             })],
         };
         assert_eq!(
@@ -349,10 +350,11 @@ mod tests {
                     }),
                 },
                 tags: vec!["tag".to_string()],
-                actions: vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+                actions: vec![TrackerAction::ServerLog(Default::default()), TrackerAction::Webhook(WebhookAction {
                     url: "https://retrack.dev".parse()?,
                     method: None,
                     headers: None,
+                    formatter: None,
                 })],
             }
         );

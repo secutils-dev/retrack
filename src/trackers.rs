@@ -40,7 +40,7 @@ pub mod tests {
                     }),
                     config: Default::default(),
                     tags: vec!["tag".to_string()],
-                    actions: vec![TrackerAction::ServerLog],
+                    actions: vec![TrackerAction::ServerLog(Default::default())],
                 }
             }
         }
@@ -148,7 +148,7 @@ pub mod tests {
                         job: None,
                     },
                     tags: vec![],
-                    actions: vec![TrackerAction::ServerLog],
+                    actions: vec![TrackerAction::ServerLog(Default::default())],
                     created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                     updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 },

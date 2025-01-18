@@ -236,7 +236,7 @@ mod tests {
             }),
         })
         .with_tags(vec!["tag".to_string()])
-        .with_actions(vec![TrackerAction::ServerLog, TrackerAction::Webhook(WebhookAction {
+        .with_actions(vec![TrackerAction::ServerLog(Default::default()), TrackerAction::Webhook(WebhookAction {
             url: Url::parse("https://retrack.dev/")?,
             method: Some(Method::PUT),
             headers: Some(
@@ -245,6 +245,7 @@ mod tests {
                     .collect::<HashMap<_, _>>())
                     .try_into()?,
             ),
+            formatter: Some("(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();".to_string()),
         })])
         .build();
         assert_json_snapshot!(tracker, @r###"
@@ -283,7 +284,8 @@ mod tests {
               "method": "PUT",
               "headers": {
                 "content-type": "application/json"
-              }
+              },
+              "formatter": "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();"
             }
           ],
           "createdAt": 946720800,

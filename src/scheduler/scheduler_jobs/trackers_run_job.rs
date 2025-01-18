@@ -494,7 +494,7 @@ mod tests {
                     retry_strategy: None
                 }),
             },
-            actions: vec![TrackerAction::ServerLog],
+            actions: vec![TrackerAction::ServerLog(Default::default())],
             tags: vec![],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
@@ -603,8 +603,8 @@ mod tests {
                 }),
             },
             actions: vec![
-                TrackerAction::ServerLog,
-                TrackerAction::Email(EmailAction { to: vec!["dev@retrack.dev".to_string()] })
+                TrackerAction::ServerLog(Default::default()),
+                TrackerAction::Email(EmailAction { to: vec!["dev@retrack.dev".to_string()], formatter: None }),
             ],
             tags: vec![],
             job_id: Some(trigger_job_id),
@@ -765,7 +765,7 @@ mod tests {
                 }),
             },
             tags: vec![],
-            actions: vec![TrackerAction::ServerLog],
+            actions: vec![TrackerAction::ServerLog(Default::default())],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.
             created_at: OffsetDateTime::from_unix_timestamp(
@@ -925,7 +925,7 @@ mod tests {
                     })
                 }),
             },
-            actions: vec![TrackerAction::ServerLog],
+            actions: vec![TrackerAction::ServerLog(Default::default())],
             tags: vec![],
 
             job_id: Some(trigger_job_id),
@@ -1117,8 +1117,8 @@ mod tests {
             },
             tags: vec![],
             actions: vec![
-                TrackerAction::ServerLog,
-                TrackerAction::Email(EmailAction { to: vec!["dev@retrack.dev".to_string()] })
+                TrackerAction::ServerLog(Default::default()),
+                TrackerAction::Email(EmailAction { to: vec!["dev@retrack.dev".to_string()], formatter: None }),
             ],
             job_id: Some(trigger_job_id),
             // Preserve timestamp only up to seconds.

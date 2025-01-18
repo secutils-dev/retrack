@@ -89,6 +89,7 @@ mod tests {
                     .with_tags(vec!["tag_two".to_string()])
                     .with_actions(vec![TrackerAction::Email(EmailAction {
                         to: vec!["dev@retrack.dev".to_string()],
+                        formatter: None,
                     })])
                     .build(),
             )

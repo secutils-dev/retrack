@@ -11,7 +11,10 @@ mod trackers_list_params;
 
 pub use self::{
     tracker::Tracker,
-    tracker_action::{EmailAction, TrackerAction, WebhookAction},
+    tracker_action::{
+        EmailAction, FormatterScriptArgs, FormatterScriptResult, ServerLogAction, TrackerAction,
+        WebhookAction,
+    },
     tracker_config::TrackerConfig,
     tracker_create_params::TrackerCreateParams,
     tracker_data_revision::TrackerDataRevision,
@@ -63,7 +66,7 @@ pub mod tests {
                         job: None,
                     },
                     tags: vec![],
-                    actions: vec![TrackerAction::ServerLog],
+                    actions: vec![TrackerAction::ServerLog(Default::default())],
                     created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                     updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
                 },
