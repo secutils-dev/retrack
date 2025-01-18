@@ -40,17 +40,6 @@ pub struct RawTrackerConfig<'s> {
     job: Option<RawSchedulerJobConfig<'s>>,
 }
 
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-pub struct RawTrackerConfigV1<'s> {
-    revisions: usize,
-    timeout: Option<Duration>,
-    #[serde(borrow)]
-    target: RawTrackerTarget<'s>,
-    actions: Vec<RawTrackerActionV1<'s>>,
-    job: Option<RawSchedulerJobConfig<'s>>,
-}
-
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawSchedulerJobConfig<'s>(Cow<'s, str>, Option<RawSchedulerJobRetryStrategy>);
 
@@ -113,66 +102,27 @@ enum RawTrackerAction<'s> {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
-enum RawTrackerActionV1<'s> {
-    Email {
-        to: Cow<'s, Vec<String>>,
-    },
-    Webhook {
-        url: String,
-        #[serde(with = "http_serde::option::method", default)]
-        method: Option<Method>,
-        headers: Option<HashMap<Cow<'s, str>, Cow<'s, str>>>,
-    },
-    ServerLog,
-}
-
 impl TryFrom<RawTracker> for Tracker {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTracker) -> Result<Self, Self::Error> {
-        let (config, target, actions) = match postcard::from_bytes::<RawTrackerConfig>(&raw.config)
-        {
-            Ok(raw_config) => (
-                TrackerConfig {
-                    revisions: raw_config.revisions,
-                    timeout: raw_config.timeout,
-                    job: parse_raw_scheduler_job_config(raw_config.job),
-                },
-                parse_raw_target(raw_config.target)?,
-                raw_config
-                    .actions
-                    .into_iter()
-                    .map(|action| action.try_into())
-                    .collect::<anyhow::Result<_>>()?,
-            ),
-            Err(err) => {
-                let raw_config =
-                    postcard::from_bytes::<RawTrackerConfigV1>(&raw.config).map_err(|_| err)?;
-                (
-                    TrackerConfig {
-                        revisions: raw_config.revisions,
-                        timeout: raw_config.timeout,
-                        job: parse_raw_scheduler_job_config(raw_config.job),
-                    },
-                    parse_raw_target(raw_config.target)?,
-                    raw_config
-                        .actions
-                        .into_iter()
-                        .map(|action| action.try_into())
-                        .collect::<anyhow::Result<_>>()?,
-                )
-            }
-        };
-
+        let raw_config = postcard::from_bytes::<RawTrackerConfig>(&raw.config)?;
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
             enabled: raw.enabled,
-            target,
-            actions,
+            target: parse_raw_target(raw_config.target)?,
+            actions: raw_config
+                .actions
+                .into_iter()
+                .map(|action| action.try_into())
+                .collect::<anyhow::Result<_>>()?,
             job_id: raw.job_id,
-            config,
+            config: TrackerConfig {
+                revisions: raw_config.revisions,
+                timeout: raw_config.timeout,
+                job: parse_raw_scheduler_job_config(raw_config.job),
+            },
             tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
@@ -456,38 +406,6 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
                     formatter: formatter.map(Cow::into_owned),
                 })
             }
-        })
-    }
-}
-
-impl TryFrom<RawTrackerActionV1<'_>> for TrackerAction {
-    type Error = anyhow::Error;
-
-    fn try_from(raw: RawTrackerActionV1) -> Result<Self, Self::Error> {
-        Ok(match raw {
-            RawTrackerActionV1::Email { to } => TrackerAction::Email(EmailAction {
-                to: to.into_owned(),
-                ..Default::default()
-            }),
-            RawTrackerActionV1::Webhook {
-                url,
-                method,
-                headers,
-            } => TrackerAction::Webhook(WebhookAction {
-                url: url.parse()?,
-                method,
-                headers: if let Some(headers) = headers {
-                    let mut header_map = HeaderMap::new();
-                    for (k, v) in headers {
-                        header_map.insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
-                    }
-                    Some(header_map)
-                } else {
-                    None
-                },
-                formatter: None,
-            }),
-            RawTrackerActionV1::ServerLog => TrackerAction::ServerLog(Default::default()),
         })
     }
 }
