@@ -64,6 +64,8 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
         js_runtime,
     ));
 
+    api.migrate().await?;
+
     let scheduler = Scheduler::start(api.clone()).await?;
     let state = web::Data::new(ServerState::new(api, scheduler));
     let http_server = HttpServer::new(move || {

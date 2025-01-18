@@ -40,6 +40,17 @@ pub struct RawTrackerConfig<'s> {
     job: Option<RawSchedulerJobConfig<'s>>,
 }
 
+#[serde_as]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+pub struct RawTrackerConfigV1<'s> {
+    revisions: usize,
+    timeout: Option<Duration>,
+    #[serde(borrow)]
+    target: RawTrackerTarget<'s>,
+    actions: Vec<RawTrackerActionV1<'s>>,
+    job: Option<RawSchedulerJobConfig<'s>>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawSchedulerJobConfig<'s>(Cow<'s, str>, Option<RawSchedulerJobRetryStrategy>);
 
@@ -102,113 +113,153 @@ enum RawTrackerAction<'s> {
     },
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+enum RawTrackerActionV1<'s> {
+    Email {
+        to: Cow<'s, Vec<String>>,
+    },
+    Webhook {
+        url: String,
+        #[serde(with = "http_serde::option::method", default)]
+        method: Option<Method>,
+        headers: Option<HashMap<Cow<'s, str>, Cow<'s, str>>>,
+    },
+    ServerLog,
+}
+
 impl TryFrom<RawTracker> for Tracker {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTracker) -> Result<Self, Self::Error> {
-        let raw_config = postcard::from_bytes::<RawTrackerConfig>(&raw.config)?;
-
-        let job_config =
-            if let Some(RawSchedulerJobConfig(schedule, retry_strategy)) = raw_config.job {
-                Some(SchedulerJobConfig {
-                    schedule: schedule.into_owned(),
-                    retry_strategy: retry_strategy.map(|retry_strategy| match retry_strategy {
-                        RawSchedulerJobRetryStrategy::Constant(interval, max_attempts) => {
-                            SchedulerJobRetryStrategy::Constant {
-                                interval,
-                                max_attempts,
-                            }
-                        }
-                        RawSchedulerJobRetryStrategy::Exponential(
-                            initial_interval,
-                            multiplier,
-                            max_interval,
-                            max_attempts,
-                        ) => SchedulerJobRetryStrategy::Exponential {
-                            initial_interval,
-                            multiplier,
-                            max_interval,
-                            max_attempts,
-                        },
-                        RawSchedulerJobRetryStrategy::Linear(
-                            initial_interval,
-                            increment,
-                            max_interval,
-                            max_attempts,
-                        ) => SchedulerJobRetryStrategy::Linear {
-                            initial_interval,
-                            increment,
-                            max_interval,
-                            max_attempts,
-                        },
-                    }),
-                })
-            } else {
-                None
-            };
+        let (config, target, actions) = match postcard::from_bytes::<RawTrackerConfig>(&raw.config)
+        {
+            Ok(raw_config) => (
+                TrackerConfig {
+                    revisions: raw_config.revisions,
+                    timeout: raw_config.timeout,
+                    job: parse_raw_scheduler_job_config(raw_config.job),
+                },
+                parse_raw_target(raw_config.target)?,
+                raw_config
+                    .actions
+                    .into_iter()
+                    .map(|action| action.try_into())
+                    .collect::<anyhow::Result<_>>()?,
+            ),
+            Err(err) => {
+                let raw_config =
+                    postcard::from_bytes::<RawTrackerConfigV1>(&raw.config).map_err(|_| err)?;
+                (
+                    TrackerConfig {
+                        revisions: raw_config.revisions,
+                        timeout: raw_config.timeout,
+                        job: parse_raw_scheduler_job_config(raw_config.job),
+                    },
+                    parse_raw_target(raw_config.target)?,
+                    raw_config
+                        .actions
+                        .into_iter()
+                        .map(|action| action.try_into())
+                        .collect::<anyhow::Result<_>>()?,
+                )
+            }
+        };
 
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
             enabled: raw.enabled,
-            target: match raw_config.target {
-                RawTrackerTarget::Page(target) => TrackerTarget::Page(PageTarget {
-                    extractor: target.extractor.into_owned(),
-                    params: target
-                        .extractor_params
-                        .map(|body| serde_json::from_slice(&body))
-                        .transpose()?,
-                    user_agent: target.user_agent.map(Cow::into_owned),
-                    ignore_https_errors: target.ignore_https_errors.unwrap_or_default(),
-                }),
-                RawTrackerTarget::Api(target) => TrackerTarget::Api(ApiTarget {
-                    requests: target
-                        .requests
-                        .into_iter()
-                        .map(|request| {
-                            Ok(TargetRequest {
-                                url: request.url.into_owned().parse()?,
-                                method: request.method,
-                                headers: if let Some(headers) = request.headers {
-                                    let mut header_map = HeaderMap::new();
-                                    for (k, v) in headers {
-                                        header_map.insert(
-                                            HeaderName::from_str(&k)?,
-                                            HeaderValue::from_str(&v)?,
-                                        );
-                                    }
-                                    Some(header_map)
-                                } else {
-                                    None
-                                },
-                                body: request
-                                    .body
-                                    .map(|body| serde_json::from_slice(&body))
-                                    .transpose()?,
-                                media_type: request.media_type.map(|media_type| media_type.into()),
-                            })
-                        })
-                        .collect::<anyhow::Result<Vec<_>>>()?,
-                    configurator: target.configurator.map(Cow::into_owned),
-                    extractor: target.extractor.map(Cow::into_owned),
-                }),
-            },
-            actions: raw_config
-                .actions
-                .into_iter()
-                .map(|action| action.try_into())
-                .collect::<anyhow::Result<_>>()?,
+            target,
+            actions,
             job_id: raw.job_id,
-            config: TrackerConfig {
-                revisions: raw_config.revisions,
-                timeout: raw_config.timeout,
-                job: job_config,
-            },
+            config,
             tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
         })
     }
+}
+
+fn parse_raw_scheduler_job_config(
+    raw: Option<RawSchedulerJobConfig>,
+) -> Option<SchedulerJobConfig> {
+    let RawSchedulerJobConfig(schedule, retry_strategy) = raw?;
+    Some(SchedulerJobConfig {
+        schedule: schedule.into_owned(),
+        retry_strategy: retry_strategy.map(|retry_strategy| match retry_strategy {
+            RawSchedulerJobRetryStrategy::Constant(interval, max_attempts) => {
+                SchedulerJobRetryStrategy::Constant {
+                    interval,
+                    max_attempts,
+                }
+            }
+            RawSchedulerJobRetryStrategy::Exponential(
+                initial_interval,
+                multiplier,
+                max_interval,
+                max_attempts,
+            ) => SchedulerJobRetryStrategy::Exponential {
+                initial_interval,
+                multiplier,
+                max_interval,
+                max_attempts,
+            },
+            RawSchedulerJobRetryStrategy::Linear(
+                initial_interval,
+                increment,
+                max_interval,
+                max_attempts,
+            ) => SchedulerJobRetryStrategy::Linear {
+                initial_interval,
+                increment,
+                max_interval,
+                max_attempts,
+            },
+        }),
+    })
+}
+
+fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<TrackerTarget> {
+    Ok(match raw {
+        RawTrackerTarget::Page(target) => TrackerTarget::Page(PageTarget {
+            extractor: target.extractor.into_owned(),
+            params: target
+                .extractor_params
+                .map(|body| serde_json::from_slice(&body))
+                .transpose()?,
+            user_agent: target.user_agent.map(Cow::into_owned),
+            ignore_https_errors: target.ignore_https_errors.unwrap_or_default(),
+        }),
+        RawTrackerTarget::Api(target) => TrackerTarget::Api(ApiTarget {
+            requests: target
+                .requests
+                .into_iter()
+                .map(|request| {
+                    Ok(TargetRequest {
+                        url: request.url.into_owned().parse()?,
+                        method: request.method,
+                        headers: if let Some(headers) = request.headers {
+                            let mut header_map = HeaderMap::new();
+                            for (k, v) in headers {
+                                header_map
+                                    .insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
+                            }
+                            Some(header_map)
+                        } else {
+                            None
+                        },
+                        body: request
+                            .body
+                            .map(|body| serde_json::from_slice(&body))
+                            .transpose()?,
+                        media_type: request.media_type.map(|media_type| media_type.into()),
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?,
+            configurator: target.configurator.map(Cow::into_owned),
+            extractor: target.extractor.map(Cow::into_owned),
+        }),
+    })
 }
 
 impl TryFrom<&Tracker> for RawTracker {
@@ -405,6 +456,38 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
                     formatter: formatter.map(Cow::into_owned),
                 })
             }
+        })
+    }
+}
+
+impl TryFrom<RawTrackerActionV1<'_>> for TrackerAction {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawTrackerActionV1) -> Result<Self, Self::Error> {
+        Ok(match raw {
+            RawTrackerActionV1::Email { to } => TrackerAction::Email(EmailAction {
+                to: to.into_owned(),
+                ..Default::default()
+            }),
+            RawTrackerActionV1::Webhook {
+                url,
+                method,
+                headers,
+            } => TrackerAction::Webhook(WebhookAction {
+                url: url.parse()?,
+                method,
+                headers: if let Some(headers) = headers {
+                    let mut header_map = HeaderMap::new();
+                    for (k, v) in headers {
+                        header_map.insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
+                    }
+                    Some(header_map)
+                } else {
+                    None
+                },
+                formatter: None,
+            }),
+            RawTrackerActionV1::ServerLog => TrackerAction::ServerLog(Default::default()),
         })
     }
 }

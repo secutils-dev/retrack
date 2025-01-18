@@ -5,6 +5,7 @@ use crate::{
     network::{DnsResolver, EmailTransport, Network},
 };
 use handlebars::Handlebars;
+use tracing::info;
 
 pub struct Api<DR: DnsResolver, ET: EmailTransport> {
     pub db: Database,
@@ -30,6 +31,24 @@ impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
             templates,
             js_runtime,
         }
+    }
+
+    /// Migrates trackers to the latest API interface version, if needed. The migration is as simple
+    /// as loading all trackers from the database using the latest or previous API interface
+    /// versions and saving the tracker to the database using the latest API interface version.
+    pub async fn migrate(&self) -> anyhow::Result<()> {
+        let trackers = self.db.trackers().get_trackers(Default::default()).await?;
+        info!(
+            "Found {} trackers that will be attempted to migrate to new API interface version.",
+            trackers.len()
+        );
+
+        for tracker in trackers {
+            self.db.trackers().update_tracker(&tracker).await?;
+        }
+
+        info!("Migration completed successfully.");
+        Ok(())
     }
 }
 
