@@ -206,10 +206,10 @@ impl JsRuntime {
                     ScriptExecutionStatus::ExecutionCompleted as usize,
                     Ordering::Relaxed,
                 );
-                anyhow!(err).context("Script was running.")
+                anyhow!(err)
             }
             ScriptExecutionStatus::ExecutionCompleted => {
-                anyhow!(err).context("Script execution completed.")
+                anyhow!(err)
             }
         };
 

@@ -37,6 +37,7 @@ mod tests {
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
     use sqlx::PgPool;
+    use uuid::uuid;
 
     #[test]
     fn serialization() -> anyhow::Result<()> {
@@ -46,13 +47,15 @@ mod tests {
         );
 
         assert_eq!(
-            postcard::to_stdvec(&EmailContent::Template(EmailTemplate::TrackerChanges {
+            postcard::to_stdvec(&EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                tracker_id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_name: "tracker_name_1".to_string(),
-                content: Ok("email content".to_string())
+                result: Ok("email content".to_string())
             }))?,
             vec![
-                1, 0, 14, 116, 114, 97, 99, 107, 101, 114, 95, 110, 97, 109, 101, 95, 49, 0, 13,
-                101, 109, 97, 105, 108, 32, 99, 111, 110, 116, 101, 110, 116
+                1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 14, 116, 114, 97, 99,
+                107, 101, 114, 95, 110, 97, 109, 101, 95, 49, 0, 13, 101, 109, 97, 105, 108, 32,
+                99, 111, 110, 116, 101, 110, 116
             ]
         );
         Ok(())
@@ -67,12 +70,14 @@ mod tests {
 
         assert_eq!(
             postcard::from_bytes::<EmailContent>(&[
-                1, 0, 14, 116, 114, 97, 99, 107, 101, 114, 95, 110, 97, 109, 101, 95, 49, 0, 13,
-                101, 109, 97, 105, 108, 32, 99, 111, 110, 116, 101, 110, 116
+                1, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 14, 116, 114, 97, 99,
+                107, 101, 114, 95, 110, 97, 109, 101, 95, 49, 0, 13, 101, 109, 97, 105, 108, 32,
+                99, 111, 110, 116, 101, 110, 116
             ])?,
-            EmailContent::Template(EmailTemplate::TrackerChanges {
+            EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                tracker_id: uuid!("00000000-0000-0000-0000-000000000001"),
                 tracker_name: "tracker_name_1".to_string(),
-                content: Ok("email content".to_string())
+                result: Ok("email content".to_string())
             })
         );
 
@@ -134,9 +139,10 @@ mod tests {
     #[sqlx::test]
     async fn convert_template_content_to_email(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
-        let mut template = EmailContent::Template(EmailTemplate::TrackerChanges {
+        let mut template = EmailContent::Template(EmailTemplate::TrackerCheckResult {
+            tracker_id: uuid!("00000000-0000-0000-0000-000000000001"),
             tracker_name: "tracker".to_string(),
-            content: Ok("content".to_string()),
+            result: Ok("content".to_string()),
         })
         .into_email(&api)
         .await?;
@@ -152,9 +158,9 @@ mod tests {
         assert_debug_snapshot!(template, @r###"
         Email {
             subject: "[Retrack] Change detected: \"tracker\"",
-            text: "\"tracker\" tracker detected content changes. Visit http://localhost:1234/ws/web_scraping__content to learn more.",
+            text: "\"tracker\" tracker detected content changes.",
             html: Some(
-                "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <title>\"tracker\" tracker detected changes</title>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <style>\n        body {\n            font-family: Arial, sans-serif;\n            background-color: #f1f1f1;\n            margin: 0;\n            padding: 0;\n        }\n    \n        .container {\n            max-width: 600px;\n            margin: 0 auto;\n            background-color: #fff;\n            padding: 20px;\n            border-radius: 5px;\n            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);\n        }\n    \n        h1 {\n            font-size: 24px;\n            margin-top: 0;\n        }\n    \n        p {\n            font-size: 16px;\n            line-height: 1.5;\n            margin-bottom: 20px;\n        }\n    \n        .navigate-link {\n            display: block;\n            width: 250px;\n            margin: auto;\n            padding: 10px 20px;\n            text-align: center;\n            text-decoration: none;\n            color: #5e1d3f;\n            background-color: #fed047;\n            border-radius: 5px;\n            font-weight: bold;\n        }\n    </style>\n</head>\n<body>\n<div class=\"container\">\n    <h1>\"tracker\" tracker detected changes</h1>\n    <p>Current content: content</p>\n    <p>To learn more, visit the <b>Content trackers</b> page:</p>\n    <a class=\"navigate-link\" href=\"http://localhost:1234/ws/web_scraping__content\">Web Scraping → Content trackers</a>\n    <p>If the button above doesn't work, you can navigate to the following URL directly: </p>\n    <p>http://localhost:1234/ws/web_scraping__content</p>\n    <a href=\"http://localhost:1234/\"><img src=\"cid:retrack-logo\" alt=\"Retrack logo\" width=\"64\" height=\"16\"/></a>\n</div>\n</body>\n</html>\n",
+                "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <title>\"tracker\" tracker detected changes</title>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <style>\n        body {\n            font-family: Arial, sans-serif;\n            background-color: #f1f1f1;\n            margin: 0;\n            padding: 0;\n        }\n    \n        .container {\n            max-width: 600px;\n            margin: 0 auto;\n            background-color: #fff;\n            padding: 20px;\n            border-radius: 5px;\n            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);\n        }\n    \n        h1 {\n            font-size: 24px;\n            margin-top: 0;\n        }\n    \n        p {\n            font-size: 16px;\n            line-height: 1.5;\n            margin-bottom: 20px;\n        }\n    \n        .navigate-link {\n            display: block;\n            width: 250px;\n            margin: auto;\n            padding: 10px 20px;\n            text-align: center;\n            text-decoration: none;\n            color: #5e1d3f;\n            background-color: #fed047;\n            border-radius: 5px;\n            font-weight: bold;\n        }\n    </style>\n</head>\n<body>\n<div class=\"container\">\n    <h1>\"tracker\" tracker detected changes</h1>\n    <p>Tracker ID: 00000000-0000-0000-0000-000000000001</p>\n    <p>Current content: content</p>\n    <a href=\"http://localhost:1234/\"><img src=\"cid:retrack-logo\" alt=\"Retrack logo\" width=\"64\" height=\"16\"/></a>\n</div>\n</body>\n</html>\n",
             ),
             attachments: Some(
                 [

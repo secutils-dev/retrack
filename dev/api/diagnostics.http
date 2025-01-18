@@ -71,7 +71,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "enabled": true
+  "enabled": false
 }
 
 ### Delete tracker

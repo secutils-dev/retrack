@@ -230,9 +230,10 @@ impl TrackersRunJob {
 
         let email_task = TaskType::Email(EmailTaskType {
             to: vec![catch_all_recipient.recipient.clone()],
-            content: EmailContent::Template(EmailTemplate::TrackerChanges {
+            content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                tracker_id: tracker.id,
                 tracker_name: tracker.name.clone(),
-                content: Err(error
+                result: Err(error
                     .downcast::<RetrackError>()
                     .map(|err| format!("{err}"))
                     .unwrap_or_else(|_| "Unknown error".to_string())),
@@ -584,7 +585,7 @@ mod tests {
             .add(TrackersTriggerJob::create(api.clone(), tracker_schedule.clone()).await?)
             .await?;
         let tracker = Tracker {
-            id: Uuid::now_v7(),
+            id: uuid!("01947145-0292-7be3-a960-2af512f41a8e"),
             name: "tracker-one".to_string(),
             enabled: true,
             target: TrackerTarget::Page(PageTarget {
@@ -690,9 +691,10 @@ mod tests {
                         "dev@retrack.dev",
                     ],
                     content: Template(
-                        TrackerChanges {
+                        TrackerCheckResult {
+                            tracker_id: 01947145-0292-7be3-a960-2af512f41a8e,
                             tracker_name: "tracker-one",
-                            content: Ok(
+                            result: Ok(
                                 "\"other-content\"",
                             ),
                         },
@@ -745,7 +747,7 @@ mod tests {
             .add(TrackersTriggerJob::create(api.clone(), tracker_schedule.clone()).await?)
             .await?;
         let tracker = Tracker {
-            id: Uuid::now_v7(),
+            id: uuid!("01947145-027d-7042-94a3-0f2169d21223"),
             name: "tracker-one".to_string(),
             enabled: true,
             target: TrackerTarget::Page(PageTarget {
@@ -848,9 +850,10 @@ mod tests {
                         "dev@retrack.dev",
                     ],
                     content: Template(
-                        TrackerChanges {
+                        TrackerCheckResult {
+                            tracker_id: 01947145-027d-7042-94a3-0f2169d21223,
                             tracker_name: "tracker-one",
-                            content: Err(
+                            result: Err(
                                 "some client-error",
                             ),
                         },
@@ -902,7 +905,7 @@ mod tests {
             .add(TrackersTriggerJob::create(api.clone(), tracker_schedule.clone()).await?)
             .await?;
         let tracker = Tracker {
-            id: Uuid::now_v7(),
+            id: uuid!("01947145-0263-73f0-a0b9-c50941f2726f"),
             name: "tracker-one".to_string(),
             enabled: true,
             target: TrackerTarget::Page(PageTarget {
@@ -1042,9 +1045,10 @@ mod tests {
                         "dev@retrack.dev",
                     ],
                     content: Template(
-                        TrackerChanges {
+                        TrackerCheckResult {
+                            tracker_id: 01947145-0263-73f0-a0b9-c50941f2726f,
                             tracker_name: "tracker-one",
-                            content: Err(
+                            result: Err(
                                 "some client-error",
                             ),
                         },
@@ -1091,7 +1095,7 @@ mod tests {
             .add(TrackersTriggerJob::create(api.clone(), tracker_schedule.clone()).await?)
             .await?;
         let tracker = Tracker {
-            id: Uuid::now_v7(),
+            id: uuid!("01947145-0263-73f0-a0b9-c50941f2726f"),
             name: "tracker-one".to_string(),
             enabled: true,
             target: TrackerTarget::Page(PageTarget {
@@ -1254,9 +1258,10 @@ mod tests {
                         "dev@retrack.dev",
                     ],
                     content: Template(
-                        TrackerChanges {
+                        TrackerCheckResult {
+                            tracker_id: 01947145-0263-73f0-a0b9-c50941f2726f,
                             tracker_name: "tracker-one",
-                            content: Ok(
+                            result: Ok(
                                 "\"other-content\"",
                             ),
                         },

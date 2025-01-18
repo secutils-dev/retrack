@@ -381,9 +381,10 @@ where
                     .schedule_task(
                         TaskType::Email(EmailTaskType {
                             to: action.to.clone(),
-                            content: EmailContent::Template(EmailTemplate::TrackerChanges {
+                            content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                                tracker_id: tracker.id,
                                 tracker_name: tracker.name.clone(),
-                                content: Ok(latest_value.to_string()),
+                                result: Ok(latest_value.to_string()),
                             }),
                         }),
                         Database::utc_now()?,
@@ -854,7 +855,8 @@ where
                         },
                     )
                     .await
-                    .context("Failed to execute \"configurator\" script.")?;
+                    .context("Failed to execute \"configurator\" script.")
+                    .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
                 match result {
                     Some(ConfiguratorScriptResult::Requests(configurator_requests)) => {
                         // If the configurator script didn't return any request overrides, use the default requests.
@@ -980,7 +982,8 @@ where
                     },
                 )
                 .await
-                .context("Failed to execute \"extractor\" script.")?
+                .context("Failed to execute \"extractor\" script.")
+                .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?
                 .unwrap_or_default();
             result.body
         } else {
@@ -4163,9 +4166,10 @@ mod tests {
                     "dev@retrack.dev".to_string(),
                     "dev-2@retrack.dev".to_string(),
                 ],
-                content: EmailContent::Template(EmailTemplate::TrackerChanges {
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
                     tracker_name: tracker.name.clone(),
-                    content: Ok(json!("\"rev_1\"").to_string()),
+                    result: Ok(json!("\"rev_1\"").to_string()),
                 }),
             })
         );
@@ -4272,9 +4276,10 @@ mod tests {
                     "dev@retrack.dev".to_string(),
                     "dev-2@retrack.dev".to_string(),
                 ],
-                content: EmailContent::Template(EmailTemplate::TrackerChanges {
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
                     tracker_name: tracker.name.clone(),
-                    content: Ok(json!("\"rev_2\"").to_string()),
+                    result: Ok(json!("\"rev_2\"").to_string()),
                 }),
             })
         );
