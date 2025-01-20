@@ -1,17 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>"{{tracker_name}}" tracker detected changes</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    {{> email_styles}}
+  <title>"{{tracker_name}}" tracker detected changes</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {{> email_styles}}
 </head>
 <body>
 <div class="container">
-    <h1>"{{tracker_name}}" tracker detected changes</h1>
-    <p>Tracker ID: {{tracker_id}}</p>
-    <p>Current content: {{content}}</p>
-    <a href="{{home_link}}"><img src="cid:retrack-logo" alt="Retrack logo" width="64" height="16"/></a>
+  <p>Retrack tracker detected the change:</p>
+  <hr />
+  <p><b>Tracker:</b> {{tracker_name}} <small><i>{{tracker_id}}</i></small></p>
+  <hr />
+  <p>{{{content}}}</p>
+  <hr />
+  <a href="{{home_link}}"><img src="cid:retrack-logo" alt="Retrack logo" width="64" height="16"/></a>
 </div>
 </body>
 </html>

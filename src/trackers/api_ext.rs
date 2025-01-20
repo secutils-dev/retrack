@@ -433,7 +433,12 @@ where
                             content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                                 tracker_id: tracker.id,
                                 tracker_name: tracker.name.clone(),
-                                result: Ok(action_payload.to_string()),
+                                // If the payload is a JSON string, remove quotes, otherwise use
+                                // JSON as is.
+                                result: Ok(action_payload
+                                    .as_str()
+                                    .map(|value| value.to_owned())
+                                    .unwrap_or_else(|| action_payload.to_string())),
                             }),
                         }),
                         Database::utc_now()?,
@@ -4393,7 +4398,7 @@ mod tests {
                 content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name.clone(),
-                    result: Ok(json!("\"rev_1\"").to_string()),
+                    result: Ok("\"rev_1\"".to_string()),
                 }),
             })
         );
@@ -4503,7 +4508,7 @@ mod tests {
                 content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name.clone(),
-                    result: Ok(json!("\"rev_2\"").to_string()),
+                    result: Ok("\"rev_2\"".to_string()),
                 }),
             })
         );
@@ -4620,7 +4625,7 @@ mod tests {
                 content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name.clone(),
-                    result: Ok(json!("\"rev_1\"_email").to_string()),
+                    result: Ok("\"rev_1\"_email".to_string()),
                 }),
             })
         );
@@ -4730,7 +4735,7 @@ mod tests {
                 content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name.clone(),
-                    result: Ok(json!("\"rev_2\"_email").to_string()),
+                    result: Ok("\"rev_2\"_email".to_string()),
                 }),
             })
         );

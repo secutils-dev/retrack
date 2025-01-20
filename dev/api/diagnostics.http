@@ -1,4 +1,4 @@
-@tracker = 01947bb3-3424-7df3-b2c9-30798b255c0a
+@tracker = 01947bc9-7f84-7b91-87d0-cf16caf1e0a0
 @tag = @debug
 
 ### Get trackers by tags
@@ -66,6 +66,10 @@ Accept: application/json
   "actions": [{
     "type": "log",
     "formatter": "{{formatter}}"
+  }, {
+    "type": "email",
+    "to": ["oxycommail@gmail.com"],
+    "formatter": "{{formatter}}"
   }],
   "config": {
     "revisions": 10,
@@ -87,4 +91,4 @@ Accept: application/json
 }
 
 ### Delete tracker
-DELETE {{host}}/api/trackers/{{tracker}}
+DELETE {{host}}/api/trackers?tag={{tag}}

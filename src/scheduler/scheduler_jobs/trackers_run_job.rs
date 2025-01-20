@@ -695,7 +695,7 @@ mod tests {
                             tracker_id: 01947145-0292-7be3-a960-2af512f41a8e,
                             tracker_name: "tracker-one",
                             result: Ok(
-                                "\"other-content\"",
+                                "other-content",
                             ),
                         },
                     ),
@@ -1262,7 +1262,7 @@ mod tests {
                             tracker_id: 01947145-0263-73f0-a0b9-c50941f2726f,
                             tracker_name: "tracker-one",
                             result: Ok(
-                                "\"other-content\"",
+                                "other-content",
                             ),
                         },
                     ),
