@@ -551,10 +551,9 @@ where
                 Err(err) => {
                     bail!(RetrackError::client_with_root_cause(
                         anyhow!(
-                            "Failed to parse schedule `{}`: {err:?}",
+                            "Tracker schedule must be a valid cron expression, but the provided schedule ({}) cannot be parsed: {err}",
                             job_config.schedule
                         )
-                        .context("Tracker schedule must be a valid cron expression.")
                     ));
                 }
             };
@@ -1691,12 +1690,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###"
-        Error {
-            context: "Tracker schedule must be a valid cron expression.",
-            source: "Failed to parse schedule `-`: Invalid pattern: Pattern must consist of five or six fields (minute, hour, day, month, day of week, and optional second).",
-        }
-        "###
+            @r###""Tracker schedule must be a valid cron expression, but the provided schedule (-) cannot be parsed: Invalid pattern: Pattern must consist of five or six fields (minute, hour, day, month, day of week, and optional second).""###
         );
 
         // Invalid schedule interval.
@@ -2636,12 +2630,7 @@ mod tests {
                 }),
                 ..Default::default()
             }).await),
-            @r###"
-        Error {
-            context: "Tracker schedule must be a valid cron expression.",
-            source: "Failed to parse schedule `-`: Invalid pattern: Pattern must consist of five or six fields (minute, hour, day, month, day of week, and optional second).",
-        }
-        "###
+            @r###""Tracker schedule must be a valid cron expression, but the provided schedule (-) cannot be parsed: Invalid pattern: Pattern must consist of five or six fields (minute, hour, day, month, day of week, and optional second).""###
         );
 
         // Invalid schedule interval.
