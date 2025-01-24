@@ -85,14 +85,14 @@ mod tests {
         web_scraper_url = 'http://localhost:7272/'
 
         [scheduler]
-        trackers_schedule = '0/10 * * * * *'
-        trackers_run = '0/10 * * * * *'
         tasks_run = '0/30 * * * * *'
+        trackers_schedule = '0/10 * * * * *'
 
         [trackers]
         max_revisions = 30
         max_timeout = 300000
         min_schedule_interval = 10000
+        min_retry_interval = 60000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
 
@@ -140,6 +140,7 @@ mod tests {
         max_revisions = 11
         max_timeout = 300_000
         min_schedule_interval = 10_000
+        min_retry_interval = 60_000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
     "#,
@@ -201,9 +202,8 @@ mod tests {
                 },
             },
             scheduler: SchedulerJobsConfig {
-                trackers_schedule: "0 * * * * * *",
-                trackers_run: "0 * * * * * *",
                 tasks_run: "0/30 * * * * * *",
+                trackers_schedule: "0 * * * * * *",
             },
             trackers: TrackersConfig {
                 max_revisions: 11,
@@ -214,6 +214,7 @@ mod tests {
                     },
                 ),
                 min_schedule_interval: 10s,
+                min_retry_interval: 60s,
                 restrict_to_public_urls: true,
                 max_script_size: Byte(
                     4096,

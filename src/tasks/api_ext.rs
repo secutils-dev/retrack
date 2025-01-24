@@ -62,10 +62,11 @@ where
         while let Some(task_id) = pending_tasks_ids.next().await {
             if let Some(task) = self.api.db.get_task(task_id?).await? {
                 let task_id = task.id;
+                let task_type = task.task_type.type_tag();
                 if let Err(err) = self.execute_task(task).await {
-                    error!(task.id = %task_id, "Failed to execute task: {err:?}");
+                    error!(task.id = %task_id, task.task_type = task_type, "Failed to execute task: {err:?}");
                 } else {
-                    debug!(task.id = %task_id, "Successfully executed task.");
+                    debug!(task.id = %task_id, task.task_type = task_type, "Successfully executed task.");
                     executed_tasks += 1;
                     self.api.db.remove_task(task_id).await?;
                 }

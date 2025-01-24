@@ -1,4 +1,4 @@
-@tracker = 01947bc9-7f84-7b91-87d0-cf16caf1e0a0
+@tracker = 019490d5-2bf5-7b61-bfe6-dda9b0f0e17d
 @tag = @debug
 
 ### Get trackers by tags
@@ -66,16 +66,49 @@ Accept: application/json
   "actions": [{
     "type": "log",
     "formatter": "{{formatter}}"
-  }, {
-    "type": "email",
-    "to": ["oxycommail@gmail.com"],
-    "formatter": "{{formatter}}"
   }],
   "config": {
     "revisions": 10,
     "timeout": 300000,
     "job": {
       "schedule": "0 */1 * * * *"
+    }
+  },
+  "tags": ["{{tag}}"]
+}
+
+### Create tracker (test schedule)
+< {%
+  const configurator = `
+    (async () => {
+      await (new Promise((resolve) => Deno.core.queueUserTimer(Deno.core.getTimerDepth() + 1, false, 20000, resolve)));
+      return { response: { body: Deno.core.encode(JSON.stringify({ timestamp: Date.now() })) } };
+    })();
+  `;
+  request.variables.set("configurator", configurator.replaceAll('\n', '').trim());
+%}
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[@debug] Schedule tester",
+  "target": {
+    "type": "api",
+    "requests": [{ "url": "https://retrack.dev" }],
+    "configurator": "{{configurator}}"
+  },
+  "actions": [{ "type": "log" }],
+  "config": {
+    "revisions": 10,
+    "timeout": 300000,
+    "job": {
+      "schedule": "*/10 * * * * *",
+      "retryStrategy": {
+        "type": "constant",
+        "interval": 60000,
+        "maxAttempts": 3
+      }
     }
   },
   "tags": ["{{tag}}"]

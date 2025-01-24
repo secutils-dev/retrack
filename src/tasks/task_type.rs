@@ -10,6 +10,16 @@ pub enum TaskType {
     Http(HttpTaskType),
 }
 
+impl TaskType {
+    /// Returns the type tag of the task.
+    pub fn type_tag(&self) -> &'static str {
+        match self {
+            TaskType::Email(_) => "email",
+            TaskType::Http(_) => "http",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::TaskType;
@@ -90,5 +100,33 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn can_return_type_tag() {
+        assert_eq!(
+            TaskType::Email(EmailTaskType {
+                to: vec!["two@retrack.dev".to_string()],
+                content: EmailContent::Custom(Email::text(
+                    "subject".to_string(),
+                    "some text message".to_string()
+                )),
+            })
+            .type_tag(),
+            "email"
+        );
+        assert_eq!(
+            TaskType::Http(HttpTaskType {
+                method: Method::PUT,
+                url: "https://retrack.dev/some-path".parse().unwrap(),
+                headers: Some(HeaderMap::from_iter([(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain")
+                )])),
+                body: Some(vec![1, 2, 3]),
+            })
+            .type_tag(),
+            "http"
+        );
     }
 }

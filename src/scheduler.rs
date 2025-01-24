@@ -4,7 +4,6 @@ mod database_ext;
 mod job_ext;
 mod scheduler_job;
 mod scheduler_job_metadata;
-mod scheduler_job_retry_state;
 mod scheduler_jobs;
 
 use anyhow::anyhow;
@@ -19,14 +18,11 @@ use tracing::{debug, error, warn};
 
 pub use self::{
     cron_ext::CronExt, scheduler_job::SchedulerJob, scheduler_job_metadata::SchedulerJobMetadata,
-    scheduler_job_retry_state::SchedulerJobRetryState,
 };
 use crate::{
     api::Api,
     network::{DnsResolver, EmailTransport, EmailTransportError},
-    scheduler::scheduler_jobs::{
-        TasksRunJob, TrackersRunJob, TrackersScheduleJob, TrackersTriggerJob,
-    },
+    scheduler::scheduler_jobs::{TasksRunJob, TrackersRunJob, TrackersScheduleJob},
     server::SchedulerStatus,
 };
 
@@ -94,21 +90,14 @@ where
         if !resumed_unique_jobs.contains(&SchedulerJob::TrackersSchedule) {
             scheduler
                 .inner_scheduler
-                .add(TrackersScheduleJob::create(scheduler.api.clone()).await?)
-                .await?;
-        }
-
-        if !resumed_unique_jobs.contains(&SchedulerJob::TrackersRun) {
-            scheduler
-                .inner_scheduler
-                .add(TrackersRunJob::create(scheduler.api.clone()).await?)
+                .add(TrackersScheduleJob::create(scheduler.api.clone())?)
                 .await?;
         }
 
         if !resumed_unique_jobs.contains(&SchedulerJob::TasksRun) {
             scheduler
                 .inner_scheduler
-                .add(TasksRunJob::create(scheduler.api.clone()).await?)
+                .add(TasksRunJob::create(scheduler.api.clone())?)
                 .await?;
         }
 
@@ -157,17 +146,12 @@ where
             // First try to resume the job, and if it's not possible, the job will be removed and
             // re-scheduled at a later step if needed.
             let job = match &job_meta.job_type {
-                SchedulerJob::TrackersTrigger => {
-                    TrackersTriggerJob::try_resume(self.api.clone(), job_data).await?
-                }
+                SchedulerJob::TasksRun => TasksRunJob::try_resume(self.api.clone(), job_data)?,
                 SchedulerJob::TrackersSchedule => {
-                    TrackersScheduleJob::try_resume(self.api.clone(), job_data).await?
+                    TrackersScheduleJob::try_resume(self.api.clone(), job_data)?
                 }
                 SchedulerJob::TrackersRun => {
                     TrackersRunJob::try_resume(self.api.clone(), job_data).await?
-                }
-                SchedulerJob::TasksRun => {
-                    TasksRunJob::try_resume(self.api.clone(), job_data).await?
                 }
             };
 
@@ -299,7 +283,7 @@ pub mod tests {
     ) -> RawSchedulerJobStoredData {
         RawSchedulerJobStoredData {
             id: job_id,
-            job_type: 3,
+            job_type: 0,
             count: Some(0),
             last_tick: None,
             next_tick: Some(12),
@@ -308,7 +292,7 @@ pub mod tests {
             schedule: Some(schedule.into()),
             repeating: None,
             last_updated: None,
-            extra: Some(SchedulerJobMetadata::new(job_type).try_into().unwrap()),
+            extra: Some(Vec::try_from(&SchedulerJobMetadata::new(job_type)).unwrap()),
             time_offset_seconds: Some(0),
             repeated_every: None,
         }
@@ -319,7 +303,7 @@ pub mod tests {
         let mock_config = mock_scheduler_config(&pool).await?;
         let api = Arc::new(mock_api_with_config(pool, mock_config).await?);
 
-        let trackers_trigger_job_id = uuid!("00000000-0000-0000-0000-000000000001");
+        let trackers_run_job_id = uuid!("00000000-0000-0000-0000-000000000001");
         let trackers_schedule_job_id = uuid!("00000000-0000-0000-0000-000000000002");
         let tasks_run_job_id = uuid!("00000000-0000-0000-0000-000000000003");
 
@@ -333,15 +317,15 @@ pub mod tests {
             )
             .await?;
         api.trackers()
-            .update_tracker_job(tracker.id, Some(trackers_trigger_job_id))
+            .set_tracker_job(tracker.id, trackers_run_job_id)
             .await?;
 
-        // Add job registration.
+        // Add job registrations.
         mock_upsert_scheduler_job(
             &api.db,
             &mock_scheduler_job(
-                trackers_trigger_job_id,
-                SchedulerJob::TrackersTrigger,
+                trackers_run_job_id,
+                SchedulerJob::TrackersRun,
                 "1 2 3 4 5 6",
             ),
         )
@@ -357,24 +341,21 @@ pub mod tests {
         .await?;
         mock_upsert_scheduler_job(
             &api.db,
-            &mock_scheduler_job(tasks_run_job_id, SchedulerJob::TasksRun, "0 * 2 * * *"),
+            &mock_scheduler_job(tasks_run_job_id, SchedulerJob::TasksRun, "0 * 1 * * *"),
         )
         .await?;
 
         let mut scheduler = Scheduler::start(api.clone()).await?;
-
         assert!(scheduler
             .inner_scheduler
-            .next_tick_for_job(trackers_trigger_job_id)
+            .next_tick_for_job(trackers_run_job_id)
             .await?
             .is_some());
-
         assert!(scheduler
             .inner_scheduler
             .next_tick_for_job(trackers_schedule_job_id)
             .await?
             .is_some());
-
         assert!(scheduler
             .inner_scheduler
             .next_tick_for_job(tasks_run_job_id)
@@ -391,7 +372,7 @@ pub mod tests {
         Scheduler::start(api.clone()).await?;
 
         let jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
-        assert_eq!(jobs.len(), 3);
+        assert_eq!(jobs.len(), 2);
 
         let mut jobs = jobs
             .into_iter()
@@ -405,19 +386,8 @@ pub mod tests {
                 0,
                 Some(
                     [
-                        1,
                         0,
-                    ],
-                ),
-                Some(
-                    "0 * 0 * * *",
-                ),
-            ),
-            (
-                0,
-                Some(
-                    [
-                        2,
+                        0,
                         0,
                     ],
                 ),
@@ -429,12 +399,13 @@ pub mod tests {
                 0,
                 Some(
                     [
-                        3,
+                        1,
+                        0,
                         0,
                     ],
                 ),
                 Some(
-                    "0 * 2 * * *",
+                    "0 * 0 * * *",
                 ),
             ),
         ]
@@ -449,8 +420,7 @@ pub mod tests {
         let api = Arc::new(mock_api_with_config(pool, mock_config).await?);
 
         let trackers_schedule_job_id = uuid!("00000000-0000-0000-0000-000000000001");
-        let trackers_run_job_id = uuid!("00000000-0000-0000-0000-000000000002");
-        let tasks_run_job_id = uuid!("00000000-0000-0000-0000-000000000003");
+        let tasks_run_job_id = uuid!("00000000-0000-0000-0000-000000000002");
 
         // Add job registration.
         mock_upsert_scheduler_job(
@@ -460,16 +430,6 @@ pub mod tests {
                 SchedulerJob::TrackersSchedule,
                 // Different schedule - every hour, not every minute.
                 "0 0 * * * * *",
-            ),
-        )
-        .await?;
-        mock_upsert_scheduler_job(
-            &api.db,
-            &mock_scheduler_job(
-                trackers_run_job_id,
-                SchedulerJob::TrackersRun,
-                // Different schedule - every day, not every minute.
-                "0 0 0 * * * *",
             ),
         )
         .await?;
@@ -490,15 +450,12 @@ pub mod tests {
         assert!(mock_get_scheduler_job(&api.db, trackers_schedule_job_id)
             .await?
             .is_none());
-        assert!(mock_get_scheduler_job(&api.db, trackers_run_job_id)
-            .await?
-            .is_none());
         assert!(mock_get_scheduler_job(&api.db, tasks_run_job_id)
             .await?
             .is_none());
 
         let jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
-        assert_eq!(jobs.len(), 3);
+        assert_eq!(jobs.len(), 2);
 
         let mut jobs = jobs
             .into_iter()
@@ -512,19 +469,8 @@ pub mod tests {
                 0,
                 Some(
                     [
-                        1,
                         0,
-                    ],
-                ),
-                Some(
-                    "0 * 0 * * *",
-                ),
-            ),
-            (
-                0,
-                Some(
-                    [
-                        2,
+                        0,
                         0,
                     ],
                 ),
@@ -536,12 +482,13 @@ pub mod tests {
                 0,
                 Some(
                     [
-                        3,
+                        1,
+                        0,
                         0,
                     ],
                 ),
                 Some(
-                    "0 * 2 * * *",
+                    "0 * 0 * * *",
                 ),
             ),
         ]
@@ -557,7 +504,7 @@ pub mod tests {
         let mut scheduler = Scheduler::start(api.clone()).await?;
 
         let jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
-        assert_eq!(jobs.len(), 3);
+        assert_eq!(jobs.len(), 2);
 
         let status = scheduler.status().await?;
         assert!(status.time_till_next_job.is_some());

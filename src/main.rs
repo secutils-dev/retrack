@@ -118,8 +118,7 @@ mod tests {
             components: ComponentsConfig::default(),
             scheduler: SchedulerJobsConfig {
                 trackers_schedule: "0 * 0 * * *".to_string(),
-                trackers_run: "0 * 1 * * *".to_string(),
-                tasks_run: "0 * 2 * * *".to_string(),
+                tasks_run: "0 * 1 * * *".to_string(),
             },
             trackers: TrackersConfig {
                 restrict_to_public_urls: false,
@@ -181,21 +180,6 @@ mod tests {
             OffsetDateTime::now_utc()
                 .add(Duration::from_secs(secs))
                 .second()
-        )
-    }
-
-    pub fn mock_schedule_in_secs(secs: &[u64]) -> String {
-        format!(
-            "{} * * * * *",
-            secs.iter()
-                .map(|secs| {
-                    OffsetDateTime::now_utc()
-                        .add(Duration::from_secs(*secs))
-                        .second()
-                        .to_string()
-                })
-                .collect::<Vec<_>>()
-                .join(",")
         )
     }
 

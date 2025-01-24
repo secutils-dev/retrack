@@ -3,7 +3,7 @@ use crate::{
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
-        scheduler_jobs::TrackersTriggerJob, CronExt,
+        scheduler_jobs::TrackersRunJob, CronExt, SchedulerJobMetadata,
     },
 };
 use anyhow::Context;
@@ -17,7 +17,7 @@ use tracing::{debug, error};
 pub(crate) struct TrackersScheduleJob;
 impl TrackersScheduleJob {
     /// Tries to resume existing `TrackersSchedule` job.
-    pub async fn try_resume<DR: DnsResolver, ET: EmailTransport>(
+    pub fn try_resume<DR: DnsResolver, ET: EmailTransport>(
         api: Arc<Api<DR, ET>>,
         existing_job_data: RawSchedulerJobStoredData,
     ) -> anyhow::Result<Option<Job>>
@@ -25,7 +25,7 @@ impl TrackersScheduleJob {
         ET::Error: EmailTransportError,
     {
         // If the schedule has changed, remove existing job and create a new one.
-        let mut new_job = Self::create(api).await?;
+        let mut new_job = Self::create(api)?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
             new_job.set_raw_job_data(existing_job_data)?;
             Some(new_job)
@@ -35,9 +35,7 @@ impl TrackersScheduleJob {
     }
 
     /// Creates a new `TrackersSchedule` job.
-    pub async fn create<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
-    ) -> anyhow::Result<Job>
+    pub fn create<DR: DnsResolver, ET: EmailTransport>(api: Arc<Api<DR, ET>>) -> anyhow::Result<Job>
     where
         ET::Error: EmailTransportError,
     {
@@ -61,7 +59,7 @@ impl TrackersScheduleJob {
             },
         )?;
 
-        job.set_job_type(SchedulerJob::TrackersSchedule)?;
+        job.set_job_meta(&SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule))?;
 
         Ok(job)
     }
@@ -111,11 +109,9 @@ impl TrackersScheduleJob {
 
             // Now, create and schedule a new job.
             let job_id = scheduler
-                .add(TrackersTriggerJob::create(api.clone(), schedule).await?)
+                .add(TrackersRunJob::create(api.clone(), schedule)?)
                 .await?;
-            api.trackers()
-                .update_tracker_job(tracker.id, Some(job_id))
-                .await?;
+            api.trackers().set_tracker_job(tracker.id, job_id).await?;
             debug!(
                 tracker.id = %tracker.id,
                 tracker.name = tracker.name,
@@ -152,7 +148,7 @@ mod tests {
 
         let api = mock_api_with_config(pool, config).await?;
 
-        let mut job = TrackersScheduleJob::create(Arc::new(api)).await?;
+        let mut job = TrackersScheduleJob::create(Arc::new(api))?;
         let job_data = job
             .job_data()
             .map(|job_data| (job_data.job_type, job_data.extra, job_data.job))?;
@@ -161,6 +157,7 @@ mod tests {
             0,
             [
                 1,
+                0,
                 0,
             ],
             Some(
@@ -188,17 +185,17 @@ mod tests {
         let job = TrackersScheduleJob::try_resume(
             Arc::new(api),
             mock_scheduler_job(job_id, SchedulerJob::TrackersSchedule, "0 0 * * * *"),
-        )
-        .await?;
+        )?;
         let job_data = job
             .and_then(|mut job| job.job_data().ok())
             .map(|job_data| (job_data.job_type, job_data.extra, job_data.job));
         assert_debug_snapshot!(job_data, @r###"
         Some(
             (
-                3,
+                0,
                 [
                     1,
+                    0,
                     0,
                 ],
                 Some(
@@ -224,8 +221,7 @@ mod tests {
         let job = TrackersScheduleJob::try_resume(
             Arc::new(api),
             mock_scheduler_job(job_id, SchedulerJob::TrackersSchedule, "0 0 * * * *"),
-        )
-        .await?;
+        )?;
         assert!(job.is_none());
 
         Ok(())
@@ -270,7 +266,7 @@ mod tests {
         assert_eq!(unscheduled_trackers[2].id, tracker_three.id);
 
         scheduler
-            .add(TrackersScheduleJob::create(api.clone()).await?)
+            .add(TrackersScheduleJob::create(api.clone())?)
             .await?;
 
         // Start scheduler and wait for a few seconds, then stop it.
@@ -299,7 +295,7 @@ mod tests {
             .filter_map(|job_data| {
                 let job_meta =
                     SchedulerJobMetadata::try_from(job_data.extra.as_deref().unwrap()).unwrap();
-                if matches!(job_meta.job_type, SchedulerJob::TrackersTrigger) {
+                if matches!(job_meta.job_type, SchedulerJob::TrackersRun) {
                     Some(job_data.id)
                 } else {
                     None
@@ -333,7 +329,7 @@ mod tests {
         assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
 
         let schedule_job_id = scheduler
-            .add(TrackersScheduleJob::create(api.clone()).await?)
+            .add(TrackersScheduleJob::create(api.clone())?)
             .await?;
 
         // Start scheduler and wait for a few seconds, then stop it.
@@ -383,7 +379,7 @@ mod tests {
         assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
 
         let schedule_job_id = scheduler
-            .add(TrackersScheduleJob::create(api.clone()).await?)
+            .add(TrackersScheduleJob::create(api.clone())?)
             .await?;
 
         // Start scheduler and wait for a few seconds, then stop it.
@@ -430,7 +426,7 @@ mod tests {
         assert!(api.trackers().get_trackers_to_schedule().await?.is_empty());
 
         let schedule_job_id = scheduler
-            .add(TrackersScheduleJob::create(api.clone()).await?)
+            .add(TrackersScheduleJob::create(api.clone())?)
             .await?;
 
         // Start scheduler and wait for a few seconds, then stop it.

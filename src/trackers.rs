@@ -183,6 +183,11 @@ pub mod tests {
             self
         }
 
+        pub fn disabled(mut self) -> Self {
+            self.tracker.enabled = false;
+            self
+        }
+
         pub fn build(self) -> Tracker {
             self.tracker
         }

@@ -1,11 +1,9 @@
-use crate::scheduler::{
-    database_ext::RawSchedulerJobStoredData, SchedulerJob, SchedulerJobMetadata,
-};
+use crate::scheduler::{database_ext::RawSchedulerJobStoredData, SchedulerJobMetadata};
 use tokio_cron_scheduler::Job;
 
 pub trait JobExt {
     /// Populates job's `extra` field with the job metadata that includes type.
-    fn set_job_type(&mut self, job_type: SchedulerJob) -> anyhow::Result<()>;
+    fn set_job_meta(&mut self, meta: &SchedulerJobMetadata) -> anyhow::Result<()>;
 
     /// Compares the schedules of the job and the raw job data.
     fn are_schedules_equal(
@@ -18,10 +16,10 @@ pub trait JobExt {
 }
 
 impl JobExt for Job {
-    /// Populates job's `extra` field with the job metadata that includes type.
-    fn set_job_type(&mut self, job_type: SchedulerJob) -> anyhow::Result<()> {
+    /// Populates job's `extra` field with the job metadata.
+    fn set_job_meta(&mut self, meta: &SchedulerJobMetadata) -> anyhow::Result<()> {
         let mut job_data = self.job_data()?;
-        job_data.extra = SchedulerJobMetadata::new(job_type).try_into()?;
+        job_data.extra = meta.try_into()?;
         self.set_job_data(job_data)?;
 
         Ok(())
@@ -66,12 +64,12 @@ mod tests {
     use tokio_cron_scheduler::Job;
 
     #[tokio::test]
-    async fn can_set_job_type() -> anyhow::Result<()> {
+    async fn can_set_job_meta() -> anyhow::Result<()> {
         let mut job = Job::new_one_shot(Duration::from_secs(10), |_, _| {})?;
         let original_job_data = job.job_data()?;
         assert!(original_job_data.extra.is_empty());
 
-        job.set_job_type(SchedulerJob::TrackersSchedule)?;
+        job.set_job_meta(&SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule))?;
 
         let job_data = job.job_data()?;
         assert_eq!(
@@ -79,7 +77,7 @@ mod tests {
             SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule)
         );
 
-        job.set_job_type(SchedulerJob::TasksRun)?;
+        job.set_job_meta(&SchedulerJobMetadata::new(SchedulerJob::TasksRun))?;
 
         let mut job_data = job.job_data()?;
         assert_eq!(

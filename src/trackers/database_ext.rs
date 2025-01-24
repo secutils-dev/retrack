@@ -2,16 +2,13 @@ mod raw_tracker;
 mod raw_tracker_data_revision;
 
 use crate::{
-    database::Database, error::Error as RetrackError, scheduler::SchedulerJobMetadata,
+    database::Database, error::Error as RetrackError,
     trackers::database_ext::raw_tracker_data_revision::RawTrackerDataRevision,
 };
 use anyhow::{anyhow, bail};
-use async_stream::try_stream;
-use futures::Stream;
 use raw_tracker::RawTracker;
 use retrack_types::trackers::{Tracker, TrackerDataRevision};
 use sqlx::{error::ErrorKind as SqlxErrorKind, query, query_as, Pool, Postgres};
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// A database extension for the trackers-related operations.
@@ -288,15 +285,17 @@ ORDER BY data.created_at
         Ok(())
     }
 
-    /// Retrieves all trackers that need to be scheduled.
+    /// Retrieves all trackers that need to be scheduled (either don't have associated job ID or
+    /// job ID isn't valid).
     pub async fn get_trackers_to_schedule(&self) -> anyhow::Result<Vec<Tracker>> {
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT id, name, enabled, config, tags, created_at, updated_at, job_needed, job_id
-FROM trackers
-WHERE job_needed = TRUE AND enabled = TRUE AND job_id IS NULL
-ORDER BY updated_at
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, t.job_needed, t.job_id
+FROM trackers as t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+WHERE t.job_needed = TRUE AND t.enabled = TRUE AND (t.job_id IS NULL OR sj.id IS NULL)
+ORDER BY t.updated_at
                 "#
         )
         .fetch_all(self.pool)
@@ -306,65 +305,6 @@ ORDER BY updated_at
             .into_iter()
             .map(Tracker::try_from)
             .collect::<Result<_, _>>()
-    }
-
-    /// Retrieves all scheduled jobs from `scheduler_jobs` table that are in a `stopped` state.
-    pub fn get_trackers_to_run(
-        &self,
-        page_size: usize,
-    ) -> impl Stream<Item = anyhow::Result<Tracker>> + '_ {
-        let page_limit = page_size as i64;
-        try_stream! {
-            let mut last_created_at = OffsetDateTime::UNIX_EPOCH;
-            let mut conn = self.pool.acquire().await?;
-            loop {
-                 let records = query!(
-r#"
-SELECT trackers.id, trackers.name, trackers.enabled, trackers.config, trackers.tags,
-       trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra
-FROM trackers
-INNER JOIN scheduler_jobs as jobs
-ON trackers.job_id = jobs.id
-WHERE jobs.stopped = true AND trackers.created_at > $1
-ORDER BY trackers.created_at
-LIMIT $2;
-"#,
-             last_created_at, page_limit
-        )
-            .fetch_all(&mut *conn)
-            .await?;
-
-                let is_last_page = records.len() < page_size;
-                let now = OffsetDateTime::now_utc();
-                for record in records {
-                    last_created_at = record.created_at;
-
-                    // Check if the tracker job is pending the retry attempt.
-                    let job_meta = record.extra.map(|extra| SchedulerJobMetadata::try_from(extra.as_slice())).transpose()?;
-                    if let Some(SchedulerJobMetadata { retry: Some(retry), .. }) = job_meta {
-                        if retry.next_at > now {
-                            continue;
-                        }
-                    }
-
-                    yield Tracker::try_from(RawTracker {
-                        id: record.id,
-                        name: record.name,
-                        enabled: record.enabled,
-                        config: record.config,
-                        tags: record.tags,
-                        created_at: record.created_at,
-                        updated_at: record.updated_at,
-                        job_needed: record.job_needed,
-                        job_id: record.job_id,
-                    })?;
-                }
-
-                if is_last_page {
-                    break;
-                }
-            }
-        }
     }
 
     /// Retrieves tracker by the specified job ID.
@@ -420,21 +360,16 @@ mod tests {
     use crate::{
         database::Database,
         error::Error as RetrackError,
-        scheduler::{SchedulerJob, SchedulerJobMetadata, SchedulerJobRetryState},
+        scheduler::SchedulerJob,
         tests::{
             mock_scheduler_job, mock_upsert_scheduler_job, to_database_error, MockTrackerBuilder,
-            RawSchedulerJobStoredData,
         },
     };
-    use futures::StreamExt;
     use insta::assert_debug_snapshot;
     use retrack_types::trackers::{Tracker, TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use sqlx::PgPool;
-    use std::{
-        ops::{Add, Sub},
-        time::Duration,
-    };
+    use std::time::Duration;
     use time::OffsetDateTime;
     use uuid::{uuid, Uuid};
 
@@ -1176,6 +1111,14 @@ mod tests {
             )?
             .with_schedule("* * * * *")
             .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000011"),
+                "some-name-6",
+                3,
+            )?
+            .with_schedule("* * * * *")
+            .disabled()
+            .build(),
         ];
 
         let trackers = db.trackers();
@@ -1216,8 +1159,30 @@ mod tests {
                 trackers_list[2].clone(),
                 trackers_list[3].clone(),
                 trackers_list[4].clone(),
+                trackers_list[5].clone()
             ]
         );
+        assert_eq!(
+            trackers.get_trackers_to_schedule().await?,
+            vec![
+                trackers_list[0].clone(),
+                Tracker {
+                    job_id: Some(uuid!("00000000-0000-0000-0000-000000000002")),
+                    ..trackers_list[1].clone()
+                },
+                trackers_list[2].clone()
+            ]
+        );
+
+        mock_upsert_scheduler_job(
+            &db,
+            &mock_scheduler_job(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                SchedulerJob::TrackersRun,
+                "* * * * *",
+            ),
+        )
+        .await?;
         assert_eq!(
             trackers.get_trackers_to_schedule().await?,
             vec![trackers_list[0].clone(), trackers_list[2].clone()]
@@ -1351,174 +1316,6 @@ mod tests {
         assert_eq!(
             update_result.to_string(),
             format!("Tracker ('{}') doesn't exist.", tracker.id)
-        );
-
-        Ok(())
-    }
-
-    #[sqlx::test]
-    async fn can_return_tracker_with_pending_jobs(pool: PgPool) -> anyhow::Result<()> {
-        let db = Database::create(pool).await?;
-
-        let pending_trackers = db
-            .trackers()
-            .get_trackers_to_run(10)
-            .collect::<Vec<_>>()
-            .await;
-        assert!(pending_trackers.is_empty());
-
-        for n in 0..=2 {
-            let job = RawSchedulerJobStoredData {
-                last_updated: Some(946720800 + n),
-                last_tick: Some(946720700),
-                next_tick: Some(946720900),
-                ran: Some(true),
-                count: Some(n as i32),
-                stopped: Some(n != 1),
-                ..mock_scheduler_job(
-                    Uuid::parse_str(&format!("68e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
-                    SchedulerJob::TrackersTrigger,
-                    format!("{} 0 0 1 1 * *", n),
-                )
-            };
-
-            mock_upsert_scheduler_job(&db, &job).await?;
-        }
-
-        for n in 0..=2 {
-            db.trackers()
-                .insert_tracker(
-                    &MockTrackerBuilder::create(
-                        Uuid::parse_str(&format!("78e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
-                        format!("name_{}", n),
-                        3,
-                    )?
-                    .with_schedule("0 0 * * * *")
-                    .with_job_id(Uuid::parse_str(&format!(
-                        "68e55044-10b1-426f-9247-bb680e5fe0c{}",
-                        n
-                    ))?)
-                    .build(),
-                )
-                .await?;
-        }
-
-        let pending_trackers = db
-            .trackers()
-            .get_trackers_to_run(10)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(pending_trackers.len(), 2);
-
-        Ok(())
-    }
-
-    #[sqlx::test]
-    async fn can_return_tracker_with_pending_jobs_with_retry(pool: PgPool) -> anyhow::Result<()> {
-        let db = Database::create(pool).await?;
-
-        let pending_trackers = db
-            .trackers()
-            .get_trackers_to_run(10)
-            .collect::<Vec<_>>()
-            .await;
-        assert!(pending_trackers.is_empty());
-
-        for n in 0..=2 {
-            let job = RawSchedulerJobStoredData {
-                last_updated: Some(946720800 + n),
-                last_tick: Some(946720700),
-                next_tick: Some(946720900),
-                ran: Some(true),
-                count: Some(n as i32),
-                stopped: Some(n != 1),
-                extra: Some(
-                    if n == 2 {
-                        SchedulerJobMetadata {
-                            job_type: SchedulerJob::TrackersTrigger,
-                            retry: Some(SchedulerJobRetryState {
-                                attempts: 1,
-                                next_at: OffsetDateTime::now_utc().add(Duration::from_secs(3600)),
-                            }),
-                        }
-                    } else {
-                        SchedulerJobMetadata::new(SchedulerJob::TrackersTrigger)
-                    }
-                    .try_into()?,
-                ),
-                ..mock_scheduler_job(
-                    Uuid::parse_str(&format!("67e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
-                    SchedulerJob::TrackersTrigger,
-                    format!("{} 0 0 1 1 * *", n),
-                )
-            };
-
-            mock_upsert_scheduler_job(&db, &job).await?;
-        }
-
-        for n in 0..=2 {
-            db.trackers()
-                .insert_tracker(
-                    &MockTrackerBuilder::create(
-                        Uuid::parse_str(&format!("77e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
-                        format!("name_{}", n),
-                        3,
-                    )?
-                    .with_schedule("0 0 * * * *")
-                    .with_job_id(Uuid::parse_str(&format!(
-                        "67e55044-10b1-426f-9247-bb680e5fe0c{}",
-                        n
-                    ))?)
-                    .build(),
-                )
-                .await?;
-        }
-
-        let mut pending_trackers = db
-            .trackers()
-            .get_trackers_to_run(10)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(pending_trackers.len(), 1);
-
-        let tracker = pending_trackers.remove(0)?;
-        assert_eq!(tracker.id, uuid!("77e55044-10b1-426f-9247-bb680e5fe0c0"));
-        assert_eq!(
-            tracker.job_id,
-            Some(uuid!("67e55044-10b1-426f-9247-bb680e5fe0c0"))
-        );
-
-        db.update_scheduler_job_meta(
-            uuid!("67e55044-10b1-426f-9247-bb680e5fe0c2"),
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersTrigger,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 1,
-                    next_at: OffsetDateTime::now_utc().sub(Duration::from_secs(3600)),
-                }),
-            },
-        )
-        .await?;
-
-        let mut pending_trackers = db
-            .trackers()
-            .get_trackers_to_run(10)
-            .collect::<Vec<_>>()
-            .await;
-        assert_eq!(pending_trackers.len(), 2);
-
-        let tracker = pending_trackers.remove(0)?;
-        assert_eq!(tracker.id, uuid!("77e55044-10b1-426f-9247-bb680e5fe0c0"));
-        assert_eq!(
-            tracker.job_id,
-            Some(uuid!("67e55044-10b1-426f-9247-bb680e5fe0c0"))
-        );
-
-        let tracker = pending_trackers.remove(0)?;
-        assert_eq!(tracker.id, uuid!("77e55044-10b1-426f-9247-bb680e5fe0c2"));
-        assert_eq!(
-            tracker.job_id,
-            Some(uuid!("67e55044-10b1-426f-9247-bb680e5fe0c2"))
         );
 
         Ok(())

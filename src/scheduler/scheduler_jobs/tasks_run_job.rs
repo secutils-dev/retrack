@@ -3,7 +3,7 @@ use crate::{
     network::{DnsResolver, EmailTransport, EmailTransportError},
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
-        CronExt,
+        CronExt, SchedulerJobMetadata,
     },
 };
 use anyhow::Context;
@@ -19,7 +19,7 @@ const MAX_TASKS_TO_SEND: usize = 100;
 pub(crate) struct TasksRunJob;
 impl TasksRunJob {
     /// Tries to resume existing `TasksRunJob` job.
-    pub async fn try_resume<DR: DnsResolver, ET: EmailTransport>(
+    pub fn try_resume<DR: DnsResolver, ET: EmailTransport>(
         api: Arc<Api<DR, ET>>,
         existing_job_data: RawSchedulerJobStoredData,
     ) -> anyhow::Result<Option<Job>>
@@ -27,7 +27,7 @@ impl TasksRunJob {
         ET::Error: EmailTransportError,
     {
         // If the schedule has changed, remove existing job and create a new one.
-        let mut new_job = Self::create(api).await?;
+        let mut new_job = Self::create(api)?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
             new_job.set_raw_job_data(existing_job_data)?;
             Some(new_job)
@@ -37,9 +37,7 @@ impl TasksRunJob {
     }
 
     /// Creates a new `TasksRunJob` job.
-    pub async fn create<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
-    ) -> anyhow::Result<Job>
+    pub fn create<DR: DnsResolver, ET: EmailTransport>(api: Arc<Api<DR, ET>>) -> anyhow::Result<Job>
     where
         ET::Error: EmailTransportError,
     {
@@ -63,7 +61,7 @@ impl TasksRunJob {
             },
         )?;
 
-        job.set_job_type(SchedulerJob::TasksRun)?;
+        job.set_job_meta(&SchedulerJobMetadata::new(SchedulerJob::TasksRun))?;
 
         Ok(job)
     }
@@ -127,7 +125,7 @@ mod tests {
 
         let api = mock_api_with_config(pool, config).await?;
 
-        let mut job = TasksRunJob::create(Arc::new(api)).await?;
+        let mut job = TasksRunJob::create(Arc::new(api))?;
         let job_data = job
             .job_data()
             .map(|job_data| (job_data.job_type, job_data.extra, job_data.job))?;
@@ -135,7 +133,8 @@ mod tests {
         (
             0,
             [
-                3,
+                0,
+                0,
                 0,
             ],
             Some(
@@ -163,17 +162,17 @@ mod tests {
         let job = TasksRunJob::try_resume(
             Arc::new(api),
             mock_scheduler_job(job_id, SchedulerJob::TasksRun, "0 0 * * * *"),
-        )
-        .await?;
+        )?;
         let job_data = job
             .and_then(|mut job| job.job_data().ok())
             .map(|job_data| (job_data.job_type, job_data.extra, job_data.job));
         assert_debug_snapshot!(job_data, @r###"
         Some(
             (
-                3,
+                0,
                 [
-                    3,
+                    0,
+                    0,
                     0,
                 ],
                 Some(
@@ -213,9 +212,7 @@ mod tests {
                 .await?;
         }
 
-        scheduler
-            .add(TasksRunJob::create(api.clone()).await?)
-            .await?;
+        scheduler.add(TasksRunJob::create(api.clone())?).await?;
 
         let timestamp = OffsetDateTime::from_unix_timestamp(946730800)?;
         assert_eq!(

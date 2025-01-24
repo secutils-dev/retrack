@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT trackers.id, trackers.name, trackers.enabled, trackers.config, trackers.tags,\n       trackers.created_at, trackers.updated_at, trackers.job_needed, trackers.job_id, jobs.extra\nFROM trackers\nINNER JOIN scheduler_jobs as jobs\nON trackers.job_id = jobs.id\nWHERE jobs.stopped = true AND trackers.created_at > $1\nORDER BY trackers.created_at\nLIMIT $2;\n",
+  "query": "\nSELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, t.job_needed, t.job_id\nFROM trackers as t\nLEFT JOIN scheduler_jobs sj ON t.job_id = sj.id\nWHERE t.job_needed = TRUE AND t.enabled = TRUE AND (t.job_id IS NULL OR sj.id IS NULL)\nORDER BY t.updated_at\n                ",
   "describe": {
     "columns": [
       {
@@ -47,18 +47,10 @@
         "ordinal": 8,
         "name": "job_id",
         "type_info": "Uuid"
-      },
-      {
-        "ordinal": 9,
-        "name": "extra",
-        "type_info": "Bytea"
       }
     ],
     "parameters": {
-      "Left": [
-        "Timestamptz",
-        "Int8"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -69,9 +61,8 @@
       false,
       false,
       false,
-      true,
       true
     ]
   },
-  "hash": "a902394141552a8b4926a9316292f472f653296689076471d2297dc6daef20c4"
+  "hash": "ea1218c096a7a9452da8461f1d6c33ae257b9440dd0d07447306b661c5d1f687"
 }

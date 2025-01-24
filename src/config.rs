@@ -145,15 +145,15 @@ pub mod tests {
                 },
             },
             scheduler: SchedulerJobsConfig {
-                trackers_schedule: "0/10 * * * * *",
-                trackers_run: "0/10 * * * * *",
                 tasks_run: "0/30 * * * * *",
+                trackers_schedule: "0/10 * * * * *",
             },
             trackers: TrackersConfig {
                 max_revisions: 30,
                 max_timeout: 300s,
                 schedules: None,
                 min_schedule_interval: 10s,
+                min_retry_interval: 60s,
                 restrict_to_public_urls: true,
                 max_script_size: Byte(
                     4096,

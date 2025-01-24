@@ -1,12 +1,8 @@
 use crate::{
     api::Api,
     network::{DnsResolver, EmailTransport},
-    scheduler::{SchedulerJobMetadata, SchedulerJobRetryState},
+    scheduler::SchedulerJobMetadata,
 };
-use retrack_types::scheduler::SchedulerJobRetryStrategy;
-use std::ops::Add;
-use time::OffsetDateTime;
-use tracing::{debug, warn};
 use uuid::Uuid;
 
 pub struct SchedulerApiExt<'a, DR: DnsResolver, ET: EmailTransport> {
@@ -19,52 +15,18 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> SchedulerApiExt<'a, DR, ET> {
         Self { api }
     }
 
-    /// Tries to schedule a retry for a specified job. If retry is not possible, returns `None`.
-    pub async fn schedule_retry(
+    /// Retrieves metadata for the scheduler job with the specified ID.
+    pub async fn get_job_meta(&self, job_id: Uuid) -> anyhow::Result<Option<SchedulerJobMetadata>> {
+        self.api.db.get_scheduler_job_meta(job_id).await
+    }
+
+    /// Sets metadata for the scheduler job with the specified ID.
+    pub async fn set_job_meta(
         &self,
         job_id: Uuid,
-        retry_strategy: &SchedulerJobRetryStrategy,
-    ) -> anyhow::Result<Option<SchedulerJobRetryState>> {
-        let db = &self.api.db;
-        let SchedulerJobMetadata { job_type, retry } =
-            db.get_scheduler_job_meta(job_id).await?.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not find a job state for a scheduler job ('{}').",
-                    job_id
-                )
-            })?;
-
-        let retry_attempts = retry
-            .map(|retry_state| retry_state.attempts)
-            .unwrap_or_default();
-        // Check if retry is possible.
-        let retry_state = if retry_attempts >= retry_strategy.max_attempts() {
-            warn!(job.id = %job_id, "Retry limit reached ('{retry_attempts}') for a scheduler job.");
-            None
-        } else {
-            let retry_interval = retry_strategy.interval(retry_attempts);
-            debug!(
-                job.id = %job_id,
-                "Scheduling a retry for job in {}.",
-                humantime::format_duration(retry_interval),
-            );
-
-            Some(SchedulerJobRetryState {
-                attempts: retry_attempts + 1,
-                next_at: OffsetDateTime::now_utc().add(retry_interval),
-            })
-        };
-
-        db.update_scheduler_job_meta(
-            job_id,
-            SchedulerJobMetadata {
-                job_type,
-                retry: retry_state,
-            },
-        )
-        .await?;
-
-        Ok(retry_state)
+        meta: &SchedulerJobMetadata,
+    ) -> anyhow::Result<()> {
+        self.api.db.update_scheduler_job_meta(job_id, meta).await
     }
 }
 
@@ -81,14 +43,11 @@ mod tests {
         scheduler::{database_ext::RawSchedulerJobStoredData, SchedulerJob, SchedulerJobMetadata},
         tests::{mock_api, mock_upsert_scheduler_job},
     };
-    use retrack_types::scheduler::SchedulerJobRetryStrategy;
     use sqlx::PgPool;
-    use std::{ops::Add, time::Duration};
-    use time::OffsetDateTime;
     use uuid::uuid;
 
     #[sqlx::test]
-    async fn properly_schedules_retry(pool: PgPool) -> anyhow::Result<()> {
+    async fn properly_sets_and_gets_job_meta(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let scheduler = api.scheduler();
 
@@ -100,7 +59,9 @@ mod tests {
             next_tick: Some(946720900),
             count: Some(3),
             job_type: 3,
-            extra: Some(SchedulerJobMetadata::new(SchedulerJob::TasksRun).try_into()?),
+            extra: Some(Vec::try_from(&SchedulerJobMetadata::new(
+                SchedulerJob::TasksRun,
+            ))?),
             ran: Some(true),
             stopped: Some(false),
             schedule: None,
@@ -110,44 +71,29 @@ mod tests {
         };
 
         mock_upsert_scheduler_job(&api.db, &job).await?;
+        assert_eq!(
+            scheduler.get_job_meta(job_id).await?,
+            Some(SchedulerJobMetadata::new(SchedulerJob::TasksRun))
+        );
 
-        let now = OffsetDateTime::now_utc();
-        let retry_state = scheduler
-            .schedule_retry(
+        scheduler
+            .set_job_meta(
                 job_id,
-                &SchedulerJobRetryStrategy::Constant {
-                    interval: Duration::from_secs(120),
-                    max_attempts: 2,
-                },
-            )
-            .await?
-            .unwrap();
-        assert_eq!(retry_state.attempts, 1);
-        assert!(retry_state.next_at >= now.add(Duration::from_secs(120)));
-
-        let retry_state = scheduler
-            .schedule_retry(
-                job_id,
-                &SchedulerJobRetryStrategy::Constant {
-                    interval: Duration::from_secs(120),
-                    max_attempts: 2,
-                },
-            )
-            .await?
-            .unwrap();
-        assert_eq!(retry_state.attempts, 2);
-        assert!(retry_state.next_at >= now.add(Duration::from_secs(120)));
-
-        let retry_state = scheduler
-            .schedule_retry(
-                job_id,
-                &SchedulerJobRetryStrategy::Constant {
-                    interval: Duration::from_secs(120),
-                    max_attempts: 2,
+                &SchedulerJobMetadata {
+                    job_type: SchedulerJob::TrackersRun,
+                    retry_attempt: 5,
+                    is_running: true,
                 },
             )
             .await?;
-        assert!(retry_state.is_none());
+        assert_eq!(
+            scheduler.get_job_meta(job_id).await?,
+            Some(SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 5,
+                is_running: true,
+            })
+        );
 
         Ok(())
     }

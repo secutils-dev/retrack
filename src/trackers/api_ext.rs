@@ -17,7 +17,6 @@ use crate::{
 use anyhow::{anyhow, bail, Context};
 use byte_unit::Byte;
 use croner::Cron;
-use futures::Stream;
 use http::Method;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use lettre::message::Mailbox;
@@ -45,17 +44,11 @@ use tracing::{debug, error, info};
 use url::Url;
 use uuid::Uuid;
 
-/// Defines a maximum number of jobs that can be retrieved from the database at once.
-const MAX_JOBS_PAGE_SIZE: usize = 1000;
-
 /// Defines the maximum length of the user agent string.
 const MAX_TRACKER_PAGE_USER_AGENT_LENGTH: usize = 200;
 
 /// We currently support up to 10 retry attempts for the tracker.
 const MAX_TRACKER_RETRY_ATTEMPTS: u32 = 10;
-
-/// We currently support minimum 60 seconds between retry attempts for the tracker.
-const MIN_TRACKER_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// We currently support maximum 12 hours between retry attempts for the tracker.
 const MAX_TRACKER_RETRY_INTERVAL: Duration = Duration::from_secs(12 * 3600);
@@ -333,19 +326,19 @@ where
         self.trackers.get_trackers_to_schedule().await
     }
 
-    /// Returns all trackers that have pending jobs.
-    pub fn get_trackers_to_run(&self) -> impl Stream<Item = anyhow::Result<Tracker>> + '_ {
-        self.trackers.get_trackers_to_run(MAX_JOBS_PAGE_SIZE)
-    }
-
     /// Returns tracker by the corresponding job ID.
     pub async fn get_tracker_by_job_id(&self, job_id: Uuid) -> anyhow::Result<Option<Tracker>> {
         self.trackers.get_tracker_by_job_id(job_id).await
     }
 
-    /// Updates tracker job ID reference (link or unlink).
-    pub async fn update_tracker_job(&self, id: Uuid, job_id: Option<Uuid>) -> anyhow::Result<()> {
-        self.trackers.update_tracker_job(id, job_id).await
+    /// Updates tracker job ID reference.
+    pub async fn set_tracker_job(&self, id: Uuid, job_id: Uuid) -> anyhow::Result<()> {
+        self.trackers.update_tracker_job(id, Some(job_id)).await
+    }
+
+    /// Clears tracker job ID reference.
+    pub async fn clear_tracker_job(&self, id: Uuid) -> anyhow::Result<()> {
+        self.trackers.update_tracker_job(id, None).await
     }
 
     /// Executes tracker action.
@@ -579,10 +572,10 @@ where
                 }
 
                 let min_interval = *retry_strategy.min_interval();
-                if min_interval < MIN_TRACKER_RETRY_INTERVAL {
+                if min_interval < config.min_retry_interval {
                     bail!(RetrackError::client(format!(
                         "Tracker min retry interval cannot be less than {}, but received {}.",
-                        humantime::format_duration(MIN_TRACKER_RETRY_INTERVAL),
+                        humantime::format_duration(config.min_retry_interval),
                         humantime::format_duration(min_interval)
                     )));
                 }
@@ -591,11 +584,11 @@ where
                 | SchedulerJobRetryStrategy::Exponential { max_interval, .. } = retry_strategy
                 {
                     let max_interval = *max_interval;
-                    if max_interval < MIN_TRACKER_RETRY_INTERVAL {
+                    if max_interval < config.min_retry_interval {
                         bail!(RetrackError::client(
                             format!(
                                 "Tracker retry strategy max interval cannot be less than {}, but received {}.",
-                                humantime::format_duration(MIN_TRACKER_RETRY_INTERVAL),
+                                humantime::format_duration(config.min_retry_interval),
                                 humantime::format_duration(max_interval)
                             )
                         ));
@@ -1192,8 +1185,7 @@ mod tests {
         tests::{
             load_fixture, mock_api, mock_api_with_config, mock_api_with_network, mock_config,
             mock_network_with_records, mock_scheduler_job, mock_upsert_scheduler_job,
-            RawSchedulerJobStoredData, TrackerCreateParamsBuilder, WebScraperContentRequest,
-            WebScraperErrorResponse,
+            TrackerCreateParamsBuilder, WebScraperContentRequest, WebScraperErrorResponse,
         },
     };
     use actix_web::ResponseError;
@@ -1220,7 +1212,7 @@ mod tests {
         Name,
     };
     use url::Url;
-    use uuid::{uuid, Uuid};
+    use uuid::uuid;
 
     #[sqlx::test]
     async fn properly_creates_new_tracker(pool: PgPool) -> anyhow::Result<()> {
@@ -2944,10 +2936,25 @@ mod tests {
 
         // Set job ID.
         api.trackers()
-            .update_tracker_job(
-                tracker.id,
-                Some(uuid!("00000000-0000-0000-0000-000000000001")),
-            )
+            .set_tracker_job(tracker.id, uuid!("00000000-0000-0000-0000-000000000001"))
+            .await?;
+        assert_eq!(
+            Some(uuid!("00000000-0000-0000-0000-000000000001")),
+            trackers.get_tracker(tracker.id).await?.unwrap().job_id
+        );
+
+        // Clears job ID.
+        api.trackers().clear_tracker_job(tracker.id).await?;
+        assert!(trackers
+            .get_tracker(tracker.id)
+            .await?
+            .unwrap()
+            .job_id
+            .is_none());
+
+        // Set job ID.
+        api.trackers()
+            .set_tracker_job(tracker.id, uuid!("00000000-0000-0000-0000-000000000001"))
             .await?;
         assert_eq!(
             Some(uuid!("00000000-0000-0000-0000-000000000001")),
@@ -4989,10 +4996,7 @@ mod tests {
             )
             .await?;
         api.trackers()
-            .update_tracker_job(
-                tracker.id,
-                Some(uuid!("00000000-0000-0000-0000-000000000001")),
-            )
+            .set_tracker_job(tracker.id, uuid!("00000000-0000-0000-0000-000000000001"))
             .await?;
         assert_eq!(
             trackers.get_tracker(tracker.id).await?.unwrap().job_id,
@@ -5077,10 +5081,7 @@ mod tests {
             )
             .await?;
         api.trackers()
-            .update_tracker_job(
-                tracker.id,
-                Some(uuid!("00000000-0000-0000-0000-000000000001")),
-            )
+            .set_tracker_job(tracker.id, uuid!("00000000-0000-0000-0000-000000000001"))
             .await?;
         assert_eq!(
             trackers.get_tracker(tracker.id).await?.unwrap().job_id,
@@ -5160,10 +5161,7 @@ mod tests {
             )
             .await?;
         api.trackers()
-            .update_tracker_job(
-                tracker.id,
-                Some(uuid!("00000000-0000-0000-0000-000000000001")),
-            )
+            .set_tracker_job(tracker.id, uuid!("00000000-0000-0000-0000-000000000001"))
             .await?;
         assert_eq!(
             trackers.get_tracker(tracker.id).await?.unwrap().job_id,
@@ -5235,8 +5233,6 @@ mod tests {
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
-        let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
-        assert!(unscheduled_trackers.is_empty());
 
         let tracker = trackers
             .create_tracker(
@@ -5250,11 +5246,17 @@ mod tests {
         assert_eq!(unscheduled_trackers, vec![tracker.clone()]);
 
         api.trackers()
-            .update_tracker_job(
-                tracker.id,
-                Some(uuid!("11e55044-10b1-426f-9247-bb680e5fe0c9")),
-            )
+            .set_tracker_job(tracker.id, uuid!("11e55044-10b1-426f-9247-bb680e5fe0c9"))
             .await?;
+        mock_upsert_scheduler_job(
+            &api.db,
+            &mock_scheduler_job(
+                uuid!("11e55044-10b1-426f-9247-bb680e5fe0c9"),
+                SchedulerJob::TrackersRun,
+                "0 0 * * * *",
+            ),
+        )
+        .await?;
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
@@ -5287,102 +5289,12 @@ mod tests {
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
-        let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
-        assert!(unscheduled_trackers.is_empty());
 
         let scheduled_tracker = api
             .trackers()
             .get_tracker_by_job_id(uuid!("11e55044-10b1-426f-9247-bb680e5fe0c8"))
             .await?;
         assert!(scheduled_tracker.is_none());
-
-        let scheduled_tracker = api
-            .trackers()
-            .get_tracker_by_job_id(uuid!("11e55044-10b1-426f-9247-bb680e5fe0c9"))
-            .await?;
-        assert!(scheduled_tracker.is_none());
-
-        Ok(())
-    }
-
-    #[sqlx::test]
-    async fn can_return_pending_tracker_jobs(pool: PgPool) -> anyhow::Result<()> {
-        let api = mock_api(pool).await?;
-
-        let trackers = api.trackers();
-
-        let pending_trackers = api
-            .trackers()
-            .get_trackers_to_run()
-            .collect::<Vec<_>>()
-            .await;
-        assert!(pending_trackers.is_empty());
-
-        for n in 0..=2 {
-            let job = RawSchedulerJobStoredData {
-                last_updated: Some(946720800 + n),
-                last_tick: Some(946720700),
-                next_tick: Some(946720900),
-                ran: Some(true),
-                stopped: Some(n != 1),
-                ..mock_scheduler_job(
-                    Uuid::parse_str(&format!("67e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
-                    SchedulerJob::TrackersTrigger,
-                    format!("{} 0 0 1 1 * *", n),
-                )
-            };
-
-            mock_upsert_scheduler_job(&api.db, &job).await?;
-        }
-
-        for n in 0..=2 {
-            trackers
-                .create_tracker(
-                    TrackerCreateParamsBuilder::new(format!("name_{}", n))
-                        .with_schedule("0 0 * * * *")
-                        .build(),
-                )
-                .await?;
-        }
-
-        let pending_trackers = api
-            .trackers()
-            .get_trackers_to_run()
-            .collect::<Vec<_>>()
-            .await;
-        assert!(pending_trackers.is_empty());
-
-        // Assign job IDs to trackers.
-        let all_trackers = trackers.get_trackers(Default::default()).await?;
-        for (n, tracker) in all_trackers.iter().enumerate() {
-            api.trackers()
-                .update_tracker_job(
-                    tracker.id,
-                    Some(Uuid::parse_str(&format!(
-                        "67e55044-10b1-426f-9247-bb680e5fe0c{}",
-                        n
-                    ))?),
-                )
-                .await?;
-        }
-
-        let pending_trackers = api
-            .trackers()
-            .get_trackers_to_run()
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<anyhow::Result<Vec<_>, _>>()?;
-        assert_eq!(pending_trackers.len(), 2);
-
-        let all_trackers = trackers.get_trackers(Default::default()).await?;
-        assert_eq!(
-            vec![all_trackers[0].clone(), all_trackers[2].clone()],
-            pending_trackers,
-        );
-
-        let all_trackers = trackers.get_trackers(Default::default()).await?;
-        assert_eq!(all_trackers.len(), 3);
 
         Ok(())
     }

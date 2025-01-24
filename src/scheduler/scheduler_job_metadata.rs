@@ -1,4 +1,4 @@
-use crate::scheduler::{SchedulerJob, SchedulerJobRetryState};
+use crate::scheduler::SchedulerJob;
 use serde::{Deserialize, Serialize};
 
 /// Application specific metadata of the scheduler job.
@@ -6,17 +6,32 @@ use serde::{Deserialize, Serialize};
 pub struct SchedulerJobMetadata {
     /// The type of the job.
     pub job_type: SchedulerJob,
-    /// The state of the job if it is being retried.
-    pub retry: Option<SchedulerJobRetryState>,
+    /// Indicates whether the job is currently running.
+    pub is_running: bool,
+    /// If job is being re-tried, contains current retry attempt.
+    pub retry_attempt: u32,
 }
 
 impl SchedulerJobMetadata {
-    /// Create a new job state without retry state.
+    /// Creates a new job state without retry state.
     pub fn new(job_type: SchedulerJob) -> Self {
         Self {
             job_type,
-            retry: None,
+            is_running: false,
+            retry_attempt: 0,
         }
+    }
+
+    /// Sets the `is_running` flag for the job.
+    pub fn set_running(&mut self) -> &mut Self {
+        self.is_running = true;
+        self
+    }
+
+    /// Sets the retry state for the job.
+    pub fn set_retry_attempt(&mut self, attempt: u32) -> &mut Self {
+        self.retry_attempt = attempt;
+        self
     }
 }
 
@@ -28,36 +43,63 @@ impl TryFrom<&[u8]> for SchedulerJobMetadata {
     }
 }
 
-impl TryFrom<SchedulerJobMetadata> for Vec<u8> {
+impl<'a> TryFrom<&'a SchedulerJobMetadata> for Vec<u8> {
     type Error = anyhow::Error;
 
-    fn try_from(value: SchedulerJobMetadata) -> Result<Self, Self::Error> {
-        Ok(postcard::to_stdvec(&value)?)
+    fn try_from(value: &'a SchedulerJobMetadata) -> Result<Self, Self::Error> {
+        Ok(postcard::to_stdvec(value)?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::SchedulerJob;
-    use crate::scheduler::{SchedulerJobMetadata, SchedulerJobRetryState};
+    use crate::scheduler::SchedulerJobMetadata;
     use insta::assert_debug_snapshot;
-    use time::OffsetDateTime;
 
     #[test]
     fn properly_creates_metadata() -> anyhow::Result<()> {
+        for job in &[
+            SchedulerJob::TasksRun,
+            SchedulerJob::TrackersSchedule,
+            SchedulerJob::TrackersRun,
+        ] {
+            assert_eq!(
+                SchedulerJobMetadata::new(*job),
+                SchedulerJobMetadata {
+                    job_type: *job,
+                    is_running: false,
+                    retry_attempt: 0,
+                }
+            );
+        }
+
         assert_eq!(
-            SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule),
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None
+            SchedulerJobMetadata::new(SchedulerJob::TrackersRun).set_running(),
+            &SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                is_running: true,
+                retry_attempt: 0,
             }
         );
 
         assert_eq!(
-            SchedulerJobMetadata::new(SchedulerJob::TasksRun),
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TasksRun,
-                retry: None
+            SchedulerJobMetadata::new(SchedulerJob::TrackersRun).set_retry_attempt(10),
+            &SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                is_running: false,
+                retry_attempt: 10,
+            }
+        );
+
+        assert_eq!(
+            SchedulerJobMetadata::new(SchedulerJob::TrackersRun)
+                .set_running()
+                .set_retry_attempt(10),
+            &SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                is_running: true,
+                retry_attempt: 10,
             }
         );
 
@@ -67,33 +109,20 @@ mod tests {
     #[test]
     fn serialize() -> anyhow::Result<()> {
         assert_eq!(
-            Vec::try_from(SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule))?,
-            vec![1, 0]
+            Vec::try_from(&SchedulerJobMetadata::new(SchedulerJob::TasksRun))?,
+            vec![0, 0, 0]
         );
         assert_eq!(
-            Vec::try_from(SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 10,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                })
+            Vec::try_from(&SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule))?,
+            vec![1, 0, 0]
+        );
+        assert_eq!(
+            Vec::try_from(&SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 10,
+                is_running: true
             })?,
-            vec![1, 1, 10, 160, 31, 1, 10, 0, 0, 0, 0, 0, 0]
-        );
-
-        assert_eq!(
-            Vec::try_from(SchedulerJobMetadata::new(SchedulerJob::TasksRun))?,
-            vec![3, 0]
-        );
-        assert_eq!(
-            Vec::try_from(SchedulerJobMetadata {
-                job_type: SchedulerJob::TasksRun,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 10,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                })
-            })?,
-            vec![3, 1, 10, 160, 31, 1, 10, 0, 0, 0, 0, 0, 0]
+            vec![2, 1, 10]
         );
 
         Ok(())
@@ -102,38 +131,34 @@ mod tests {
     #[test]
     fn deserialize() -> anyhow::Result<()> {
         assert_eq!(
-            SchedulerJobMetadata::try_from([1, 0].as_ref())?,
-            SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule)
-        );
-
-        assert_eq!(
-            SchedulerJobMetadata::try_from([1, 1, 10, 160, 31, 1, 10, 0, 0, 0, 0, 0, 0].as_ref())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 10,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                })
-            }
-        );
-
-        assert_eq!(
-            SchedulerJobMetadata::try_from([3, 0].as_ref())?,
+            SchedulerJobMetadata::try_from([0, 0, 0].as_ref())?,
             SchedulerJobMetadata::new(SchedulerJob::TasksRun)
         );
 
         assert_eq!(
-            SchedulerJobMetadata::try_from([3, 1, 10, 160, 31, 1, 10, 0, 0, 0, 0, 0, 0].as_ref())?,
+            SchedulerJobMetadata::try_from([1, 0, 0].as_ref())?,
+            SchedulerJobMetadata::new(SchedulerJob::TrackersSchedule)
+        );
+
+        assert_eq!(
+            SchedulerJobMetadata::try_from([2, 1, 10].as_ref())?,
             SchedulerJobMetadata {
-                job_type: SchedulerJob::TasksRun,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 10,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                })
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 10,
+                is_running: true
             }
         );
 
-        assert_debug_snapshot!(SchedulerJobMetadata::try_from([4].as_ref()), @r###"
+        assert_eq!(
+            SchedulerJobMetadata::try_from([2, 1, 0].as_ref())?,
+            SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 0,
+                is_running: true
+            }
+        );
+
+        assert_debug_snapshot!(SchedulerJobMetadata::try_from([3].as_ref()), @r###"
         Err(
             SerdeDeCustom,
         )

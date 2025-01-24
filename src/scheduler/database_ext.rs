@@ -3,7 +3,7 @@ mod raw_scheduler_job_stored_data;
 pub use self::raw_scheduler_job_stored_data::RawSchedulerJobStoredData;
 
 use crate::{database::Database, scheduler::SchedulerJobMetadata};
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use async_stream::try_stream;
 use futures::Stream;
 use sqlx::{query, query_as};
@@ -28,7 +28,7 @@ impl Database {
     pub async fn update_scheduler_job_meta(
         &self,
         id: Uuid,
-        meta: SchedulerJobMetadata,
+        meta: &SchedulerJobMetadata,
     ) -> anyhow::Result<()> {
         let meta = Vec::try_from(meta)?;
         let result = query!(
@@ -42,31 +42,6 @@ impl Database {
         if result.rows_affected() == 0 {
             bail!(format!("A scheduler job ('{id}') doesn't exist."));
         }
-
-        Ok(())
-    }
-
-    /// Updates `stopped` job value to the `scheduler_jobs` table.
-    pub async fn reset_scheduler_job_state(&self, id: Uuid, stopped: bool) -> anyhow::Result<()> {
-        let metadata = self
-            .get_scheduler_job_meta(id)
-            .await?
-            .ok_or_else(|| anyhow!("A scheduler job ('{id}') doesn't exist."))?;
-
-        // Every time the job state is reset, we should reset retry state.
-        let metadata = Vec::try_from(SchedulerJobMetadata::new(metadata.job_type))?;
-        query!(
-            r#"
-UPDATE scheduler_jobs
-SET stopped = $2, extra = $3
-WHERE id = $1
-        "#,
-            id,
-            stopped,
-            metadata
-        )
-        .execute(&self.pool)
-        .await?;
 
         Ok(())
     }
@@ -107,11 +82,10 @@ pub mod tests {
     pub use super::RawSchedulerJobStoredData;
     use crate::{
         database::Database,
-        scheduler::{SchedulerJob, SchedulerJobMetadata, SchedulerJobRetryState},
+        scheduler::{SchedulerJob, SchedulerJobMetadata},
     };
     use futures::{Stream, StreamExt};
     use sqlx::{query, query_as, PgPool};
-    use time::OffsetDateTime;
     use uuid::{uuid, Uuid};
 
     pub async fn mock_upsert_scheduler_job(
@@ -167,231 +141,6 @@ pub mod tests {
     }
 
     #[sqlx::test]
-    async fn can_reset_scheduler_job_state(pool: PgPool) -> anyhow::Result<()> {
-        let db = Database::create(pool).await?;
-
-        let job_one_id = uuid!("00000000-0000-0000-0000-000000000001");
-        let job_two_id = uuid!("00000000-0000-0000-0000-000000000002");
-
-        let jobs = vec![
-            RawSchedulerJobStoredData {
-                id: job_one_id,
-                last_updated: None,
-                last_tick: None,
-                next_tick: Some(946720900i64),
-                count: Some(3),
-                job_type: 3,
-                extra: Some(
-                    SchedulerJobMetadata {
-                        job_type: SchedulerJob::TrackersSchedule,
-                        retry: Some(SchedulerJobRetryState {
-                            attempts: 5,
-                            next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                        }),
-                    }
-                    .try_into()?,
-                ),
-                ran: Some(true),
-                stopped: Some(false),
-                schedule: None,
-                repeating: None,
-                time_offset_seconds: Some(0),
-                repeated_every: None,
-            },
-            RawSchedulerJobStoredData {
-                id: job_two_id,
-                last_updated: None,
-                last_tick: None,
-                next_tick: Some(946820900),
-                count: Some(0),
-                job_type: 1,
-                extra: Some(
-                    SchedulerJobMetadata {
-                        job_type: SchedulerJob::TrackersSchedule,
-                        retry: None,
-                    }
-                    .try_into()?,
-                ),
-                ran: Some(true),
-                stopped: Some(false),
-                schedule: None,
-                repeating: None,
-                time_offset_seconds: Some(0),
-                repeated_every: None,
-            },
-        ];
-
-        for job in jobs {
-            mock_upsert_scheduler_job(&db, &job).await?;
-        }
-
-        let job_one = mock_get_scheduler_job(&db, job_one_id).await?.unwrap();
-        assert!(!job_one.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_one.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
-            }
-        );
-
-        let job_two = mock_get_scheduler_job(&db, job_two_id).await?.unwrap();
-        assert!(!job_two.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_two.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None
-            }
-        );
-
-        db.reset_scheduler_job_state(job_one_id, true).await?;
-
-        let job_one = mock_get_scheduler_job(&db, job_one_id).await?.unwrap();
-        assert!(job_one.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_one.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None,
-            }
-        );
-
-        let job_two = mock_get_scheduler_job(&db, job_two_id).await?.unwrap();
-        assert!(!job_two.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_two.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None
-            }
-        );
-
-        db.reset_scheduler_job_state(job_two_id, true).await?;
-
-        let job_one = mock_get_scheduler_job(&db, job_one_id).await?.unwrap();
-        assert!(job_one.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_one.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None,
-            }
-        );
-
-        let job_two = mock_get_scheduler_job(&db, job_two_id).await?.unwrap();
-        assert!(job_two.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_two.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None
-            }
-        );
-
-        db.update_scheduler_job_meta(
-            job_one_id,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
-            },
-        )
-        .await?;
-        db.update_scheduler_job_meta(
-            job_two_id,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 10,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
-            },
-        )
-        .await?;
-
-        let job_one = mock_get_scheduler_job(&db, job_one_id).await?.unwrap();
-        assert!(job_one.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_one.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
-            }
-        );
-
-        let job_two = mock_get_scheduler_job(&db, job_two_id).await?.unwrap();
-        assert!(job_two.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_two.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 10,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
-            }
-        );
-
-        db.reset_scheduler_job_state(job_two_id, false).await?;
-
-        let job_one = mock_get_scheduler_job(&db, job_one_id).await?.unwrap();
-        assert!(job_one.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_one.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
-            }
-        );
-
-        let job_two = mock_get_scheduler_job(&db, job_two_id).await?.unwrap();
-        assert!(!job_two.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_two.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None,
-            }
-        );
-
-        db.reset_scheduler_job_state(job_one_id, false).await?;
-
-        let job_one = mock_get_scheduler_job(&db, job_one_id).await?.unwrap();
-        assert!(!job_one.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_one.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None,
-            }
-        );
-
-        let job_two = mock_get_scheduler_job(&db, job_two_id).await?.unwrap();
-        assert!(!job_two.stopped.unwrap());
-        assert_eq!(
-            SchedulerJobMetadata::try_from(job_two.extra.unwrap().as_slice())?,
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: None,
-            }
-        );
-
-        Ok(())
-    }
-
-    #[sqlx::test]
     async fn can_update_and_retrieve_scheduler_job_metadata(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let jobs = vec![
@@ -402,7 +151,7 @@ pub mod tests {
                 next_tick: Some(946720900),
                 count: Some(3),
                 job_type: 3,
-                extra: Some(Vec::try_from(SchedulerJobMetadata::new(
+                extra: Some(Vec::try_from(&SchedulerJobMetadata::new(
                     SchedulerJob::TasksRun,
                 ))?),
                 ran: Some(true),
@@ -419,12 +168,10 @@ pub mod tests {
                 next_tick: Some(946820900),
                 count: Some(0),
                 job_type: 1,
-                extra: Some(Vec::try_from(SchedulerJobMetadata {
-                    job_type: SchedulerJob::TrackersSchedule,
-                    retry: Some(SchedulerJobRetryState {
-                        attempts: 5,
-                        next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                    }),
+                extra: Some(Vec::try_from(&SchedulerJobMetadata {
+                    job_type: SchedulerJob::TrackersRun,
+                    retry_attempt: 5,
+                    is_running: false,
                 })?),
                 ran: Some(true),
                 stopped: Some(false),
@@ -450,28 +197,24 @@ pub mod tests {
                 .await?
                 .unwrap(),
             SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 5,
+                is_running: false,
             }
         );
 
         db.update_scheduler_job_meta(
             uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8"),
-            SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
+            &SchedulerJobMetadata {
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 5,
+                is_running: false,
             },
         )
         .await?;
         db.update_scheduler_job_meta(
             uuid!("00e55044-10b1-426f-9247-bb680e5fe0c8"),
-            SchedulerJobMetadata::new(SchedulerJob::TasksRun),
+            &SchedulerJobMetadata::new(SchedulerJob::TasksRun),
         )
         .await?;
 
@@ -480,11 +223,9 @@ pub mod tests {
                 .await?
                 .unwrap(),
             SchedulerJobMetadata {
-                job_type: SchedulerJob::TrackersSchedule,
-                retry: Some(SchedulerJobRetryState {
-                    attempts: 5,
-                    next_at: OffsetDateTime::from_unix_timestamp(946720800)?,
-                }),
+                job_type: SchedulerJob::TrackersRun,
+                retry_attempt: 5,
+                is_running: false,
             }
         );
         assert_eq!(
