@@ -1490,7 +1490,7 @@ mod tests {
         let server = MockServer::start();
 
         // Create tracker with retry strategy.
-        let api_url = server.url("/api");
+        let api_url = server.url("/api-retry");
         let mut create_params = TrackerCreateParamsBuilder::new("tracker-with-retry")
             .with_target(TrackerTarget::Api(ApiTarget {
                 requests: vec![TargetRequest::new(api_url.parse()?)],
@@ -1523,7 +1523,7 @@ mod tests {
         let attempt_one_mock = server.mock(|when, then| {
             when.method(httpmock::Method::GET)
                 .header("x-custom-header", "attempt-1")
-                .path("/api");
+                .path("/api-retry");
             then.status(400)
                 .header("Content-Type", "application/json")
                 .body("Uh oh (first attempt)!")
@@ -1533,7 +1533,7 @@ mod tests {
         let attempt_two_mock = server.mock(|when, then| {
             when.method(httpmock::Method::GET)
                 .header("x-custom-header", "attempt-2")
-                .path("/api");
+                .path("/api-retry");
             then.status(400)
                 .header("Content-Type", "application/json")
                 .body("Uh oh (second attempt)!")
@@ -1544,7 +1544,7 @@ mod tests {
         let attempt_three_mock = server.mock(|when, then| {
             when.method(httpmock::Method::GET)
                 .header("x-custom-header", "attempt-3")
-                .path("/api");
+                .path("/api-retry");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body_obj(content.value())
