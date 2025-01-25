@@ -384,7 +384,7 @@ where
         let action_payload = if let Some(formatter) = action.formatter() {
             let formatter_result = self
                 .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
-                    formatter,
+                    self.get_script_content(tracker, formatter).await?,
                     FormatterScriptArgs {
                         action: action.type_tag(),
                         new_content: new_value.clone(),
@@ -392,7 +392,12 @@ where
                     },
                 )
                 .await
-                .context("Failed to execute action \"formatter\" script.")
+                .with_context(|| {
+                    format!(
+                        "Failed to execute action \"formatter\" script ({}).",
+                        action.type_tag()
+                    )
+                })
                 .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
             match formatter_result {
                 // Formatter empty content that means we should abort action.
@@ -4703,6 +4708,87 @@ mod tests {
                     HeaderValue::from_static("text/plain"),
                 )])),
                 body: Some(serde_json::to_vec(&json!("\"rev_2\"_webhook$"))?),
+            })
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_execute_tracker_actions_with_remote_formatter_script(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let server = MockServer::start();
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(
+                            server.url("/api/remote-formatter/get-call").parse()?,
+                        )],
+                        configurator: None,
+                        extractor: None,
+                    }))
+                    .with_actions(vec![TrackerAction::Email(EmailAction {
+                        to: vec!["dev@retrack.dev".to_string()],
+                        formatter: Some(server.url("/api/remote-formatter/formatter.js")),
+                    })])
+                    .build(),
+            )
+            .await?;
+
+        let content = TrackerDataValue::new(json!("\"rev_1\""));
+        let server_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/api/remote-formatter/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        let formatter_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/api/remote-formatter/formatter.js");
+            then.status(200)
+                .header("Content-Type", "text/javascript")
+                .body("(() => ({ content: `${context.newContent}_${context.action}` }))();");
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data(
+                tracker.id,
+                TrackerListRevisionsParams {
+                    calculate_diff: false,
+                },
+            )
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        formatter_mock.assert();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(OffsetDateTime::now_utc(), 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 1);
+
+        let email_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            email_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec!["dev@retrack.dev".to_string()],
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: Ok("\"rev_1\"_email".to_string()),
+                }),
             })
         );
 
