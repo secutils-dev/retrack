@@ -429,8 +429,8 @@ mod tests {
     use serde_json::json;
     use sqlx::PgPool;
     use std::{ops::Add, sync::Arc, time::Duration};
+    use test_log::test;
     use time::OffsetDateTime;
-    use tracing_test::traced_test;
     use uuid::uuid;
 
     #[sqlx::test]
@@ -827,7 +827,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn when_run_removes_job_if_does_not_reference_tracker(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -854,7 +854,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn when_run_removes_job_if_tracker_does_not_support_tracking(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -892,7 +892,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn when_run_removes_retry_job_if_tracker_does_not_support_retries(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -938,7 +938,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn when_run_removes_job_if_tracker_does_not_support_revisions(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -984,7 +984,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn when_run_removes_job_if_tracker_is_disabled(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
         let api = Arc::new(mock_api(pool).await?);
@@ -1024,7 +1024,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn can_run(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
         let api = Arc::new(mock_api(pool).await?);
@@ -1034,10 +1034,10 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParamsBuilder::new("tracker")
+                TrackerCreateParamsBuilder::new("tracker-normal-job")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        requests: vec![TargetRequest::new(server.url("/api").parse()?)],
+                        requests: vec![TargetRequest::new(server.url("/api-normal-job").parse()?)],
                         configurator: None,
                         extractor: None,
                     }))
@@ -1058,7 +1058,7 @@ mod tests {
         // Create server mock.
         let content = TrackerDataValue::new(json!("some-content"));
         let content_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/api");
+            when.method(httpmock::Method::GET).path("/api-normal-job");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body_obj(content.value())
@@ -1125,16 +1125,16 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn can_run_retry_job(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
         let api = Arc::new(mock_api(pool).await?);
         let server = MockServer::start();
 
         // Create tracker with retry strategy.
-        let mut create_params = TrackerCreateParamsBuilder::new("tracker")
+        let mut create_params = TrackerCreateParamsBuilder::new("tracker-retry-job")
             .with_target(TrackerTarget::Api(ApiTarget {
-                requests: vec![TargetRequest::new(server.url("/api").parse()?)],
+                requests: vec![TargetRequest::new(server.url("/api-retry-job").parse()?)],
                 configurator: None,
                 extractor: None,
             }))
@@ -1169,7 +1169,7 @@ mod tests {
         // Create server mock.
         let content = TrackerDataValue::new(json!("some-content"));
         let content_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/api");
+            when.method(httpmock::Method::GET).path("/api-retry-job");
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body_obj(content.value())
@@ -1219,7 +1219,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn resets_job_and_report_error_if_job_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.smtp = config.smtp.map(|config| SmtpConfig {
@@ -1238,10 +1238,10 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers
             .create_tracker(
-                TrackerCreateParamsBuilder::new("tracker")
+                TrackerCreateParamsBuilder::new("tracker-failed-job")
                     .with_schedule("0 0 * * * *")
                     .with_target(TrackerTarget::Api(ApiTarget {
-                        requests: vec![TargetRequest::new(server.url("/api").parse()?)],
+                        requests: vec![TargetRequest::new(server.url("/api-failed-job").parse()?)],
                         configurator: None,
                         extractor: None,
                     }))
@@ -1261,10 +1261,10 @@ mod tests {
 
         // Create server mock.
         let content_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/api");
+            when.method(httpmock::Method::GET).path("/api-failed-job");
             then.status(400)
                 .header("Content-Type", "application/json")
-                .body("Uh oh!")
+                .body("Uh oh (failed-job)!")
                 .delay(Duration::from_secs(2));
         });
 
@@ -1337,7 +1337,9 @@ mod tests {
                 content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name,
-                    result: Err("Failed to execute API target request (0): Uh oh!".to_string())
+                    result: Err(
+                        "Failed to execute API target request (0): Uh oh (failed-job)!".to_string()
+                    )
                 })
             })
         );
@@ -1345,7 +1347,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[test(sqlx::test)]
     async fn removes_job_and_report_error_if_last_retry_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.smtp = config.smtp.map(|config| SmtpConfig {
@@ -1361,9 +1363,9 @@ mod tests {
         let server = MockServer::start();
 
         // Create tracker with retry strategy.
-        let mut create_params = TrackerCreateParamsBuilder::new("tracker")
+        let mut create_params = TrackerCreateParamsBuilder::new("tracker-failed-retry")
             .with_target(TrackerTarget::Api(ApiTarget {
-                requests: vec![TargetRequest::new(server.url("/api").parse()?)],
+                requests: vec![TargetRequest::new(server.url("/api-failed-retry").parse()?)],
                 configurator: None,
                 extractor: None,
             }))
@@ -1395,10 +1397,10 @@ mod tests {
 
         // Create server mock.
         let content_mock = server.mock(|when, then| {
-            when.method(httpmock::Method::GET).path("/api");
+            when.method(httpmock::Method::GET).path("/api-failed-retry");
             then.status(400)
                 .header("Content-Type", "application/json")
-                .body("Uh oh!")
+                .body("Uh oh (failed retry)!")
                 .delay(Duration::from_secs(2));
         });
 
@@ -1460,7 +1462,10 @@ mod tests {
                 content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name,
-                    result: Err("Failed to execute API target request (0): Uh oh!".to_string())
+                    result: Err(
+                        "Failed to execute API target request (0): Uh oh (failed retry)!"
+                            .to_string()
+                    )
                 })
             })
         );
@@ -1468,8 +1473,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
-    #[traced_test]
+    #[test(sqlx::test)]
     async fn can_schedule_retries_if_request_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.smtp = config.smtp.map(|config| SmtpConfig {

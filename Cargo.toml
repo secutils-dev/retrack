@@ -70,8 +70,8 @@ uuid = "1.12.1"
 [dev-dependencies]
 httpmock = "0.7.0"
 insta = "1.42.0"
+test-log = "0.2.17"
 toml = "0.8.19"
-tracing-test = "0.2.5"
 
 [features]
 default = [
