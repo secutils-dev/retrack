@@ -194,8 +194,8 @@ impl TrackersRunJob {
                 metrics.job_execution_time = run_start.elapsed().as_nanos() as u64,
                 "Tracker no longer has a job config, the job will be removed."
             );
-            job_scheduler.remove(&job_id).await?;
             trackers.clear_tracker_job(tracker.id).await?;
+            job_scheduler.remove(&job_id).await?;
             return Ok(());
         };
 
@@ -208,8 +208,8 @@ impl TrackersRunJob {
                 metrics.job_execution_time = run_start.elapsed().as_nanos() as u64,
                 "Tracker doesn't have a retry strategy, the retry job will be removed."
             );
-            job_scheduler.remove(&job_id).await?;
             trackers.clear_tracker_job(tracker.id).await?;
+            job_scheduler.remove(&job_id).await?;
             return Ok(());
         }
 
@@ -223,8 +223,8 @@ impl TrackersRunJob {
                 metrics.job_execution_time = run_start.elapsed().as_nanos() as u64,
                 "Tracker is disabled or doesn't support automatic tracking, the job will be removed."
             );
-            job_scheduler.remove(&job_id).await?;
             trackers.clear_tracker_job(tracker.id).await?;
+            job_scheduler.remove(&job_id).await?;
             return Ok(());
         }
 
@@ -262,8 +262,8 @@ impl TrackersRunJob {
                 // If it was a retry attempt, remove the job to let scheduler reschedule it using
                 // latest tracker schedule. Otherwise, just mark the job as not running.
                 if job_meta.retry_attempt > 0 {
-                    job_scheduler.remove(&job_id).await?;
                     trackers.clear_tracker_job(tracker.id).await?;
+                    job_scheduler.remove(&job_id).await?;
                 } else {
                     scheduler
                         .set_job_meta(job_id, &Self::create_job_meta())
@@ -293,8 +293,8 @@ impl TrackersRunJob {
 
                         // Remove the job and update the tracker to remove the job reference to
                         // allow scheduling job to re-schedule tracker and report the error.
-                        job_scheduler.remove(&job_id).await?;
                         trackers.clear_tracker_job(tracker.id).await?;
+                        job_scheduler.remove(&job_id).await?;
                         Self::report_error(&api, tracker, err).await;
 
                         return Ok(());
