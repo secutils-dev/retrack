@@ -430,6 +430,7 @@ mod tests {
     use sqlx::PgPool;
     use std::{ops::Add, sync::Arc, time::Duration};
     use time::OffsetDateTime;
+    use tracing_test::traced_test;
     use uuid::uuid;
 
     #[sqlx::test]
@@ -1468,6 +1469,7 @@ mod tests {
     }
 
     #[sqlx::test]
+    #[traced_test]
     async fn can_schedule_retries_if_request_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.smtp = config.smtp.map(|config| SmtpConfig {
