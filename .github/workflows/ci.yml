@@ -61,7 +61,7 @@ jobs:
 
       - name: Test (default features)
         timeout-minutes: 6
-        run: cargo test can_schedule_retries_if_request_fails -- --nocapture
+        run: cargo test -- --nocapture
 
       - name: Build (default features)
         run: cargo build --release
