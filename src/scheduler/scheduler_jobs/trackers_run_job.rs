@@ -1491,7 +1491,7 @@ mod tests {
 
         // Create tracker with retry strategy.
         let api_url = server.url("/api");
-        let mut create_params = TrackerCreateParamsBuilder::new("tracker")
+        let mut create_params = TrackerCreateParamsBuilder::new("tracker-with-retry")
             .with_target(TrackerTarget::Api(ApiTarget {
                 requests: vec![TargetRequest::new(api_url.parse()?)],
                 configurator: Some(format!("((context) => ({{ requests: [{{ url: '{api_url}', headers: {{ 'x-custom-header': context.tags[0] }} }}] }}))(context);")),
@@ -1510,7 +1510,7 @@ mod tests {
         let tracker = trackers.create_tracker(create_params).await?;
 
         // Create tracker job.
-        let job_schedule = mock_schedule_in_sec(1);
+        let job_schedule = mock_schedule_in_sec(2);
         let job_id = scheduler
             .add(TrackersRunJob::create(api.clone(), &job_schedule)?)
             .await?;
@@ -1526,7 +1526,7 @@ mod tests {
                 .path("/api");
             then.status(400)
                 .header("Content-Type", "application/json")
-                .body("Uh oh!")
+                .body("Uh oh (first attempt)!")
                 .delay(Duration::from_secs(3));
         });
 
@@ -1536,7 +1536,7 @@ mod tests {
                 .path("/api");
             then.status(400)
                 .header("Content-Type", "application/json")
-                .body("Uh oh!")
+                .body("Uh oh (second attempt)!")
                 .delay(Duration::from_secs(3));
         });
 
