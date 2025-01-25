@@ -52,16 +52,16 @@ jobs:
       - name: Check format
         run: cargo +nightly fmt --all -- --check
 
+      - name: Test (default features)
+        timeout-minutes: 6
+        run: cargo test -- --nocapture
+
       - name: Check database schema
         run: |
           cargo install --force sqlx-cli
           cargo sqlx database create
           cargo sqlx migrate run
           cargo sqlx prepare --check
-
-      - name: Test (default features)
-        timeout-minutes: 6
-        run: cargo test -- --nocapture
 
       - name: Build (default features)
         run: cargo build --release
