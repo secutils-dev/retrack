@@ -1500,7 +1500,7 @@ mod tests {
         create_params.config.job = Some(SchedulerJobConfig {
             schedule: "0 0 * * * *".to_string(),
             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
-                interval: Duration::from_secs(2),
+                interval: Duration::from_secs(3),
                 max_attempts: 2,
             }),
         });
@@ -1525,7 +1525,7 @@ mod tests {
             then.status(400)
                 .header("Content-Type", "application/json")
                 .body("Uh oh!")
-                .delay(Duration::from_secs(2));
+                .delay(Duration::from_secs(3));
         });
 
         let attempt_two_mock = server.mock(|when, then| {
@@ -1535,7 +1535,7 @@ mod tests {
             then.status(400)
                 .header("Content-Type", "application/json")
                 .body("Uh oh!")
-                .delay(Duration::from_secs(2));
+                .delay(Duration::from_secs(3));
         });
 
         let content = TrackerDataValue::new(json!("Hooray!!!"));
@@ -1546,7 +1546,7 @@ mod tests {
             then.status(200)
                 .header("Content-Type", "application/json")
                 .json_body_obj(content.value())
-                .delay(Duration::from_secs(2));
+                .delay(Duration::from_secs(3));
         });
 
         assert!(trackers
@@ -1580,7 +1580,7 @@ mod tests {
                 break;
             }
 
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
         scheduler.shutdown().await?;
