@@ -45,6 +45,7 @@ jobs:
           rustup override set ${{ matrix.rust }}
           rustup component add clippy
           rustup component add --toolchain nightly rustfmt
+          cargo install --force sqlx-cli
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
@@ -54,7 +55,6 @@ jobs:
 
       - name: Create test database
         run: |
-          cargo install --force sqlx-cli
           cargo sqlx database create
           cargo sqlx migrate run
 
