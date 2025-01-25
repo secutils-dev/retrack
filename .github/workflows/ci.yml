@@ -19,6 +19,7 @@ jobs:
   ci:
     name: API Build (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         rust: [ stable ]
@@ -68,6 +69,7 @@ jobs:
   ci-web-scraper:
     name: Web Scraper Build (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         name: Checkout
