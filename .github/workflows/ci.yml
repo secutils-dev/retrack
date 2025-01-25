@@ -59,6 +59,7 @@ jobs:
           cargo sqlx prepare --check
 
       - name: Test (default features)
+        timeout-minutes: 6
         run: cargo test
 
       - name: Build (default features)
