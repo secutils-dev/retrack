@@ -584,23 +584,21 @@ where
                 | SchedulerJobRetryStrategy::Exponential { max_interval, .. } = retry_strategy
                 {
                     let max_interval = *max_interval;
-                    if max_interval < config.min_retry_interval {
+                    if max_interval < min_interval {
                         bail!(RetrackError::client(
                             format!(
                                 "Tracker retry strategy max interval cannot be less than {}, but received {}.",
-                                humantime::format_duration(config.min_retry_interval),
+                                humantime::format_duration(min_interval),
                                 humantime::format_duration(max_interval)
                             )
                         ));
                     }
 
-                    if max_interval > MAX_TRACKER_RETRY_INTERVAL
-                        || max_interval > min_schedule_interval
-                    {
+                    if max_interval > MAX_TRACKER_RETRY_INTERVAL {
                         bail!(RetrackError::client(
                             format!(
                                 "Tracker retry strategy max interval cannot be greater than {}, but received {}.",
-                                humantime::format_duration(MAX_TRACKER_RETRY_INTERVAL.min(min_schedule_interval)),
+                                humantime::format_duration(MAX_TRACKER_RETRY_INTERVAL),
                                 humantime::format_duration(max_interval)
                             )
                         ));
@@ -1791,7 +1789,7 @@ mod tests {
                 tags: tags.clone(),
                 actions: actions.clone()
             }).await),
-            @r###""Tracker retry strategy max interval cannot be less than 1m, but received 30s.""###
+            @r###""Tracker retry strategy max interval cannot be less than 2m, but received 30s.""###
         );
 
         // Too high max retry interval.
@@ -1816,29 +1814,6 @@ mod tests {
                 actions: actions.clone()
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 12h, but received 13h.""###
-        );
-
-        assert_debug_snapshot!(
-            create_and_fail(api.create_tracker(TrackerCreateParams {
-                name: "name".to_string(),
-                enabled: true,
-                target: target.clone(),
-                config: TrackerConfig {
-                    job: Some(SchedulerJobConfig {
-                        schedule: "@hourly".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                            initial_interval: Duration::from_secs(120),
-                            increment: Duration::from_secs(10),
-                            max_interval: Duration::from_secs(2 * 3600),
-                            max_attempts: 5,
-                        })
-                    }),
-                    ..config.clone()
-                },
-                tags: tags.clone(),
-                actions: actions.clone()
-            }).await),
-            @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
         // Too few requests.
@@ -2711,7 +2686,7 @@ mod tests {
                 }),
                 ..Default::default()
             }).await),
-            @r###""Tracker retry strategy max interval cannot be less than 1m, but received 30s.""###
+            @r###""Tracker retry strategy max interval cannot be less than 2m, but received 30s.""###
         );
 
         // Too high max retry interval.
@@ -2732,25 +2707,6 @@ mod tests {
                 ..Default::default()
             }).await),
             @r###""Tracker retry strategy max interval cannot be greater than 12h, but received 13h.""###
-        );
-
-        assert_debug_snapshot!(
-            update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                config: Some(TrackerConfig {
-                    job: Some(SchedulerJobConfig {
-                        schedule: "@hourly".to_string(),
-                        retry_strategy: Some(SchedulerJobRetryStrategy::Linear {
-                            initial_interval: Duration::from_secs(120),
-                            increment: Duration::from_secs(10),
-                            max_interval: Duration::from_secs(2 * 3600),
-                            max_attempts: 5,
-                        })
-                    }),
-                    ..tracker.config.clone()
-                }),
-               ..Default::default()
-            }).await),
-            @r###""Tracker retry strategy max interval cannot be greater than 1h, but received 2h.""###
         );
 
         // Too few requests.

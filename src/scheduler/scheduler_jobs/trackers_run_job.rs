@@ -1582,7 +1582,7 @@ mod tests {
                 } else if !job_meta.is_running {
                     should_increase_counter = true;
                 }
-            } else if attempts_counter >= 3 {
+            } else if attempts_counter >= 4 {
                 break;
             }
 
