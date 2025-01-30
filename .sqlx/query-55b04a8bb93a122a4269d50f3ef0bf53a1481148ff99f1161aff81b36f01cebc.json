@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    DELETE FROM trackers_data as data\n    USING trackers as t\n    WHERE data.tracker_id = t.id AND t.id = $1 AND data.id = $2\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "55b04a8bb93a122a4269d50f3ef0bf53a1481148ff99f1161aff81b36f01cebc"
+}

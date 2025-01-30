@@ -4,9 +4,11 @@ pub mod trackers_clear_revisions;
 pub mod trackers_create;
 pub mod trackers_create_revision;
 pub mod trackers_get;
+pub mod trackers_get_revision;
 pub mod trackers_list;
 pub mod trackers_list_revisions;
 pub mod trackers_remove;
+pub mod trackers_remove_revision;
 pub mod trackers_update;
 
 use crate::server::Status;
@@ -39,7 +41,9 @@ use utoipa::OpenApi;
         trackers_bulk_remove::trackers_bulk_remove,
         trackers_list_revisions::trackers_list_revisions,
         trackers_create_revision::trackers_create_revision,
-        trackers_clear_revisions::trackers_clear_revisions
+        trackers_clear_revisions::trackers_clear_revisions,
+        trackers_get_revision::trackers_get_revision,
+        trackers_remove_revision::trackers_remove_revision
     ),
     components(schemas(
         ApiTarget,

@@ -155,8 +155,8 @@ WHERE id = $1
     }
 
     /// Removes tracker with the specified ID.
-    pub async fn remove_tracker(&self, id: Uuid) -> anyhow::Result<()> {
-        query!(
+    pub async fn remove_tracker(&self, id: Uuid) -> anyhow::Result<bool> {
+        let result = query!(
             r#"
     DELETE FROM trackers
     WHERE id = $1
@@ -166,7 +166,7 @@ WHERE id = $1
         .execute(self.pool)
         .await?;
 
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     /// Removes all trackers that have all specified tags. If `tags` is empty, all trackers are removed.
@@ -182,10 +182,11 @@ WHERE id = $1
         Ok(result.rows_affected())
     }
 
-    /// Retrieves all tracked data for the specified tracker.
-    pub async fn get_tracker_data(
+    /// Retrieves tracked data for the specified tracker sorted by creation date (desc).
+    pub async fn get_tracker_data_revisions(
         &self,
         tracker_id: Uuid,
+        size: usize,
     ) -> anyhow::Result<Vec<TrackerDataRevision>> {
         let raw_revisions = query_as!(
             RawTrackerDataRevision,
@@ -195,9 +196,11 @@ FROM trackers_data as data
 INNER JOIN trackers
 ON data.tracker_id = trackers.id
 WHERE data.tracker_id = $1
-ORDER BY data.created_at
+ORDER BY data.created_at DESC
+LIMIT $2
                 "#,
-            tracker_id
+            tracker_id,
+            size as i64
         )
         .fetch_all(self.pool)
         .await?;
@@ -210,22 +213,32 @@ ORDER BY data.created_at
         Ok(revisions)
     }
 
-    /// Removes tracker data.
-    pub async fn clear_tracker_data(&self, tracker_id: Uuid) -> anyhow::Result<()> {
-        query!(
+    /// Retrieves tracker data revision with the specified ID.
+    pub async fn get_tracker_data_revision(
+        &self,
+        tracker_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<TrackerDataRevision>> {
+        query_as!(
+            RawTrackerDataRevision,
             r#"
-    DELETE FROM trackers_data
-    WHERE tracker_id = $1
+SELECT data.id, data.tracker_id, data.data, data.created_at
+FROM trackers_data as data
+INNER JOIN trackers
+ON data.tracker_id = trackers.id
+WHERE data.tracker_id = $1 AND data.id = $2
+LIMIT 1
                     "#,
-            tracker_id
+            tracker_id,
+            id
         )
-        .execute(self.pool)
-        .await?;
-
-        Ok(())
+        .fetch_optional(self.pool)
+        .await?
+        .map(TrackerDataRevision::try_from)
+        .transpose()
     }
 
-    // Inserts tracker revision.
+    /// Inserts tracker revision.
     pub async fn insert_tracker_data_revision(
         &self,
         revision: &TrackerDataRevision,
@@ -265,19 +278,62 @@ ORDER BY data.created_at
         Ok(())
     }
 
-    /// Removes tracker data revision.
+    /// Removes tracker data revision with the specified ID.
     pub async fn remove_tracker_data_revision(
         &self,
         tracker_id: Uuid,
         id: Uuid,
-    ) -> anyhow::Result<()> {
-        query!(
+    ) -> anyhow::Result<bool> {
+        // Query is more complex than it can be, but it's to additional layer of protection against
+        // accidental deletion of data.
+        let result = query!(
             r#"
-    DELETE FROM trackers_data
-    WHERE tracker_id = $1 AND id = $2
+    DELETE FROM trackers_data as data
+    USING trackers as t
+    WHERE data.tracker_id = t.id AND t.id = $1 AND data.id = $2
                     "#,
             tracker_id,
             id
+        )
+        .execute(self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Removes all tracker data revisions.
+    pub async fn clear_tracker_data_revisions(&self, tracker_id: Uuid) -> anyhow::Result<()> {
+        query!(
+            r#"
+    DELETE FROM trackers_data
+    WHERE tracker_id = $1
+                    "#,
+            tracker_id
+        )
+        .execute(self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Removes the oldest tracker data revisions that are beyond specified limit.
+    pub async fn enforce_tracker_data_revisions_limit(
+        &self,
+        tracker_id: Uuid,
+        limit: usize,
+    ) -> anyhow::Result<()> {
+        query!(
+            r#"
+    DELETE FROM trackers_data USING (
+        SELECT id FROM trackers_data
+        WHERE tracker_id = $1
+        ORDER BY created_at DESC
+        OFFSET $2
+    ) AS oldest_revisions
+    WHERE trackers_data.id = oldest_revisions.id
+                    "#,
+            tracker_id,
+            limit as i64
         )
         .execute(self.pool)
         .await?;
@@ -636,9 +692,19 @@ mod tests {
             .unwrap();
         assert_eq!(tracker_2, trackers_list[0].clone());
 
-        trackers
-            .remove_tracker(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?;
+        // Non-existent tracker.
+        assert!(
+            !trackers
+                .remove_tracker(uuid!("00000000-0000-0000-0000-000000000003"))
+                .await?
+        );
+
+        // Existent tracker.
+        assert!(
+            trackers
+                .remove_tracker(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+        );
 
         let tracker = trackers
             .get_tracker(uuid!("00000000-0000-0000-0000-000000000001"))
@@ -651,9 +717,11 @@ mod tests {
             .unwrap();
         assert_eq!(tracker, trackers_list.remove(0));
 
-        trackers
-            .remove_tracker(uuid!("00000000-0000-0000-0000-000000000002"))
-            .await?;
+        assert!(
+            trackers
+                .remove_tracker(uuid!("00000000-0000-0000-0000-000000000002"))
+                .await?
+        );
 
         let tracker = trackers
             .get_tracker(uuid!("00000000-0000-0000-0000-000000000001"))
@@ -876,7 +944,100 @@ mod tests {
 
         // No data yet.
         for tracker in trackers_list.iter() {
-            assert!(trackers.get_tracker_data(tracker.id).await?.is_empty());
+            assert!(trackers
+                .get_tracker_data_revisions(tracker.id, 100)
+                .await?
+                .is_empty());
+        }
+
+        let revisions = vec![
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                trackers_list[0].id,
+                0,
+            )?,
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                trackers_list[0].id,
+                1,
+            )?,
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000003"),
+                trackers_list[1].id,
+                0,
+            )?,
+        ];
+        for revision in revisions.iter() {
+            trackers.insert_tracker_data_revision(revision).await?;
+        }
+
+        assert_eq!(
+            trackers
+                .get_tracker_data_revision(trackers_list[0].id, revisions.first().unwrap().id)
+                .await?,
+            Some(revisions[0].clone())
+        );
+        assert_eq!(
+            trackers
+                .get_tracker_data_revision(trackers_list[0].id, revisions.get(1).unwrap().id)
+                .await?,
+            Some(revisions[1].clone())
+        );
+        assert!(trackers
+            .get_tracker_data_revision(
+                trackers_list[0].id,
+                uuid!("00000000-0000-0000-0000-000000000003")
+            )
+            .await?
+            .is_none());
+
+        assert_eq!(
+            trackers
+                .get_tracker_data_revision(trackers_list[1].id, revisions.get(2).unwrap().id)
+                .await?,
+            Some(revisions[2].clone())
+        );
+        assert!(trackers
+            .get_tracker_data_revision(
+                trackers_list[1].id,
+                uuid!("00000000-0000-0000-0000-000000000002")
+            )
+            .await?
+            .is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_retrieve_all_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let trackers_list = vec![
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                "some-name",
+                3,
+            )?
+            .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                "some-name-2",
+                3,
+            )?
+            .build(),
+        ];
+
+        let trackers = db.trackers();
+        for tracker in trackers_list.iter() {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        // No data yet.
+        for tracker in trackers_list.iter() {
+            assert!(trackers
+                .get_tracker_data_revisions(tracker.id, 100)
+                .await?
+                .is_empty());
         }
 
         let mut revisions = vec![
@@ -900,17 +1061,37 @@ mod tests {
             trackers.insert_tracker_data_revision(revision).await?;
         }
 
-        let tracker_one_data = trackers.get_tracker_data(trackers_list[0].id).await?;
+        let tracker_one_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
         assert_eq!(
             tracker_one_data,
-            vec![revisions.remove(0), revisions.remove(0)]
+            vec![
+                revisions.get(1).unwrap().clone(),
+                revisions.first().unwrap().clone()
+            ]
         );
 
-        let tracker_two_data = trackers.get_tracker_data(trackers_list[1].id).await?;
+        let tracker_one_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 2)
+            .await?;
+        assert_eq!(
+            tracker_one_data,
+            vec![revisions.get(1).unwrap().clone(), revisions.remove(0)]
+        );
+
+        let tracker_one_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 1)
+            .await?;
+        assert_eq!(tracker_one_data, vec![revisions.remove(0)]);
+
+        let tracker_two_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
         assert_eq!(tracker_two_data, vec![revisions.remove(0)]);
 
         assert!(trackers
-            .get_tracker_data(uuid!("00000000-0000-0000-0000-000000000004"))
+            .get_tracker_data_revisions(uuid!("00000000-0000-0000-0000-000000000004"), 100)
             .await?
             .is_empty());
 
@@ -918,7 +1099,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn can_remove_tracker_data(pool: PgPool) -> anyhow::Result<()> {
+    async fn can_remove_tracker_data_revision(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
         let trackers_list = vec![
@@ -962,40 +1143,64 @@ mod tests {
             trackers.insert_tracker_data_revision(revision).await?;
         }
 
-        let tracker_data = trackers.get_tracker_data(trackers_list[0].id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
         assert_eq!(
             tracker_data,
-            vec![revisions[0].clone(), revisions[1].clone()]
+            vec![revisions[1].clone(), revisions[0].clone()]
         );
 
-        let tracker_data = trackers.get_tracker_data(trackers_list[1].id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
         assert_eq!(tracker_data, vec![revisions[2].clone()]);
 
-        // Remove one revision.
-        trackers
-            .remove_tracker_data_revision(trackers_list[0].id, revisions[0].id)
-            .await?;
+        // Remove non-existent revision.
+        assert!(
+            !trackers
+                .remove_tracker_data_revision(
+                    trackers_list[0].id,
+                    uuid!("00000000-0000-0000-0000-000000000004")
+                )
+                .await?
+        );
 
-        let tracker_data = trackers.get_tracker_data(trackers_list[0].id).await?;
+        // Remove one revision.
+        assert!(
+            trackers
+                .remove_tracker_data_revision(trackers_list[0].id, revisions[0].id)
+                .await?
+        );
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
         assert_eq!(tracker_data, vec![revisions[1].clone()]);
 
-        let tracker_data = trackers.get_tracker_data(trackers_list[1].id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
         assert_eq!(tracker_data, vec![revisions[2].clone()]);
 
         // Remove the rest of revisions.
-        trackers
-            .remove_tracker_data_revision(trackers_list[0].id, revisions[1].id)
-            .await?;
-        trackers
-            .remove_tracker_data_revision(trackers_list[1].id, revisions[2].id)
-            .await?;
+        assert!(
+            trackers
+                .remove_tracker_data_revision(trackers_list[0].id, revisions[1].id)
+                .await?
+        );
+        assert!(
+            trackers
+                .remove_tracker_data_revision(trackers_list[1].id, revisions[2].id)
+                .await?
+        );
 
         assert!(trackers
-            .get_tracker_data(trackers_list[0].id)
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
             .await?
             .is_empty());
         assert!(trackers
-            .get_tracker_data(trackers_list[1].id)
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
             .await?
             .is_empty());
 
@@ -1047,25 +1252,163 @@ mod tests {
             trackers.insert_tracker_data_revision(revision).await?;
         }
 
-        let tracker_data = trackers.get_tracker_data(trackers_list[0].id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
         assert_eq!(
             tracker_data,
-            vec![revisions[0].clone(), revisions[1].clone()]
+            vec![revisions[1].clone(), revisions[0].clone()]
         );
 
-        let tracker_data = trackers.get_tracker_data(trackers_list[1].id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
         assert_eq!(tracker_data, vec![revisions[2].clone()]);
 
         // Clear all revisions.
-        trackers.clear_tracker_data(trackers_list[0].id).await?;
-        trackers.clear_tracker_data(trackers_list[1].id).await?;
+        trackers
+            .clear_tracker_data_revisions(trackers_list[0].id)
+            .await?;
+        trackers
+            .clear_tracker_data_revisions(trackers_list[1].id)
+            .await?;
 
         assert!(trackers
-            .get_tracker_data(trackers_list[0].id)
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
             .await?
             .is_empty());
         assert!(trackers
-            .get_tracker_data(trackers_list[1].id)
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?
+            .is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_enforce_tracker_data_revisions_limit(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let trackers_list = vec![
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                "some-name",
+                3,
+            )?
+            .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                "some-name-2",
+                3,
+            )?
+            .build(),
+        ];
+
+        let trackers = db.trackers();
+        for tracker in trackers_list.iter() {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        let revisions = vec![
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                trackers_list[0].id,
+                0,
+            )?,
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000002"),
+                trackers_list[0].id,
+                1,
+            )?,
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000003"),
+                trackers_list[0].id,
+                2,
+            )?,
+            create_data_revision(
+                uuid!("00000000-0000-0000-0000-000000000004"),
+                trackers_list[1].id,
+                0,
+            )?,
+        ];
+        for revision in revisions.iter() {
+            trackers.insert_tracker_data_revision(revision).await?;
+        }
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
+        assert_eq!(
+            tracker_data,
+            vec![
+                revisions[2].clone(),
+                revisions[1].clone(),
+                revisions[0].clone()
+            ]
+        );
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
+        assert_eq!(tracker_data, vec![revisions[3].clone()]);
+
+        // No-op enforce.
+        trackers
+            .enforce_tracker_data_revisions_limit(trackers_list[0].id, 3)
+            .await?;
+        trackers
+            .enforce_tracker_data_revisions_limit(trackers_list[1].id, 1)
+            .await?;
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
+        assert_eq!(
+            tracker_data,
+            vec![
+                revisions[2].clone(),
+                revisions[1].clone(),
+                revisions[0].clone()
+            ]
+        );
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
+        assert_eq!(tracker_data, vec![revisions[3].clone()]);
+
+        // Partial enforce.
+        trackers
+            .enforce_tracker_data_revisions_limit(trackers_list[0].id, 1)
+            .await?;
+        trackers
+            .enforce_tracker_data_revisions_limit(trackers_list[1].id, 0)
+            .await?;
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?;
+        assert_eq!(tracker_data, vec![revisions[2].clone()]);
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
+            .await?;
+        assert!(tracker_data.is_empty());
+
+        // Full removal.
+        trackers
+            .enforce_tracker_data_revisions_limit(trackers_list[0].id, 0)
+            .await?;
+        trackers
+            .enforce_tracker_data_revisions_limit(trackers_list[1].id, 0)
+            .await?;
+
+        assert!(trackers
+            .get_tracker_data_revisions(trackers_list[0].id, 100)
+            .await?
+            .is_empty());
+        assert!(trackers
+            .get_tracker_data_revisions(trackers_list[1].id, 100)
             .await?
             .is_empty());
 

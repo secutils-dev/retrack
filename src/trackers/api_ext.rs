@@ -35,7 +35,7 @@ use retrack_types::{
 use serde_json::json;
 use std::{
     borrow::Cow,
-    cmp::{max, min},
+    cmp::min,
     collections::HashSet,
     str::FromStr,
     time::{Duration, Instant},
@@ -206,7 +206,7 @@ where
     }
 
     /// Removes existing tracker and all data.
-    pub async fn remove_tracker(&self, id: Uuid) -> anyhow::Result<()> {
+    pub async fn remove_tracker(&self, id: Uuid) -> anyhow::Result<bool> {
         self.trackers.remove_tracker(id).await
     }
 
@@ -223,6 +223,17 @@ where
         self.trackers.remove_trackers(&normalized_tags).await
     }
 
+    /// Returns tracker data revision by its ID.
+    pub async fn get_tracker_data_revision(
+        &self,
+        tracker_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<TrackerDataRevision>> {
+        self.trackers
+            .get_tracker_data_revision(tracker_id, id)
+            .await
+    }
+
     /// Fetches data revision for the specified tracker, and persists it if allowed by config and
     /// if the data has changed.
     pub async fn create_tracker_data_revision(
@@ -235,50 +246,51 @@ where
             )));
         };
 
-        let mut revisions = self.trackers.get_tracker_data(tracker.id).await?;
+        // Fetch last revision to provide it to the extractor of the new revision.
+        let last_revision = self
+            .trackers
+            .get_tracker_data_revisions(tracker.id, 1)
+            .await?
+            .pop();
         let mut new_revision = match tracker.target {
             TrackerTarget::Page(_) => {
-                self.create_tracker_page_data_revision(&tracker, &revisions)
+                self.create_tracker_page_data_revision(&tracker, &last_revision)
                     .await?
             }
             TrackerTarget::Api(_) => {
-                self.create_tracker_api_data_revision(&tracker, &revisions)
+                self.create_tracker_api_data_revision(&tracker, &last_revision)
                     .await?
             }
         };
 
         // If the last revision has the same original data value, drop newly fetched revision.
-        let last_revision = if let Some(last_revision) = revisions.pop() {
+        let last_revision = if let Some(last_revision) = last_revision {
+            // Return the last revision without re-running actions if data hasn't changed.
             if last_revision.data.original() == new_revision.data.original() {
-                // Return the last revision without re-running actions as data hasn't changed.
                 return Ok(last_revision);
             }
-
-            // Return revision back to the revision list, in case it needs to be displaced.
-            revisions.push(last_revision);
-            revisions.last()
+            Some(last_revision)
         } else {
             None
         };
 
         // Iterate through all tracker actions and execute them.
-        let previous_data_value = last_revision.map(|r| &r.data);
+        let last_revision_value = last_revision.map(|r| r.data);
         for action in tracker.actions.iter() {
             self.execute_tracker_action(
                 &tracker,
                 action,
                 &mut new_revision.data,
-                previous_data_value,
+                last_revision_value.as_ref(),
             )
             .await?
         }
 
+        // Insert new revision if allowed by the config.
         let max_revisions = min(
             tracker.config.revisions,
             self.api.config.trackers.max_revisions,
-        ) as isize;
-
-        // Insert new revision if allowed by the config.
+        );
         if max_revisions > 0 {
             self.trackers
                 .insert_tracker_data_revision(&new_revision)
@@ -286,29 +298,34 @@ where
         }
 
         // Enforce revisions limit and displace old revisions if needed.
-        let revisions_to_remove = max((revisions.len() as isize) - max_revisions + 1, 0) as usize;
-        for revision in revisions.iter().take(revisions_to_remove) {
-            self.trackers
-                .remove_tracker_data_revision(tracker.id, revision.id)
-                .await?;
-        }
+        self.trackers
+            .enforce_tracker_data_revisions_limit(tracker.id, max_revisions)
+            .await?;
 
         Ok(new_revision)
     }
 
     /// Returns all stored tracker data revisions.
-    pub async fn get_tracker_data(
+    pub async fn get_tracker_data_revisions(
         &self,
         tracker_id: Uuid,
         params: TrackerListRevisionsParams,
     ) -> anyhow::Result<Vec<TrackerDataRevision>> {
-        if self.get_tracker(tracker_id).await?.is_none() {
+        let Some(tracker) = self.get_tracker(tracker_id).await? else {
             bail!(RetrackError::client(format!(
                 "Tracker ('{tracker_id}') is not found."
             )));
-        }
+        };
 
-        let revisions = self.trackers.get_tracker_data(tracker_id).await?;
+        // If size isn't explicitly specified, use the `max_revisions` value from the global config.
+        let max_revisions = params
+            .size
+            .map(|size| size.get())
+            .unwrap_or(self.api.config.trackers.max_revisions);
+        let revisions = self
+            .trackers
+            .get_tracker_data_revisions(tracker_id, min(max_revisions, tracker.config.revisions))
+            .await?;
         if params.calculate_diff {
             tracker_data_revisions_diff(revisions)
         } else {
@@ -316,9 +333,25 @@ where
         }
     }
 
+    /// Removes specified tracker data revision.
+    pub async fn remove_tracker_data_revision(
+        &self,
+        tracker_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.trackers
+            .remove_tracker_data_revision(tracker_id, id)
+            .await
+    }
+
     /// Removes all persisted tracker revisions data.
     pub async fn clear_tracker_data(&self, tracker_id: Uuid) -> anyhow::Result<()> {
-        self.trackers.clear_tracker_data(tracker_id).await
+        if self.get_tracker(tracker_id).await?.is_none() {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{tracker_id}') is not found."
+            )));
+        }
+        self.trackers.clear_tracker_data_revisions(tracker_id).await
     }
 
     /// Returns all tracker job references that have jobs that need to be scheduled.
@@ -768,7 +801,7 @@ where
     async fn create_tracker_page_data_revision(
         &self,
         tracker: &Tracker,
-        revisions: &[TrackerDataRevision],
+        previous_revision: &Option<TrackerDataRevision>,
     ) -> anyhow::Result<TrackerDataRevision> {
         let TrackerTarget::Page(ref target) = tracker.target else {
             bail!(RetrackError::client(format!(
@@ -785,7 +818,7 @@ where
             user_agent: target.user_agent.as_deref(),
             ignore_https_errors: target.ignore_https_errors,
             timeout: tracker.config.timeout,
-            previous_content: revisions.last().map(|rev| &rev.data),
+            previous_content: previous_revision.as_ref().map(|rev| &rev.data),
         };
 
         let scraper_response = self.http_client()
@@ -842,7 +875,7 @@ where
     async fn create_tracker_api_data_revision(
         &self,
         tracker: &Tracker,
-        revisions: &[TrackerDataRevision],
+        last_revision: &Option<TrackerDataRevision>,
     ) -> anyhow::Result<TrackerDataRevision> {
         let TrackerTarget::Api(ref target) = tracker.target else {
             bail!(RetrackError::client(format!(
@@ -866,7 +899,7 @@ where
                         self.get_script_content(tracker, configurator).await?,
                         ConfiguratorScriptArgs {
                             tags: tracker.tags.clone(),
-                            previous_content: revisions.last().map(|rev| rev.data.clone()),
+                            previous_content: last_revision.as_ref().map(|rev| rev.data.clone()),
                             requests: configurator_requests,
                         },
                     )
@@ -993,7 +1026,7 @@ where
                     self.get_script_content(tracker, extractor).await?,
                     ExtractorScriptArgs {
                         tags: tracker.tags.clone(),
-                        previous_content: revisions.last().map(|rev| rev.data.clone()),
+                        previous_content: last_revision.as_ref().map(|rev| rev.data.clone()),
                         responses: Some(responses.clone()),
                     },
                 )
@@ -3277,10 +3310,10 @@ mod tests {
             .await?;
 
         let tracker_one_data = trackers
-            .get_tracker_data(tracker_one.id, Default::default())
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert!(tracker_one_data.is_empty());
         assert!(tracker_two_data.is_empty());
@@ -3302,15 +3335,10 @@ mod tests {
             .create_tracker_data_revision(tracker_one.id)
             .await?;
         let tracker_one_data = trackers
-            .get_tracker_data(
-                tracker_one.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert_eq!(tracker_one_data.len(), 1);
         assert_eq!(tracker_one_data[0].tracker_id, tracker_one.id);
@@ -3345,10 +3373,10 @@ mod tests {
         content_mock.delete();
 
         let tracker_one_data = trackers
-            .get_tracker_data(tracker_one.id, Default::default())
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert_eq!(tracker_one_data.len(), 2);
         assert!(tracker_two_data.is_empty());
@@ -3372,15 +3400,16 @@ mod tests {
         content_mock.assert();
 
         let tracker_one_data = trackers
-            .get_tracker_data(
+            .get_tracker_data_revisions(
                 tracker_one.id,
                 TrackerListRevisionsParams {
                     calculate_diff: true,
+                    ..Default::default()
                 },
             )
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert_eq!(tracker_one_data.len(), 2);
         assert_eq!(tracker_two_data.len(), 1);
@@ -3390,11 +3419,11 @@ mod tests {
             @r###"
         [
             TrackerDataValue {
-                original: String("\"rev_1\""),
+                original: String("@@ -1 +1 @@\n-\"rev_1\"\n+\"rev_2\"\n"),
                 mods: None,
             },
             TrackerDataValue {
-                original: String("@@ -1 +1 @@\n-\"rev_1\"\n+\"rev_2\"\n"),
+                original: String("\"rev_1\""),
                 mods: None,
             },
         ]
@@ -3413,23 +3442,18 @@ mod tests {
         );
 
         let tracker_one_data = trackers
-            .get_tracker_data(
-                tracker_one.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         assert_debug_snapshot!(
             tracker_one_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
             @r###"
         [
             TrackerDataValue {
-                original: String("\"rev_1\""),
+                original: String("\"rev_2\""),
                 mods: None,
             },
             TrackerDataValue {
-                original: String("\"rev_2\""),
+                original: String("\"rev_1\""),
                 mods: None,
             },
         ]
@@ -3487,10 +3511,10 @@ mod tests {
             .await?;
 
         let tracker_one_data = trackers
-            .get_tracker_data(tracker_one.id, Default::default())
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert!(tracker_one_data.is_empty());
         assert!(tracker_two_data.is_empty());
@@ -3507,15 +3531,10 @@ mod tests {
             .create_tracker_data_revision(tracker_one.id)
             .await?;
         let tracker_one_data = trackers
-            .get_tracker_data(
-                tracker_one.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert_eq!(tracker_one_data.len(), 1);
         assert_eq!(tracker_one_data[0].tracker_id, tracker_one.id);
@@ -3542,10 +3561,10 @@ mod tests {
         content_mock.delete();
 
         let tracker_one_data = trackers
-            .get_tracker_data(tracker_one.id, Default::default())
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert_eq!(tracker_one_data.len(), 2);
         assert!(tracker_two_data.is_empty());
@@ -3570,15 +3589,16 @@ mod tests {
         content_mock.assert();
 
         let tracker_one_data = trackers
-            .get_tracker_data(
+            .get_tracker_data_revisions(
                 tracker_one.id,
                 TrackerListRevisionsParams {
                     calculate_diff: true,
+                    ..Default::default()
                 },
             )
             .await?;
         let tracker_two_data = trackers
-            .get_tracker_data(tracker_two.id, Default::default())
+            .get_tracker_data_revisions(tracker_two.id, Default::default())
             .await?;
         assert_eq!(tracker_one_data.len(), 2);
         assert_eq!(tracker_two_data.len(), 1);
@@ -3588,11 +3608,11 @@ mod tests {
             @r###"
         [
             TrackerDataValue {
-                original: String("\"rev_1\""),
+                original: String("@@ -1 +1 @@\n-\"rev_1\"\n+\"rev_2\"\n"),
                 mods: None,
             },
             TrackerDataValue {
-                original: String("@@ -1 +1 @@\n-\"rev_1\"\n+\"rev_2\"\n"),
+                original: String("\"rev_1\""),
                 mods: None,
             },
         ]
@@ -3611,23 +3631,18 @@ mod tests {
         );
 
         let tracker_one_data = trackers
-            .get_tracker_data(
-                tracker_one.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker_one.id, Default::default())
             .await?;
         assert_debug_snapshot!(
             tracker_one_data.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
             @r###"
         [
             TrackerDataValue {
-                original: String("\"rev_1\""),
+                original: String("\"rev_2\""),
                 mods: None,
             },
             TrackerDataValue {
-                original: String("\"rev_2\""),
+                original: String("\"rev_1\""),
                 mods: None,
             },
         ]
@@ -3687,12 +3702,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].tracker_id, tracker.id);
@@ -3720,10 +3730,11 @@ mod tests {
         content_mock.assert();
 
         let tracker_data = trackers
-            .get_tracker_data(
+            .get_tracker_data_revisions(
                 tracker.id,
                 TrackerListRevisionsParams {
                     calculate_diff: true,
+                    ..Default::default()
                 },
             )
             .await?;
@@ -3734,14 +3745,14 @@ mod tests {
             @r###"
         [
             TrackerDataValue {
+                original: String("@@ -1,4 +1,4 @@\n {\n-  \"name\": \"\\\"rev_1\\\"_modified_undefined\",\n+  \"name\": \"\\\"rev_2\\\"_modified_{\\\"original\\\":{\\\"name\\\":\\\"\\\\\\\"rev_1\\\\\\\"_modified_undefined\\\",\\\"value\\\":1}}\",\n   \"value\": 1\n }\n"),
+                mods: None,
+            },
+            TrackerDataValue {
                 original: Object {
                     "name": String("\"rev_1\"_modified_undefined"),
                     "value": Number(1),
                 },
-                mods: None,
-            },
-            TrackerDataValue {
-                original: String("@@ -1,4 +1,4 @@\n {\n-  \"name\": \"\\\"rev_1\\\"_modified_undefined\",\n+  \"name\": \"\\\"rev_2\\\"_modified_{\\\"original\\\":{\\\"name\\\":\\\"\\\\\\\"rev_1\\\\\\\"_modified_undefined\\\",\\\"value\\\":1}}\",\n   \"value\": 1\n }\n"),
                 mods: None,
             },
         ]
@@ -3797,12 +3808,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].tracker_id, tracker.id);
@@ -3818,10 +3824,11 @@ mod tests {
         );
 
         let tracker_data = trackers
-            .get_tracker_data(
+            .get_tracker_data_revisions(
                 tracker.id,
                 TrackerListRevisionsParams {
                     calculate_diff: true,
+                    ..Default::default()
                 },
             )
             .await?;
@@ -3832,14 +3839,14 @@ mod tests {
             @r###"
         [
             TrackerDataValue {
+                original: String("@@ -1,4 +1,4 @@\n {\n-  \"name\": \"rev_1_modified_undefined\",\n+  \"name\": \"rev_1_modified_{\\\"original\\\":{\\\"name\\\":\\\"rev_1_modified_undefined\\\",\\\"value\\\":1}}\",\n   \"value\": 1\n }\n"),
+                mods: None,
+            },
+            TrackerDataValue {
                 original: Object {
                     "name": String("rev_1_modified_undefined"),
                     "value": Number(1),
                 },
-                mods: None,
-            },
-            TrackerDataValue {
-                original: String("@@ -1,4 +1,4 @@\n {\n-  \"name\": \"rev_1_modified_undefined\",\n+  \"name\": \"rev_1_modified_{\\\"original\\\":{\\\"name\\\":\\\"rev_1_modified_undefined\\\",\\\"value\\\":1}}\",\n   \"value\": 1\n }\n"),
                 mods: None,
             },
         ]
@@ -3882,7 +3889,7 @@ mod tests {
             .await?;
 
         let tracker_data = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_data.is_empty());
 
@@ -3897,7 +3904,7 @@ mod tests {
         content_mock.assert();
 
         let revs = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_debug_snapshot!(
             revs.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
@@ -3995,7 +4002,7 @@ mod tests {
             .await?;
 
         let tracker_data = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_data.is_empty());
 
@@ -4010,7 +4017,7 @@ mod tests {
         content_mock.assert();
 
         let revs = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_debug_snapshot!(
             revs.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
@@ -4102,7 +4109,7 @@ mod tests {
             .await?;
 
         let tracker_data = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_data.is_empty());
 
@@ -4128,7 +4135,7 @@ mod tests {
         json_mock.assert();
 
         let revs = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_debug_snapshot!(
             revs.into_iter().map(|rev| rev.data).collect::<Vec<_>>(),
@@ -4221,12 +4228,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].tracker_id, tracker.id);
@@ -4240,10 +4242,11 @@ mod tests {
         extractor_mock.assert();
 
         let tracker_data = trackers
-            .get_tracker_data(
+            .get_tracker_data_revisions(
                 tracker.id,
                 TrackerListRevisionsParams {
                     calculate_diff: true,
+                    ..Default::default()
                 },
             )
             .await?;
@@ -4324,12 +4327,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
@@ -4398,12 +4396,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
@@ -4434,16 +4427,11 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 2);
-        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
-        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_2\""));
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_2\""));
+        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_1\""));
 
         server_mock.assert();
 
@@ -4551,12 +4539,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
@@ -4625,12 +4608,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
@@ -4661,16 +4639,11 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 2);
-        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
-        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_2\""));
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_2\""));
+        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_1\""));
 
         server_mock.assert();
 
@@ -4759,12 +4732,7 @@ mod tests {
 
         trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_data = trackers
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
         assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
@@ -4840,7 +4808,7 @@ mod tests {
         );
 
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_content.is_empty());
         content_mock.assert();
@@ -4866,7 +4834,7 @@ mod tests {
             .await?;
 
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_content.is_empty());
 
@@ -4909,7 +4877,7 @@ mod tests {
         content_mock.assert();
 
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_content.len(), 1);
         assert_eq!(tracker_content, vec![revision]);
@@ -4935,7 +4903,7 @@ mod tests {
             .await?;
 
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_content.is_empty());
 
@@ -4954,7 +4922,7 @@ mod tests {
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_content.len(), 1);
         assert_eq!(tracker_content, vec![revision]);
@@ -4963,7 +4931,7 @@ mod tests {
         trackers.clear_tracker_data(tracker.id).await?;
 
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_content.is_empty());
 
@@ -4990,7 +4958,7 @@ mod tests {
             .await?;
 
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert!(tracker_content.is_empty());
 
@@ -5009,7 +4977,7 @@ mod tests {
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
         let tracker_content = trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_content.len(), 1);
         assert_eq!(tracker_content, vec![revision]);
@@ -5017,7 +4985,11 @@ mod tests {
 
         trackers.remove_tracker(tracker.id).await?;
 
-        let tracker_content = api.db.trackers().get_tracker_data(tracker.id).await?;
+        let tracker_content = api
+            .db
+            .trackers()
+            .get_tracker_data_revisions(tracker.id, 100)
+            .await?;
         assert!(tracker_content.is_empty());
 
         Ok(())

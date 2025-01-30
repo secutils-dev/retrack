@@ -12,7 +12,7 @@ use uuid::Uuid;
     ),
     request_body = TrackerUpdateParams,
     responses(
-        (status = 200, description = "Tracker was successfully updated.", body = Tracker),
+        (status = OK, description = "Tracker was successfully updated.", body = Tracker),
         (status = BAD_REQUEST, description = "Cannot update a tracker with the specified properties.")
     )
 )]
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(response.status(), 400);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            r###"{"message":"Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."}"###
+            r###"Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://localhost/app."###
         );
         let trackers = server_state
             .api

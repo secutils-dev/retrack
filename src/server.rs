@@ -88,6 +88,8 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             .service(handlers::trackers_list_revisions::trackers_list_revisions)
             .service(handlers::trackers_create_revision::trackers_create_revision)
             .service(handlers::trackers_clear_revisions::trackers_clear_revisions)
+            .service(handlers::trackers_get_revision::trackers_get_revision)
+            .service(handlers::trackers_remove_revision::trackers_remove_revision)
             .wrap(Cors::permissive())
     });
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT data.id, data.tracker_id, data.data, data.created_at\nFROM trackers_data as data\nINNER JOIN trackers\nON data.tracker_id = trackers.id\nWHERE data.tracker_id = $1\nORDER BY data.created_at\n                ",
+  "query": "\nSELECT data.id, data.tracker_id, data.data, data.created_at\nFROM trackers_data as data\nINNER JOIN trackers\nON data.tracker_id = trackers.id\nWHERE data.tracker_id = $1\nORDER BY data.created_at DESC\nLIMIT $2\n                ",
   "describe": {
     "columns": [
       {
@@ -26,7 +26,8 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
@@ -36,5 +37,5 @@
       false
     ]
   },
-  "hash": "e348a1c654787c57acbec6b2e8e4e426f66d5474e5afaaff4e4b9b78a1d0a5b7"
+  "hash": "6f5776b8e1a59eafe3be4b4dcd7b08e1c7d3f28288b8d52d36d30f2b41b7a213"
 }

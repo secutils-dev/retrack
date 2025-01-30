@@ -12,7 +12,7 @@ use uuid::Uuid;
         TrackerListRevisionsParams
     ),
     responses(
-        (status = 200, description = "A list of currently active trackers.", body = [TrackerDataRevision]),
+        (status = OK, description = "A list of currently active trackers.", body = [TrackerDataRevision]),
         (status = BAD_REQUEST, description = "Cannot list revisions for a tracker with the specified parameters.")
     )
 )]
@@ -24,7 +24,7 @@ pub async fn trackers_list_revisions(
 ) -> Result<HttpResponse, RetrackError> {
     let trackers = state.api.trackers();
     match trackers
-        .get_tracker_data(*tracker_id, params.into_inner())
+        .get_tracker_data_revisions(*tracker_id, params.into_inner())
         .await
     {
         Ok(revisions) => Ok(HttpResponse::Ok().json(revisions)),
@@ -145,13 +145,13 @@ mod tests {
         )?;
         assert_eq!(
             revisions,
-            vec![data_revision_one.clone(), data_revision_two.clone()]
+            vec![data_revision_two.clone(), data_revision_one.clone()]
         );
 
         let response = call_service(
             &app,
             TestRequest::with_uri(&format!(
-                "https://retrack.dev/api/trackers/{}/revisions",
+                "https://retrack.dev/api/trackers/{}/revisions?size=10",
                 tracker.id
             ))
             .to_request(),
@@ -163,8 +163,23 @@ mod tests {
         )?;
         assert_eq!(
             revisions,
-            vec![data_revision_one.clone(), data_revision_two.clone()]
+            vec![data_revision_two.clone(), data_revision_one.clone()]
         );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri(&format!(
+                "https://retrack.dev/api/trackers/{}/revisions?size=1",
+                tracker.id
+            ))
+            .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        let revisions = serde_json::from_slice::<Vec<TrackerDataRevision>>(
+            &response.into_body().try_into_bytes().unwrap(),
+        )?;
+        assert_eq!(revisions, vec![data_revision_two.clone()]);
 
         // Calculate the difference between the two revisions
         let response = call_service(
@@ -183,8 +198,25 @@ mod tests {
         )?;
         assert_eq!(
             revisions,
-            tracker_data_revisions_diff(vec![data_revision_one, data_revision_two])?
+            tracker_data_revisions_diff(vec![data_revision_two.clone(), data_revision_one])?
         );
+
+        // Does not calculate the difference, if there is only one revision.
+        let response = call_service(
+            &app,
+            TestRequest::with_uri(&format!(
+                "https://retrack.dev/api/trackers/{}/revisions?calculateDiff=true&size=1",
+                tracker.id
+            ))
+            .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+
+        let revisions = serde_json::from_slice::<Vec<TrackerDataRevision>>(
+            &response.into_body().try_into_bytes().unwrap(),
+        )?;
+        assert_eq!(revisions, vec![data_revision_two]);
 
         Ok(())
     }
@@ -209,7 +241,38 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 400);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""{\"message\":\"Tracker ('00000000-0000-0000-0000-000000000001') is not found.\"}""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""Tracker ('00000000-0000-0000-0000-000000000001') is not found.""###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn fails_with_bad_request_for_zero_size(pool: PgPool) -> anyhow::Result<()> {
+        let server_state = web::Data::new(mock_server_state(pool).await?);
+        let app = init_service(
+            App::new()
+                .app_data(server_state.clone())
+                .service(trackers_list_revisions),
+        )
+        .await;
+
+        // Create tracker.
+        let trackers_api = server_state.api.trackers();
+        let tracker = trackers_api
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
+            .await?;
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri(&format!(
+                "https://retrack.dev/api/trackers/{}/revisions?size=0",
+                tracker.id
+            ))
+            .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 400);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""Query deserialize error: invalid value: integer `0`, expected a nonzero usize""###);
 
         Ok(())
     }

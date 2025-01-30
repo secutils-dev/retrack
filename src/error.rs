@@ -2,7 +2,6 @@ mod error_kind;
 
 use actix_web::{http::StatusCode, HttpResponse, HttpResponseBuilder, ResponseError};
 use anyhow::anyhow;
-use serde_json::json;
 use std::fmt::{Debug, Display, Formatter};
 
 pub use error_kind::ErrorKind;
@@ -56,12 +55,10 @@ impl ResponseError for Error {
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponseBuilder::new(self.status_code()).json(json!({
-            "message": match self.kind {
-                ErrorKind::ClientError => self.root_cause.to_string(),
-                ErrorKind::Unknown => "Internal Server Error".to_string(),
-            }
-        }))
+        HttpResponseBuilder::new(self.status_code()).body(match self.kind {
+            ErrorKind::ClientError => self.root_cause.to_string(),
+            ErrorKind::Unknown => "Internal Server Error".to_string(),
+        })
     }
 }
 
@@ -97,13 +94,12 @@ mod tests {
             res: 
             Response HTTP/1.1 400 Bad Request
               headers:
-                "content-type": "application/json"
-              body: Sized(20)
+              body: Sized(6)
             ,
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body.as_ref(), b"{\"message\":\"Uh oh.\"}");
+        assert_eq!(body.as_ref(), b"Uh oh.");
 
         let error = Error::client_with_root_cause(anyhow!("Something sensitive").context("Uh oh."));
 
@@ -124,13 +120,12 @@ mod tests {
             res: 
             Response HTTP/1.1 400 Bad Request
               headers:
-                "content-type": "application/json"
-              body: Sized(20)
+              body: Sized(6)
             ,
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body.as_ref(), b"{\"message\":\"Uh oh.\"}");
+        assert_eq!(body.as_ref(), b"Uh oh.");
 
         Ok(())
     }
@@ -151,13 +146,12 @@ mod tests {
             res: 
             Response HTTP/1.1 500 Internal Server Error
               headers:
-                "content-type": "application/json"
-              body: Sized(35)
+              body: Sized(21)
             ,
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body.as_ref(), b"{\"message\":\"Internal Server Error\"}");
+        assert_eq!(body.as_ref(), b"Internal Server Error");
 
         Ok(())
     }
@@ -188,13 +182,12 @@ mod tests {
             res: 
             Response HTTP/1.1 400 Bad Request
               headers:
-                "content-type": "application/json"
-              body: Sized(19)
+              body: Sized(5)
             ,
         }
         "###);
         let body = error_response.into_body().try_into_bytes().unwrap();
-        assert_eq!(body.as_ref(), b"{\"message\":\"Three\"}");
+        assert_eq!(body.as_ref(), b"Three");
 
         Ok(())
     }

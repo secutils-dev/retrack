@@ -47,9 +47,7 @@ mod tests {
     };
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
-    use retrack_types::trackers::{
-        TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams,
-    };
+    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
     use sqlx::PgPool;
     use std::str::from_utf8;
@@ -106,12 +104,7 @@ mod tests {
             &response.into_body().try_into_bytes().unwrap(),
         )?;
         let saved_revision = trackers_api
-            .get_tracker_data(
-                tracker.id,
-                TrackerListRevisionsParams {
-                    calculate_diff: false,
-                },
-            )
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(saved_revision[0].id, revision.id);
         assert_eq!(saved_revision[0].data, revision.data);
@@ -142,7 +135,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 400);
-        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""{\"message\":\"Tracker ('00000000-0000-0000-0000-000000000001') is not found.\"}""###);
+        assert_debug_snapshot!(from_utf8(&response.into_body().try_into_bytes().unwrap())?, @r###""Tracker ('00000000-0000-0000-0000-000000000001') is not found.""###);
 
         Ok(())
     }

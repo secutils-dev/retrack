@@ -1066,7 +1066,7 @@ mod tests {
         });
 
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1099,7 +1099,7 @@ mod tests {
         // Check that content was saved.
         assert_eq!(
             api.trackers()
-                .get_tracker_data(tracker.id, Default::default())
+                .get_tracker_data_revisions(tracker.id, Default::default())
                 .await?
                 .into_iter()
                 .map(|rev| rev.data)
@@ -1177,7 +1177,7 @@ mod tests {
         });
 
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1204,7 +1204,7 @@ mod tests {
         // Check that content was saved.
         assert_eq!(
             api.trackers()
-                .get_tracker_data(tracker.id, Default::default())
+                .get_tracker_data_revisions(tracker.id, Default::default())
                 .await?
                 .into_iter()
                 .map(|rev| rev.data)
@@ -1269,7 +1269,7 @@ mod tests {
         });
 
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1301,7 +1301,7 @@ mod tests {
 
         // Check that content was NOT saved.
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1405,7 +1405,7 @@ mod tests {
         });
 
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1431,7 +1431,7 @@ mod tests {
 
         // Check that content was NOT saved.
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1556,7 +1556,7 @@ mod tests {
         });
 
         assert!(trackers
-            .get_tracker_data(tracker.id, Default::default())
+            .get_tracker_data_revisions(tracker.id, Default::default())
             .await?
             .is_empty());
 
@@ -1598,7 +1598,7 @@ mod tests {
         // Check that we eventually got data.
         assert_eq!(
             api.trackers()
-                .get_tracker_data(tracker.id, Default::default())
+                .get_tracker_data_revisions(tracker.id, Default::default())
                 .await?
                 .into_iter()
                 .map(|rev| rev.data)

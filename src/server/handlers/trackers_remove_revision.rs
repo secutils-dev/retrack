@@ -3,26 +3,35 @@ use actix_web::{delete, web, HttpResponse};
 use tracing::error;
 use uuid::Uuid;
 
-/// Clears all data revisions for a tracker with the specified ID.
+/// Removes tracker data revision with the specified ID for a tracker with the specified ID.
 #[utoipa::path(
     tags = ["trackers"],
     params(
         ("tracker_id" = Uuid, Path, description = "A unique tracker ID."),
+        ("revision_id" = Uuid, Path, description = "A unique tracker data revision ID."),
     ),
     responses(
-        (status = NO_CONTENT, description = "Data revisions for a tracker with the specified ID were successfully cleared.")
+        (status = NO_CONTENT, description = "Specified data revision for a tracker with the specified ID was successfully removed."),
+        (status = NOT_FOUND, description = "Revision with the specified ID was not found.")
     )
 )]
-#[delete("/api/trackers/{tracker_id}/revisions")]
-pub async fn trackers_clear_revisions(
+#[delete("/api/trackers/{tracker_id}/revisions/{revision_id}")]
+pub async fn trackers_remove_revision(
     state: web::Data<ServerState>,
-    tracker_id: web::Path<Uuid>,
+    params: web::Path<(Uuid, Uuid)>,
 ) -> Result<HttpResponse, RetrackError> {
+    let (tracker_id, revision_id) = params.into_inner();
     let trackers = state.api.trackers();
-    match trackers.clear_tracker_data(*tracker_id).await {
-        Ok(_) => Ok(HttpResponse::NoContent().finish()),
+    match trackers
+        .remove_tracker_data_revision(tracker_id, revision_id)
+        .await
+    {
+        Ok(true) => Ok(HttpResponse::NoContent().finish()),
+        Ok(false) => Ok(HttpResponse::NotFound().body(format!(
+            "Tracker ('{tracker_id}') or data revision ('{revision_id}') is not found."
+        ))),
         Err(err) => {
-            error!("Failed to clear tracker data revisions: {err:?}");
+            error!("Failed to remove tracker data revision: {err:?}");
             Err(err.into())
         }
     }
@@ -32,7 +41,7 @@ pub async fn trackers_clear_revisions(
 mod tests {
     use crate::{
         server::{
-            handlers::trackers_clear_revisions::trackers_clear_revisions,
+            handlers::trackers_remove_revision::trackers_remove_revision,
             server_state::tests::mock_server_state,
         },
         tests::TrackerCreateParamsBuilder,
@@ -51,12 +60,12 @@ mod tests {
     use uuid::uuid;
 
     #[sqlx::test]
-    async fn can_list_tracker_data(pool: PgPool) -> anyhow::Result<()> {
+    async fn can_remove_tracker_data_revision(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
             App::new()
                 .app_data(server_state.clone())
-                .service(trackers_clear_revisions),
+                .service(trackers_remove_revision),
         )
         .await;
 
@@ -64,17 +73,18 @@ mod tests {
         let response = call_service(
             &app,
             TestRequest::with_uri(&format!(
-                "https://retrack.dev/api/trackers/{}/revisions",
-                uuid!("00000000-0000-0000-0000-000000000001")
+                "https://retrack.dev/api/trackers/{}/revisions/{}",
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                uuid!("00000000-0000-0000-0000-000000000002")
             ))
             .method(Method::DELETE)
             .to_request(),
         )
         .await;
-        assert_eq!(response.status(), 400);
+        assert_eq!(response.status(), 404);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            "Tracker ('00000000-0000-0000-0000-000000000001') is not found."
+            "Tracker ('00000000-0000-0000-0000-000000000001') or data revision ('00000000-0000-0000-0000-000000000002') is not found."
         );
 
         // Create tracker.
@@ -83,20 +93,25 @@ mod tests {
             .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
             .await?;
 
-        // Tracker without revisions.
+        // Unknown tracker revision.
         let response = call_service(
             &app,
             TestRequest::with_uri(&format!(
-                "https://retrack.dev/api/trackers/{}/revisions",
-                tracker.id
+                "https://retrack.dev/api/trackers/{}/revisions/{}",
+                tracker.id,
+                uuid!("00000000-0000-0000-0000-000000000002")
             ))
             .method(Method::DELETE)
             .to_request(),
         )
         .await;
-        assert_eq!(response.status(), 204);
+        assert_eq!(response.status(), 404);
+        assert_eq!(
+            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
+            format!("Tracker ('{}') or data revision ('00000000-0000-0000-0000-000000000002') is not found.", tracker.id)
+        );
 
-        // Add tracker data revision and check that it has been saved..
+        // Add tracker data revisions and check that it has been saved.
         let trackers_db = server_state.api.db.trackers();
         let data_revision_one = TrackerDataRevision {
             id: uuid!("00000000-0000-0000-0000-000000000001"),
@@ -124,12 +139,31 @@ mod tests {
             2
         );
 
-        // Finally clean all revisions.
+        // Remove older revision.
         let response = call_service(
             &app,
             TestRequest::with_uri(&format!(
-                "https://retrack.dev/api/trackers/{}/revisions",
-                tracker.id
+                "https://retrack.dev/api/trackers/{}/revisions/{}",
+                tracker.id, data_revision_one.id
+            ))
+            .method(Method::DELETE)
+            .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 204);
+        assert_eq!(
+            trackers_api
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?,
+            vec![data_revision_two.clone()]
+        );
+
+        // Remove newer revision.
+        let response = call_service(
+            &app,
+            TestRequest::with_uri(&format!(
+                "https://retrack.dev/api/trackers/{}/revisions/{}",
+                tracker.id, data_revision_two.id
             ))
             .method(Method::DELETE)
             .to_request(),

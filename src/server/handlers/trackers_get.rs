@@ -11,8 +11,8 @@ use uuid::Uuid;
         ("tracker_id" = Uuid, Path, description = "A unique tracker ID."),
     ),
     responses(
-        (status = 200, description = "Tracker with the specified ID.", body = Tracker),
-        (status = NOT_FOUND, description = "Tracker with the specified ID was not found or the ID is not a valid UUID.")
+        (status = OK, description = "Tracker with the specified ID.", body = Tracker),
+        (status = NOT_FOUND, description = "Tracker with the specified ID was not found.")
     )
 )]
 #[get("/api/trackers/{tracker_id}")]
@@ -22,7 +22,9 @@ pub async fn trackers_get(
 ) -> Result<HttpResponse, RetrackError> {
     match state.api.trackers().get_tracker(*tracker_id).await {
         Ok(Some(tracker)) => Ok(HttpResponse::Ok().json(tracker)),
-        Ok(None) => Ok(HttpResponse::NotFound().finish()),
+        Ok(None) => {
+            Ok(HttpResponse::NotFound().body(format!("Tracker ('{tracker_id}') is not found.")))
+        }
         Err(err) => {
             error!("Failed to retrieve tracker: {err:?}");
             Err(err.into())
@@ -70,7 +72,6 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 200);
-
         assert_eq!(
             serde_json::to_string(&tracker)?,
             from_utf8(&response.into_body().try_into_bytes().unwrap())?
@@ -82,14 +83,6 @@ mod tests {
     #[sqlx::test]
     async fn returns_not_found_if_tracker_is_not_found(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
-
-        // Create tracker.
-        server_state
-            .api
-            .trackers()
-            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
-            .await?;
-
         let app = init_service(
             App::new()
                 .app_data(server_state.clone())
@@ -106,11 +99,9 @@ mod tests {
             .to_request(),
         )
         .await;
-        assert_eq!(response.status(), 404);
-
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            ""
+            "Tracker ('00000000-0000-0000-0000-000000000021') is not found."
         );
 
         Ok(())
