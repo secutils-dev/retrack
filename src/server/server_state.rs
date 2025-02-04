@@ -7,28 +7,21 @@ pub use self::{
 };
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport, EmailTransportError, TokioDnsResolver},
+    network::{DnsResolver, TokioDnsResolver},
     scheduler::Scheduler,
 };
-use lettre::{AsyncSmtpTransport, Tokio1Executor};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub struct ServerState<
-    DR: DnsResolver = TokioDnsResolver,
-    ET: EmailTransport = AsyncSmtpTransport<Tokio1Executor>,
-> {
-    pub api: Arc<Api<DR, ET>>,
-    pub scheduler: RwLock<Scheduler<DR, ET>>,
+pub struct ServerState<DR: DnsResolver = TokioDnsResolver> {
+    pub api: Arc<Api<DR>>,
+    pub scheduler: RwLock<Scheduler<DR>>,
     /// Version of the API server.
     version: String,
 }
 
-impl<DR: DnsResolver, ET: EmailTransport> ServerState<DR, ET>
-where
-    ET::Error: EmailTransportError,
-{
-    pub fn new(api: Arc<Api<DR, ET>>, scheduler: Scheduler<DR, ET>) -> Self {
+impl<DR: DnsResolver> ServerState<DR> {
+    pub fn new(api: Arc<Api<DR>>, scheduler: Scheduler<DR>) -> Self {
         Self {
             api,
             scheduler: RwLock::new(scheduler),
@@ -52,13 +45,12 @@ pub mod tests {
         config::Config,
         database::Database,
         js_runtime::JsRuntime,
-        network::{Network, TokioDnsResolver},
+        network::Network,
         scheduler::Scheduler,
         server::ServerState,
         templates::create_templates,
         tests::{mock_config, mock_scheduler},
     };
-    use lettre::{AsyncSmtpTransport, Tokio1Executor};
     use sqlx::PgPool;
     use std::sync::Arc;
 
@@ -70,16 +62,14 @@ pub mod tests {
         pool: PgPool,
         config: Config,
     ) -> anyhow::Result<ServerState> {
+        // We should use a real network implementation in tests that rely on `AppState` being
+        // extracted from `HttpRequest`, as types should match for the extraction to work.
+        let network = Network::create(&config)?;
         let js_runtime = JsRuntime::init_platform(&config.js_runtime)?;
         let api = Arc::new(Api::new(
             config,
             Database::create(pool.clone()).await?,
-            // We should use a real network implementation in tests that rely on `AppState` being
-            // extracted from `HttpRequest`, as types should match for the extraction to work.
-            Network::new(
-                TokioDnsResolver::create(),
-                AsyncSmtpTransport::<Tokio1Executor>::unencrypted_localhost(),
-            ),
+            network,
             create_templates()?,
             js_runtime,
         ));

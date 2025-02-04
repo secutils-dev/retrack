@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport, EmailTransportError},
+    network::DnsResolver,
     tasks::{EmailAttachmentDisposition, EmailTaskType, HttpTaskType, Task, TaskType},
 };
 use anyhow::{bail, Context};
@@ -13,23 +13,20 @@ use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use std::cmp;
 use time::OffsetDateTime;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 /// Defines a maximum number of tasks that can be retrieved from the database at once.
 const MAX_TASKS_PAGE_SIZE: usize = 100;
 
 /// Describes the API to work with tasks.
-pub struct TasksApi<'a, DR: DnsResolver, ET: EmailTransport> {
-    api: &'a Api<DR, ET>,
+pub struct TasksApi<'a, DR: DnsResolver> {
+    api: &'a Api<DR>,
 }
 
-impl<'a, DR: DnsResolver, ET: EmailTransport> TasksApi<'a, DR, ET>
-where
-    ET::Error: EmailTransportError,
-{
+impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
     /// Creates Tasks API.
-    pub fn new(api: &'a Api<DR, ET>) -> Self {
+    pub fn new(api: &'a Api<DR>) -> Self {
         Self { api }
     }
 
@@ -85,7 +82,8 @@ where
         match task.task_type {
             TaskType::Email(email_task) => {
                 debug!(task.id = %task.id, "Executing email task.");
-                self.send_email(email_task, task.scheduled_at).await?;
+                self.send_email(task.id, email_task, task.scheduled_at)
+                    .await?;
             }
             TaskType::Http(http_task) => {
                 debug!(task.id = %task.id, "Executing HTTP task.");
@@ -99,17 +97,17 @@ where
     /// Send email using configured SMTP server.
     async fn send_email(
         &self,
+        task_id: Uuid,
         task: EmailTaskType,
         timestamp: OffsetDateTime,
     ) -> anyhow::Result<()> {
-        let smtp_config = if let Some(ref smtp_config) = self.api.config.as_ref().smtp {
-            smtp_config
-        } else {
+        let Some(ref smtp) = self.api.network.smtp else {
+            error!(task.id = %task_id, "Email task cannot be executed since SMTP isn't configured.");
             bail!("SMTP is not configured.");
         };
 
         let email = task.content.into_email(self.api).await?;
-        let catch_all_recipient = smtp_config.catch_all.as_ref().and_then(|catch_all| {
+        let catch_all_recipient = smtp.config.catch_all.as_ref().and_then(|catch_all| {
             // Checks if the email text matches the regular expression specified in `text_matcher`.
             if catch_all.text_matcher.is_match(&email.text) {
                 Some(catch_all.recipient.as_str())
@@ -119,8 +117,8 @@ where
         });
 
         let mut message_builder = Message::builder()
-            .from(smtp_config.username.parse()?)
-            .reply_to(smtp_config.username.parse()?)
+            .from(smtp.config.username.parse()?)
+            .reply_to(smtp.config.username.parse()?)
             .subject(&email.subject)
             .date(timestamp.into());
 
@@ -172,7 +170,7 @@ where
             None => message_builder.body(email.text)?,
         };
 
-        self.api.network.email_transport.send(message).await?;
+        smtp.send(message).await?;
 
         Ok(())
     }
@@ -216,12 +214,9 @@ where
     }
 }
 
-impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET>
-where
-    ET::Error: EmailTransportError,
-{
+impl<DR: DnsResolver> Api<DR> {
     /// Returns an API to work with tasks.
-    pub fn tasks(&self) -> TasksApi<'_, DR, ET> {
+    pub fn tasks(&self) -> TasksApi<'_, DR> {
         TasksApi::new(self)
     }
 }
@@ -229,17 +224,20 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        config::SmtpConfig,
         tasks::{
             Email, EmailAttachment, EmailContent, EmailTaskType, HttpTaskType, Task, TaskType,
         },
-        tests::{mock_api, mock_api_with_config, mock_config, SmtpCatchAllConfig},
+        tests::{
+            mock_api, mock_api_with_network, mock_network_with_smtp, mock_smtp, mock_smtp_config,
+            MockSmtpServer, SmtpCatchAllConfig,
+        },
     };
     use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
     use serde_json::json;
     use sqlx::PgPool;
+    use std::str::from_utf8;
     use time::OffsetDateTime;
     use uuid::uuid;
 
@@ -303,13 +301,23 @@ mod tests {
 
     #[sqlx::test]
     async fn properly_executes_email_tasks(pool: PgPool) -> anyhow::Result<()> {
-        let api = mock_api(pool).await?;
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let api = mock_api_with_network(
+            pool,
+            mock_network_with_smtp(mock_smtp(mock_smtp_config(
+                smtp_server.host.to_string(),
+                smtp_server.port,
+            ))),
+        )
+        .await?;
 
         let mut tasks = vec![
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 task_type: TaskType::Email(EmailTaskType {
-                    to: vec!["dev@retrack.dev".to_string()],
+                    to: vec!["some@retrack.dev".to_string()],
                     content: EmailContent::Custom(Email::text(
                         "subj".to_string(),
                         "email text".to_string(),
@@ -320,7 +328,7 @@ mod tests {
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
                 task_type: TaskType::Email(EmailTaskType {
-                    to: vec!["some@retrack.dev".to_string()],
+                    to: vec!["another@retrack.dev".to_string()],
                     content: EmailContent::Custom(Email::html(
                         "subj #2".to_string(),
                         "email text #2".to_string(),
@@ -347,65 +355,30 @@ mod tests {
         assert!(api.db.get_task(tasks[0].id).await?.is_none());
         assert!(api.db.get_task(tasks[1].id).await?.is_none());
 
-        let messages = api.network.email_transport.messages().await;
-        assert_eq!(messages.len(), 2);
+        let mails = smtp_server.mails();
+        assert_eq!(mails.len(), 2);
 
         let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
-        let messages = messages
+        let mails = mails
             .into_iter()
-            .map(|(envelope, content)| {
+            .map(|mail| {
+                let mail = from_utf8(&mail.content).unwrap();
                 let boundary = boundary_regex
-                    .captures(&content)
+                    .captures(mail)
                     .and_then(|captures| captures.get(1))
                     .map(|capture| capture.as_str());
-
-                (
-                    envelope,
-                    if let Some(boundary) = boundary {
-                        content.replace(boundary, "BOUNDARY")
-                    } else {
-                        content
-                    },
-                )
+                if let Some(boundary) = boundary {
+                    mail.replace(boundary, "BOUNDARY")
+                } else {
+                    mail.to_string()
+                }
             })
             .collect::<Vec<_>>();
 
-        assert_debug_snapshot!(messages, @r###"
+        assert_debug_snapshot!(mails, @r###"
         [
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subj\r\nDate: Sat, 01 Jan 2000 09:58:20 +0000\r\nTo: dev@retrack.dev\r\nContent-Transfer-Encoding: 7bit\r\n\r\nemail text",
-            ),
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "some@retrack.dev",
-                            at_start: 4,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subj #2\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: some@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nemail text #2\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml #2\r\n--BOUNDARY--\r\n",
-            ),
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subj\r\nDate: Sat, 01 Jan 2000 09:58:20 +0000\r\nTo: some@retrack.dev\r\nContent-Transfer-Encoding: 7bit\r\n\r\nemail text",
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subj #2\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: another@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nemail text #2\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml #2\r\n--BOUNDARY--\r\n",
         ]
         "###);
 
@@ -414,7 +387,17 @@ mod tests {
 
     #[sqlx::test]
     async fn properly_executes_email_tasks_with_attachments(pool: PgPool) -> anyhow::Result<()> {
-        let api = mock_api(pool).await?;
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let api = mock_api_with_network(
+            pool,
+            mock_network_with_smtp(mock_smtp(mock_smtp_config(
+                smtp_server.host.to_string(),
+                smtp_server.port,
+            ))),
+        )
+        .await?;
 
         let mut tasks = [Task {
             id: uuid!("00000000-0000-0000-0000-000000000002"),
@@ -441,47 +424,29 @@ mod tests {
         assert_eq!(api.tasks().execute_pending_tasks(3).await?, 1);
         assert!(api.db.get_task(tasks[0].id).await?.is_none());
 
-        let messages = api.network.email_transport.messages().await;
-        assert_eq!(messages.len(), 1);
-
+        let mails = smtp_server.mails();
         let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
-        let messages = messages
+        let mails = mails
             .into_iter()
-            .map(|(envelope, content)| {
-                let mut patched_content = content.clone();
+            .map(|mail| {
+                let mail = from_utf8(&mail.content).unwrap();
+                let mut patched_mail = mail.to_string();
                 for (index, capture) in boundary_regex
-                    .captures_iter(&content)
+                    .captures_iter(mail)
                     .flat_map(|captures| captures.iter().skip(1).collect::<Vec<_>>())
                     .filter_map(|capture| Some(capture?.as_str()))
                     .enumerate()
                 {
-                    patched_content =
-                        patched_content.replace(capture, &format!("BOUNDARY_{index}"));
+                    patched_mail = patched_mail.replace(capture, &format!("BOUNDARY_{index}"));
                 }
 
-                (envelope, patched_content)
+                patched_mail
             })
             .collect::<Vec<_>>();
 
-        assert_debug_snapshot!(messages, @r###"
+        assert_debug_snapshot!(mails, @r###"
         [
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "some@retrack.dev",
-                            at_start: 4,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: some@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed;\r\n boundary=\"BOUNDARY_0\"\r\n\r\n--BOUNDARY_0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY_1\"\r\n\r\n--BOUNDARY_1\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\ntext\r\n--BOUNDARY_1\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n<img src='cid:logo' />\r\n--BOUNDARY_1--\r\n--BOUNDARY_0\r\nContent-ID: <logo>\r\nContent-Disposition: inline\r\nContent-Type: image/png\r\nContent-Transfer-Encoding: 7bit\r\n\r\n\u{1}\u{2}\u{3}\r\n--BOUNDARY_0--\r\n",
-            ),
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: some@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed;\r\n boundary=\"BOUNDARY_0\"\r\n\r\n--BOUNDARY_0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY_1\"\r\n\r\n--BOUNDARY_1\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\ntext\r\n--BOUNDARY_1\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n<img src='cid:logo' />\r\n--BOUNDARY_1--\r\n--BOUNDARY_0\r\nContent-ID: <logo>\r\nContent-Disposition: inline\r\nContent-Type: image/png\r\nContent-Transfer-Encoding: 7bit\r\n\r\n\u{1}\u{2}\u{3}\r\n--BOUNDARY_0--\r\n",
         ]
         "###);
 
@@ -490,7 +455,17 @@ mod tests {
 
     #[sqlx::test]
     async fn properly_executes_pending_tasks_in_batches(pool: PgPool) -> anyhow::Result<()> {
-        let api = mock_api(pool).await?;
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let api = mock_api_with_network(
+            pool,
+            mock_network_with_smtp(mock_smtp(mock_smtp_config(
+                smtp_server.host.to_string(),
+                smtp_server.port,
+            ))),
+        )
+        .await?;
 
         let tasks_api = api.tasks();
         let mut task_ids = vec![];
@@ -537,15 +512,16 @@ mod tests {
 
     #[sqlx::test]
     async fn sends_emails_respecting_catch_all_filter(pool: PgPool) -> anyhow::Result<()> {
-        let mut config = mock_config()?;
-        let text_matcher = regex::Regex::new("(one text)|(two text)")?;
-        config.smtp = config.smtp.map(|smtp| SmtpConfig {
-            catch_all: Some(SmtpCatchAllConfig {
-                recipient: "catch-all@retrack.dev".to_string(),
-                text_matcher,
-            }),
-            ..smtp
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let mut smtp_config = mock_smtp_config(smtp_server.host.to_string(), smtp_server.port);
+        smtp_config.catch_all = Some(SmtpCatchAllConfig {
+            recipient: "catch-all@retrack.dev".to_string(),
+            text_matcher: regex::Regex::new("(one text)|(two text)")?,
         });
+        let api =
+            mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?;
 
         let tasks = vec![
             (
@@ -583,89 +559,37 @@ mod tests {
             ),
         ];
 
-        let api = mock_api_with_config(pool, config).await?;
         for (task_type, scheduled_at) in tasks.into_iter() {
             api.tasks().schedule_task(task_type, scheduled_at).await?;
         }
 
         assert_eq!(api.tasks().execute_pending_tasks(4).await?, 3);
 
-        let messages = api.network.email_transport.messages().await;
-        assert_eq!(messages.len(), 3);
+        let mails = smtp_server.mails();
+        assert_eq!(mails.len(), 3);
 
         let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
-        let messages = messages
+        let mails = mails
             .into_iter()
-            .map(|(envelope, content)| {
+            .map(|mail| {
+                let mail = from_utf8(&mail.content).unwrap();
                 let boundary = boundary_regex
-                    .captures(&content)
+                    .captures(mail)
                     .and_then(|captures| captures.get(1))
                     .map(|capture| capture.as_str());
-
-                (
-                    envelope,
-                    if let Some(boundary) = boundary {
-                        content.replace(boundary, "BOUNDARY")
-                    } else {
-                        content
-                    },
-                )
+                if let Some(boundary) = boundary {
+                    mail.replace(boundary, "BOUNDARY")
+                } else {
+                    mail.to_string()
+                }
             })
             .collect::<Vec<_>>();
 
-        assert_debug_snapshot!(messages, @r###"
+        assert_debug_snapshot!(mails, @r###"
         [
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "catch-all@retrack.dev",
-                            at_start: 9,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome one text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
-            ),
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "catch-all@retrack.dev",
-                            at_start: 9,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome two text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
-            ),
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "three@retrack.dev",
-                            at_start: 5,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: three@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome three text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
-            ),
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome one text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome two text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: three@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome three text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
         ]
         "###);
 
@@ -676,16 +600,16 @@ mod tests {
     async fn sends_emails_respecting_wide_open_catch_all_filter(
         pool: PgPool,
     ) -> anyhow::Result<()> {
-        let mut config = mock_config()?;
-        let text_matcher = regex::Regex::new(".*")?;
-        config.smtp = config.smtp.map(|smtp| SmtpConfig {
-            catch_all: Some(SmtpCatchAllConfig {
-                recipient: "catch-all@retrack.dev".to_string(),
-                text_matcher,
-            }),
-            ..smtp
-        });
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
 
+        let mut smtp_config = mock_smtp_config(smtp_server.host.to_string(), smtp_server.port);
+        smtp_config.catch_all = Some(SmtpCatchAllConfig {
+            recipient: "catch-all@retrack.dev".to_string(),
+            text_matcher: regex::Regex::new(".*")?,
+        });
+        let api =
+            mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?;
         let tasks = vec![
             (
                 TaskType::Email(EmailTaskType {
@@ -722,89 +646,37 @@ mod tests {
             ),
         ];
 
-        let api = mock_api_with_config(pool, config).await?;
         for (task_type, scheduled_at) in tasks.into_iter() {
             api.tasks().schedule_task(task_type, scheduled_at).await?;
         }
 
         assert_eq!(api.tasks().execute_pending_tasks(4).await?, 3);
 
-        let messages = api.network.email_transport.messages().await;
-        assert_eq!(messages.len(), 3);
+        let mails = smtp_server.mails();
+        assert_eq!(mails.len(), 3);
 
         let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
-        let messages = messages
+        let mails = mails
             .into_iter()
-            .map(|(envelope, content)| {
+            .map(|mail| {
+                let mail = from_utf8(&mail.content).unwrap();
                 let boundary = boundary_regex
-                    .captures(&content)
+                    .captures(mail)
                     .and_then(|captures| captures.get(1))
                     .map(|capture| capture.as_str());
-
-                (
-                    envelope,
-                    if let Some(boundary) = boundary {
-                        content.replace(boundary, "BOUNDARY")
-                    } else {
-                        content
-                    },
-                )
+                if let Some(boundary) = boundary {
+                    mail.replace(boundary, "BOUNDARY")
+                } else {
+                    mail.to_string()
+                }
             })
             .collect::<Vec<_>>();
 
-        assert_debug_snapshot!(messages, @r###"
+        assert_debug_snapshot!(mails, @r###"
         [
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "catch-all@retrack.dev",
-                            at_start: 9,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome one text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
-            ),
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "catch-all@retrack.dev",
-                            at_start: 9,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome two text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
-            ),
-            (
-                Envelope {
-                    forward_path: [
-                        Address {
-                            serialized: "catch-all@retrack.dev",
-                            at_start: 9,
-                        },
-                    ],
-                    reverse_path: Some(
-                        Address {
-                            serialized: "dev@retrack.dev",
-                            at_start: 3,
-                        },
-                    ),
-                },
-                "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome three text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
-            ),
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome one text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome two text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
+            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: catch-all@retrack.dev\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"BOUNDARY\"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsome three text message\r\n--BOUNDARY\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nhtml\r\n--BOUNDARY--\r\n",
         ]
         "###);
 

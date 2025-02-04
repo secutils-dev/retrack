@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport, EmailTransportError},
+    network::DnsResolver,
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
         CronExt, SchedulerJobMetadata,
@@ -19,13 +19,10 @@ const MAX_TASKS_TO_SEND: usize = 100;
 pub(crate) struct TasksRunJob;
 impl TasksRunJob {
     /// Tries to resume existing `TasksRunJob` job.
-    pub fn try_resume<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
+    pub fn try_resume<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
         existing_job_data: RawSchedulerJobStoredData,
-    ) -> anyhow::Result<Option<Job>>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<Option<Job>> {
         // If the schedule has changed, remove existing job and create a new one.
         let mut new_job = Self::create(api)?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
@@ -37,10 +34,7 @@ impl TasksRunJob {
     }
 
     /// Creates a new `TasksRunJob` job.
-    pub fn create<DR: DnsResolver, ET: EmailTransport>(api: Arc<Api<DR, ET>>) -> anyhow::Result<Job>
-    where
-        ET::Error: EmailTransportError,
-    {
+    pub fn create<DR: DnsResolver>(api: Arc<Api<DR>>) -> anyhow::Result<Job> {
         let mut job = Job::new_async(
             Cron::parse_pattern(&api.config.scheduler.tasks_run)
                 .with_context(|| {
@@ -67,13 +61,7 @@ impl TasksRunJob {
     }
 
     /// Executes a `TasksRunJob` job.
-    async fn execute<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
-        _: JobScheduler,
-    ) -> anyhow::Result<()>
-    where
-        ET::Error: EmailTransportError,
-    {
+    async fn execute<DR: DnsResolver>(api: Arc<Api<DR>>, _: JobScheduler) -> anyhow::Result<()> {
         let execute_start = Instant::now();
         match api.tasks().execute_pending_tasks(MAX_TASKS_TO_SEND).await {
             Ok(executed_tasks_count) if executed_tasks_count > 0 => {
@@ -107,14 +95,15 @@ mod tests {
         scheduler::scheduler_job::SchedulerJob,
         tasks::{Email, EmailContent, EmailTaskType, TaskType},
         tests::{
-            mock_api_with_config, mock_config, mock_schedule_in_sec, mock_scheduler,
-            mock_scheduler_job,
+            mock_api_with_config, mock_api_with_network, mock_config, mock_network_with_smtp,
+            mock_schedule_in_sec, mock_scheduler, mock_scheduler_job, mock_smtp, mock_smtp_config,
+            MockSmtpServer,
         },
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
-    use std::{sync::Arc, time::Duration};
+    use std::{str::from_utf8, sync::Arc, time::Duration};
     use time::OffsetDateTime;
     use uuid::uuid;
 
@@ -193,10 +182,20 @@ mod tests {
     async fn can_execute_pending_tasks(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
 
-        let mut config = mock_config()?;
-        config.scheduler.tasks_run = mock_schedule_in_sec(2);
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
 
-        let api = Arc::new(mock_api_with_config(pool, config).await?);
+        let mut api = mock_api_with_network(
+            pool,
+            mock_network_with_smtp(mock_smtp(mock_smtp_config(
+                smtp_server.host.to_string(),
+                smtp_server.port,
+            ))),
+        )
+        .await?;
+        api.config.scheduler.tasks_run = mock_schedule_in_sec(2);
+        let api = Arc::new(api);
+
         for n in 0..=(MAX_TASKS_TO_SEND as i64) {
             api.tasks()
                 .schedule_task(
@@ -249,27 +248,9 @@ mod tests {
             1
         );
 
-        let messages = api.network.email_transport.messages().await;
-        assert_eq!(messages.len(), 100);
-        assert_debug_snapshot!(messages[0], @r###"
-        (
-            Envelope {
-                forward_path: [
-                    Address {
-                        serialized: "dev@retrack.dev",
-                        at_start: 3,
-                    },
-                ],
-                reverse_path: Some(
-                    Address {
-                        serialized: "dev@retrack.dev",
-                        at_start: 3,
-                    },
-                ),
-            },
-            "From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: dev@retrack.dev\r\nContent-Transfer-Encoding: 7bit\r\n\r\nmessage 0",
-        )
-        "###);
+        let mails = smtp_server.mails();
+        assert_eq!(mails.len(), 100);
+        assert_debug_snapshot!(from_utf8(&mails[0].content)?, @r###""From: dev@retrack.dev\r\nReply-To: dev@retrack.dev\r\nSubject: subject\r\nDate: Sat, 01 Jan 2000 10:00:00 +0000\r\nTo: dev@retrack.dev\r\nContent-Transfer-Encoding: 7bit\r\n\r\nmessage 0""###);
 
         Ok(())
     }

@@ -21,7 +21,7 @@ pub use self::{
 };
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport, EmailTransportError},
+    network::DnsResolver,
     scheduler::scheduler_jobs::{TasksRunJob, TrackersRunJob, TrackersScheduleJob},
     server::SchedulerStatus,
 };
@@ -39,17 +39,14 @@ const SCHEDULER_NOTIFICATIONS_TABLE: &str = "scheduler_notifications";
 const SCHEDULER_NOTIFICATION_STATES_TABLE: &str = "scheduler_notification_states";
 
 /// The scheduler is responsible for scheduling and executing jobs.
-pub struct Scheduler<DR: DnsResolver, ET: EmailTransport> {
+pub struct Scheduler<DR: DnsResolver> {
     pub inner_scheduler: JobScheduler,
-    pub api: Arc<Api<DR, ET>>,
+    pub api: Arc<Api<DR>>,
 }
 
-impl<DR: DnsResolver, ET: EmailTransport> Scheduler<DR, ET>
-where
-    ET::Error: EmailTransportError,
-{
+impl<DR: DnsResolver> Scheduler<DR> {
     /// Starts the scheduler resuming existing jobs and adding new ones.
-    pub async fn start(api: Arc<Api<DR, ET>>) -> anyhow::Result<Self> {
+    pub async fn start(api: Arc<Api<DR>>) -> anyhow::Result<Self> {
         let store_db_config = &api.config.db;
         let store = Arc::new(RwLock::new(PostgresStore::Created(format!(
             "host={} port={} dbname={}{}",

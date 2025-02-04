@@ -1,17 +1,13 @@
-use crate::{
-    api::Api,
-    network::{DnsResolver, EmailTransport},
-    scheduler::SchedulerJobMetadata,
-};
+use crate::{api::Api, network::DnsResolver, scheduler::SchedulerJobMetadata};
 use uuid::Uuid;
 
-pub struct SchedulerApiExt<'a, DR: DnsResolver, ET: EmailTransport> {
-    api: &'a Api<DR, ET>,
+pub struct SchedulerApiExt<'a, DR: DnsResolver> {
+    api: &'a Api<DR>,
 }
 
-impl<'a, DR: DnsResolver, ET: EmailTransport> SchedulerApiExt<'a, DR, ET> {
+impl<'a, DR: DnsResolver> SchedulerApiExt<'a, DR> {
     /// Creates Scheduler API.
-    pub fn new(api: &'a Api<DR, ET>) -> Self {
+    pub fn new(api: &'a Api<DR>) -> Self {
         Self { api }
     }
 
@@ -30,9 +26,9 @@ impl<'a, DR: DnsResolver, ET: EmailTransport> SchedulerApiExt<'a, DR, ET> {
     }
 }
 
-impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
+impl<DR: DnsResolver> Api<DR> {
     /// Returns an API to work with scheduler jobs.
-    pub fn scheduler(&self) -> SchedulerApiExt<DR, ET> {
+    pub fn scheduler(&self) -> SchedulerApiExt<DR> {
         SchedulerApiExt::new(self)
     }
 }

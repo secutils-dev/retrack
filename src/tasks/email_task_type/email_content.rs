@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport},
+    network::DnsResolver,
     tasks::{Email, EmailTemplate},
 };
 use serde::{Deserialize, Serialize};
@@ -16,10 +16,7 @@ pub enum EmailContent {
 
 impl EmailContent {
     /// Consumes email content and returns its email representation if supported.
-    pub async fn into_email<DR: DnsResolver, ET: EmailTransport>(
-        self,
-        api: &Api<DR, ET>,
-    ) -> anyhow::Result<Email> {
+    pub async fn into_email<DR: DnsResolver>(self, api: &Api<DR>) -> anyhow::Result<Email> {
         Ok(match self {
             EmailContent::Custom(email) => email,
             EmailContent::Template(template) => template.compile_to_email(api).await?,

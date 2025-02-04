@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport, EmailTransportError},
+    network::DnsResolver,
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
         CronExt, SchedulerJobMetadata,
@@ -21,13 +21,10 @@ use uuid::Uuid;
 pub(crate) struct TrackersRunJob;
 impl TrackersRunJob {
     /// Tries to resume existing `TrackersTrigger` job.
-    pub async fn try_resume<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
+    pub async fn try_resume<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
         existing_job_data: RawSchedulerJobStoredData,
-    ) -> anyhow::Result<Option<Job>>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<Option<Job>> {
         // Check #1: The job should have a valid metadata. If not, remove it.
         let scheduler = api.scheduler();
         let Some(job_meta) = scheduler.get_job_meta(existing_job_data.id).await? else {
@@ -122,13 +119,10 @@ impl TrackersRunJob {
     }
 
     /// Creates a new `TrackersTrigger` job.
-    pub fn create<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
+    pub fn create<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
         schedule: impl AsRef<str>,
-    ) -> anyhow::Result<Job>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<Job> {
         // Now, create and schedule new job.
         let mut job = Job::new_async(
             Cron::parse_pattern(schedule.as_ref())
@@ -153,14 +147,11 @@ impl TrackersRunJob {
         Ok(job)
     }
 
-    async fn execute<DR: DnsResolver, ET: EmailTransport>(
+    async fn execute<DR: DnsResolver>(
         job_id: Uuid,
-        api: Arc<Api<DR, ET>>,
+        api: Arc<Api<DR>>,
         job_scheduler: &JobScheduler,
-    ) -> anyhow::Result<()>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<()> {
         // Check #1: The job should have valid metadata. If not, remove it.
         let run_start = Instant::now();
         let Some(mut job_meta) = api.scheduler().get_job_meta(job_id).await? else {
@@ -346,14 +337,8 @@ impl TrackersRunJob {
         Ok(())
     }
 
-    async fn report_error<DR: DnsResolver, ET: EmailTransport>(
-        api: &Api<DR, ET>,
-        tracker: Tracker,
-        error: anyhow::Error,
-    ) where
-        ET::Error: EmailTransportError,
-    {
-        let Some(ref smtp_config) = api.config.smtp else {
+    async fn report_error<DR: DnsResolver>(api: &Api<DR>, tracker: Tracker, error: anyhow::Error) {
+        let Some(ref smtp) = api.network.smtp else {
             warn!(
                 tracker.id = %tracker.id,
                 tracker.name = tracker.name,
@@ -362,7 +347,7 @@ impl TrackersRunJob {
             return;
         };
 
-        let Some(ref catch_all_recipient) = smtp_config.catch_all else {
+        let Some(ref catch_all_recipient) = smtp.config.catch_all else {
             warn!(
                 tracker.id = %tracker.id,
                 tracker.name = tracker.name,
@@ -410,9 +395,10 @@ mod tests {
         scheduler::{SchedulerJob, SchedulerJobMetadata},
         tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
         tests::{
-            mock_api, mock_api_with_config, mock_config, mock_get_scheduler_job,
-            mock_schedule_in_sec, mock_scheduler, mock_scheduler_job, mock_upsert_scheduler_job,
-            SmtpCatchAllConfig, TrackerCreateParamsBuilder,
+            mock_api, mock_api_with_network, mock_get_scheduler_job, mock_network_with_smtp,
+            mock_schedule_in_sec, mock_scheduler, mock_scheduler_job, mock_smtp, mock_smtp_config,
+            mock_upsert_scheduler_job, MockSmtpServer, SmtpCatchAllConfig,
+            TrackerCreateParamsBuilder,
         },
     };
     use futures::StreamExt;
@@ -1221,18 +1207,22 @@ mod tests {
 
     #[test(sqlx::test)]
     async fn resets_job_and_report_error_if_job_fails(pool: PgPool) -> anyhow::Result<()> {
-        let mut config = mock_config()?;
-        config.smtp = config.smtp.map(|config| SmtpConfig {
+        let mut scheduler = mock_scheduler(&pool).await?;
+
+        let server = MockServer::start();
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let smtp_config = SmtpConfig {
             catch_all: Some(SmtpCatchAllConfig {
                 recipient: "dev@retrack.dev".to_string(),
-                text_matcher: Regex::new(r"alpha").unwrap(),
+                text_matcher: Regex::new(r"alpha")?,
             }),
-            ..config
-        });
-
-        let mut scheduler = mock_scheduler(&pool).await?;
-        let api = Arc::new(mock_api_with_config(pool, config).await?);
-        let server = MockServer::start();
+            ..mock_smtp_config(smtp_server.host.to_string(), smtp_server.port)
+        };
+        let api = Arc::new(
+            mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?,
+        );
 
         // Create tracker.
         let trackers = api.trackers();
@@ -1349,18 +1339,22 @@ mod tests {
 
     #[test(sqlx::test)]
     async fn removes_job_and_report_error_if_last_retry_fails(pool: PgPool) -> anyhow::Result<()> {
-        let mut config = mock_config()?;
-        config.smtp = config.smtp.map(|config| SmtpConfig {
+        let mut scheduler = mock_scheduler(&pool).await?;
+
+        let server = MockServer::start();
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let smtp_config = SmtpConfig {
             catch_all: Some(SmtpCatchAllConfig {
                 recipient: "dev@retrack.dev".to_string(),
-                text_matcher: Regex::new(r"alpha").unwrap(),
+                text_matcher: Regex::new(r"alpha")?,
             }),
-            ..config
-        });
-
-        let mut scheduler = mock_scheduler(&pool).await?;
-        let api = Arc::new(mock_api_with_config(pool, config).await?);
-        let server = MockServer::start();
+            ..mock_smtp_config(smtp_server.host.to_string(), smtp_server.port)
+        };
+        let api = Arc::new(
+            mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?,
+        );
 
         // Create tracker with retry strategy.
         let mut create_params = TrackerCreateParamsBuilder::new("tracker-failed-retry")
@@ -1475,23 +1469,27 @@ mod tests {
 
     #[test(sqlx::test)]
     async fn can_schedule_retries_if_request_fails(pool: PgPool) -> anyhow::Result<()> {
-        let mut config = mock_config()?;
-        config.smtp = config.smtp.map(|config| SmtpConfig {
+        let mut scheduler = mock_scheduler(&pool).await?;
+
+        let server = MockServer::start();
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let smtp_config = SmtpConfig {
             catch_all: Some(SmtpCatchAllConfig {
                 recipient: "dev@retrack.dev".to_string(),
-                text_matcher: Regex::new(r"alpha").unwrap(),
+                text_matcher: Regex::new(r"alpha")?,
             }),
-            ..config
-        });
-        config.trackers = TrackersConfig {
+            ..mock_smtp_config(smtp_server.host.to_string(), smtp_server.port)
+        };
+        let mut api =
+            mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?;
+        api.config.trackers = TrackersConfig {
             restrict_to_public_urls: false,
             min_retry_interval: Duration::from_secs(2),
             ..Default::default()
         };
-
-        let mut scheduler = mock_scheduler(&pool).await?;
-        let api = Arc::new(mock_api_with_config(pool, config).await?);
-        let server = MockServer::start();
+        let api = Arc::new(api);
 
         // Create tracker with retry strategy.
         let api_url = server.url("/api-retry");

@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport},
+    network::DnsResolver,
     tasks::{Email, EmailAttachment},
 };
 use serde::{Deserialize, Serialize};
@@ -21,10 +21,7 @@ pub enum EmailTemplate {
 
 impl EmailTemplate {
     /// Compiles tracker check result template as an email.
-    pub async fn compile_to_email<DR: DnsResolver, ET: EmailTransport>(
-        &self,
-        api: &Api<DR, ET>,
-    ) -> anyhow::Result<Email> {
+    pub async fn compile_to_email<DR: DnsResolver>(&self, api: &Api<DR>) -> anyhow::Result<Email> {
         match self {
             Self::TrackerCheckResult {
                 tracker_id,
@@ -34,8 +31,8 @@ impl EmailTemplate {
         }
     }
     /// Compiles tracker check result template as an email.
-    async fn tracker_check_result<DR: DnsResolver, ET: EmailTransport>(
-        api: &Api<DR, ET>,
+    async fn tracker_check_result<DR: DnsResolver>(
+        api: &Api<DR>,
         tracker_id: Uuid,
         tracker_name: &str,
         content: &Result<String, String>,

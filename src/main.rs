@@ -80,7 +80,7 @@ mod tests {
         network::{DnsResolver, Network},
     };
     use bytes::Bytes;
-    use lettre::transport::stub::AsyncStubTransport;
+    use lettre::transport::smtp::authentication::Credentials;
     use std::{fs, ops::Add, path::PathBuf, time::Duration};
     use time::OffsetDateTime;
     use trust_dns_resolver::proto::rr::Record;
@@ -90,6 +90,7 @@ mod tests {
     use crate::{
         config::{CacheConfig, DatabaseConfig, JsRuntimeConfig, TrackersConfig},
         js_runtime::JsRuntime,
+        network::{Smtp, SmtpTransport},
         templates::create_templates,
     };
     use sqlx::{postgres::PgDatabaseError, PgPool};
@@ -102,6 +103,18 @@ mod tests {
             .downcast::<PgDatabaseError>())
     }
 
+    pub fn mock_smtp_config(host: impl Into<String>, port: u16) -> SmtpConfig {
+        SmtpConfig {
+            username: "dev@retrack.dev".to_string(),
+            password: "password".to_string(),
+            host: host.into(),
+            port: Some(port),
+            no_tls: false,
+            catch_all: None,
+            throttle_delay: Duration::from_millis(1),
+        }
+    }
+
     pub fn mock_config() -> anyhow::Result<Config> {
         Ok(Config {
             public_url: Url::parse("http://localhost:1234")?,
@@ -109,12 +122,7 @@ mod tests {
             cache: CacheConfig {
                 http_cache_path: Some("./target/http-cache".into()),
             },
-            smtp: Some(SmtpConfig {
-                username: "dev@retrack.dev".to_string(),
-                password: "password".to_string(),
-                address: "localhost".to_string(),
-                catch_all: None,
-            }),
+            smtp: None,
             components: ComponentsConfig::default(),
             scheduler: SchedulerJobsConfig {
                 trackers_schedule: "0 * 0 * * *".to_string(),
@@ -128,27 +136,50 @@ mod tests {
         })
     }
 
-    pub fn mock_network() -> Network<MockResolver, AsyncStubTransport> {
-        Network::new(MockResolver::new(), AsyncStubTransport::new_ok())
+    pub fn mock_smtp(config: SmtpConfig) -> Smtp {
+        Smtp::new(
+            SmtpTransport::builder_dangerous(&config.host)
+                .port(config.port.unwrap_or(25))
+                .credentials(Credentials::new(
+                    config.username.clone(),
+                    config.password.clone(),
+                ))
+                .build(),
+            config,
+        )
+    }
+
+    pub fn mock_network() -> Network<MockResolver> {
+        Network {
+            resolver: MockResolver::new(),
+            smtp: None,
+        }
     }
 
     pub fn mock_network_with_records<const N: usize>(
         records: Vec<Record>,
-    ) -> Network<MockResolver<N>, AsyncStubTransport> {
-        Network::new(
-            MockResolver::new_with_records::<N>(records),
-            AsyncStubTransport::new_ok(),
-        )
+    ) -> Network<MockResolver<N>> {
+        Network {
+            resolver: MockResolver::new_with_records::<N>(records),
+            smtp: None,
+        }
     }
 
-    pub async fn mock_api(pool: PgPool) -> anyhow::Result<Api<MockResolver, AsyncStubTransport>> {
+    pub fn mock_network_with_smtp(smtp: Smtp) -> Network<MockResolver> {
+        Network {
+            resolver: MockResolver::new(),
+            smtp: Some(smtp),
+        }
+    }
+
+    pub async fn mock_api(pool: PgPool) -> anyhow::Result<Api<MockResolver>> {
         mock_api_with_config(pool, mock_config()?).await
     }
 
     pub async fn mock_api_with_config(
         pool: PgPool,
         config: Config,
-    ) -> anyhow::Result<Api<MockResolver, AsyncStubTransport>> {
+    ) -> anyhow::Result<Api<MockResolver>> {
         let js_runtime = JsRuntime::init_platform(&config.js_runtime)?;
         Ok(Api::new(
             config,
@@ -161,8 +192,8 @@ mod tests {
 
     pub async fn mock_api_with_network<DR: DnsResolver>(
         pool: PgPool,
-        network: Network<DR, AsyncStubTransport>,
-    ) -> anyhow::Result<Api<DR, AsyncStubTransport>> {
+        network: Network<DR>,
+    ) -> anyhow::Result<Api<DR>> {
         let config = mock_config()?;
         let js_runtime = JsRuntime::init_platform(&config.js_runtime)?;
         Ok(Api::new(

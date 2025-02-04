@@ -4,7 +4,7 @@ use crate::{
     database::Database,
     error::Error as RetrackError,
     js_runtime::{ScriptBuilder, ScriptConfig},
-    network::{DnsResolver, EmailTransport, EmailTransportError},
+    network::DnsResolver,
     scheduler::CronExt,
     tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
     trackers::{
@@ -74,20 +74,14 @@ pub const MAX_TRACKER_EMAIL_ACTION_RECIPIENTS_COUNT: usize = 10;
 /// Defines the maximum count of tracker webhook action headers.
 pub const MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT: usize = 20;
 
-pub struct TrackersApiExt<'a, DR: DnsResolver, ET: EmailTransport>
-where
-    ET::Error: EmailTransportError,
-{
-    api: &'a Api<DR, ET>,
+pub struct TrackersApiExt<'a, DR: DnsResolver> {
+    api: &'a Api<DR>,
     trackers: TrackersDatabaseExt<'a>,
 }
 
-impl<'a, DR: DnsResolver, ET: EmailTransport> TrackersApiExt<'a, DR, ET>
-where
-    ET::Error: EmailTransportError,
-{
+impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
     /// Creates Trackers API.
-    pub fn new(api: &'a Api<DR, ET>) -> Self {
+    pub fn new(api: &'a Api<DR>) -> Self {
         Self {
             api,
             trackers: api.db.trackers(),
@@ -1201,12 +1195,9 @@ where
     }
 }
 
-impl<'a, DR: DnsResolver, ET: EmailTransport> Api<DR, ET>
-where
-    ET::Error: EmailTransportError,
-{
+impl<'a, DR: DnsResolver> Api<DR> {
     /// Returns an API to work with trackers.
-    pub fn trackers(&'a self) -> TrackersApiExt<'a, DR, ET> {
+    pub fn trackers(&'a self) -> TrackersApiExt<'a, DR> {
         TrackersApiExt::new(self)
     }
 }

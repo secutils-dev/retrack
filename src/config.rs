@@ -64,6 +64,7 @@ pub mod tests {
     use crate::config::{Config, RawConfig, SmtpConfig};
     use insta::assert_debug_snapshot;
     use regex::Regex;
+    use std::time::Duration;
 
     #[test]
     fn conversion_from_raw_config() {
@@ -71,11 +72,14 @@ pub mod tests {
             smtp: Some(SmtpConfig {
                 username: "test@retrack.dev".to_string(),
                 password: "password".to_string(),
-                address: "smtp.retrack.dev".to_string(),
+                host: "smtp.retrack.dev".to_string(),
+                port: Some(465),
+                no_tls: true,
                 catch_all: Some(SmtpCatchAllConfig {
                     recipient: "test@retrack.dev".to_string(),
                     text_matcher: Regex::new(r"test").unwrap(),
                 }),
+                throttle_delay: Duration::from_secs(30),
             }),
             ..Default::default()
         };
@@ -114,7 +118,12 @@ pub mod tests {
                 SmtpConfig {
                     username: "test@retrack.dev",
                     password: "password",
-                    address: "smtp.retrack.dev",
+                    host: "smtp.retrack.dev",
+                    port: Some(
+                        465,
+                    ),
+                    no_tls: true,
+                    throttle_delay: 30s,
                     catch_all: Some(
                         SmtpCatchAllConfig {
                             recipient: "test@retrack.dev",

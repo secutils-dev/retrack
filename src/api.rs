@@ -2,25 +2,25 @@ use crate::{
     config::Config,
     database::Database,
     js_runtime::JsRuntime,
-    network::{DnsResolver, EmailTransport, Network},
+    network::{DnsResolver, Network},
 };
 use handlebars::Handlebars;
 use tracing::info;
 
-pub struct Api<DR: DnsResolver, ET: EmailTransport> {
+pub struct Api<DR: DnsResolver> {
     pub db: Database,
     pub config: Config,
-    pub network: Network<DR, ET>,
+    pub network: Network<DR>,
     pub templates: Handlebars<'static>,
     pub js_runtime: JsRuntime,
 }
 
-impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
+impl<DR: DnsResolver> Api<DR> {
     /// Instantiates APIs collection with the specified config and datastore.
     pub fn new(
         config: Config,
         database: Database,
-        network: Network<DR, ET>,
+        network: Network<DR>,
         templates: Handlebars<'static>,
         js_runtime: JsRuntime,
     ) -> Self {
@@ -42,7 +42,7 @@ impl<DR: DnsResolver, ET: EmailTransport> Api<DR, ET> {
     }
 }
 
-impl<DR: DnsResolver, ET: EmailTransport> AsRef<Api<DR, ET>> for Api<DR, ET> {
+impl<DR: DnsResolver> AsRef<Api<DR>> for Api<DR> {
     fn as_ref(&self) -> &Self {
         self
     }

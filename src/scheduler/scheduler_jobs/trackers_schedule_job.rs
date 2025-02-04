@@ -1,6 +1,6 @@
 use crate::{
     api::Api,
-    network::{DnsResolver, EmailTransport, EmailTransportError},
+    network::DnsResolver,
     scheduler::{
         database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
         scheduler_jobs::TrackersRunJob, CronExt, SchedulerJobMetadata,
@@ -17,13 +17,10 @@ use tracing::{debug, error};
 pub(crate) struct TrackersScheduleJob;
 impl TrackersScheduleJob {
     /// Tries to resume existing `TrackersSchedule` job.
-    pub fn try_resume<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
+    pub fn try_resume<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
         existing_job_data: RawSchedulerJobStoredData,
-    ) -> anyhow::Result<Option<Job>>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<Option<Job>> {
         // If the schedule has changed, remove existing job and create a new one.
         let mut new_job = Self::create(api)?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
@@ -35,10 +32,7 @@ impl TrackersScheduleJob {
     }
 
     /// Creates a new `TrackersSchedule` job.
-    pub fn create<DR: DnsResolver, ET: EmailTransport>(api: Arc<Api<DR, ET>>) -> anyhow::Result<Job>
-    where
-        ET::Error: EmailTransportError,
-    {
+    pub fn create<DR: DnsResolver>(api: Arc<Api<DR>>) -> anyhow::Result<Job> {
         let mut job = Job::new_async(
             Cron::parse_pattern(&api.config.scheduler.trackers_schedule)
                 .with_context(|| {
@@ -65,13 +59,10 @@ impl TrackersScheduleJob {
     }
 
     /// Executes a `TrackersSchedule` job.
-    async fn execute<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
+    async fn execute<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
         scheduler: JobScheduler,
-    ) -> anyhow::Result<()>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<()> {
         let trackers = api.trackers();
         Self::schedule_trackers(
             api.clone(),
@@ -83,14 +74,11 @@ impl TrackersScheduleJob {
         Ok(())
     }
 
-    async fn schedule_trackers<DR: DnsResolver, ET: EmailTransport>(
-        api: Arc<Api<DR, ET>>,
+    async fn schedule_trackers<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
         scheduler: &JobScheduler,
         unscheduled_trackers: Vec<Tracker>,
-    ) -> anyhow::Result<()>
-    where
-        ET::Error: EmailTransportError,
-    {
+    ) -> anyhow::Result<()> {
         if !unscheduled_trackers.is_empty() {
             debug!("Found {} unscheduled trackers.", unscheduled_trackers.len());
         }

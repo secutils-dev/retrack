@@ -2,21 +2,14 @@ mod handlers;
 mod server_state;
 
 use crate::{
-    api::Api,
-    database::Database,
-    network::{Network, TokioDnsResolver},
-    scheduler::Scheduler,
+    api::Api, database::Database, network::Network, scheduler::Scheduler,
     templates::create_templates,
 };
 use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer, Result};
 use anyhow::Context;
-use lettre::{
-    message::Mailbox, transport::smtp::authentication::Credentials, AsyncSmtpTransport,
-    Tokio1Executor,
-};
 use sqlx::postgres::PgPoolOptions;
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 use tracing::info;
 use tracing_actix_web::TracingLogger;
 use utoipa::OpenApi;
@@ -38,28 +31,15 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
     )
     .await?;
 
-    let email_transport = if let Some(ref smtp_config) = raw_config.smtp {
-        if let Some(ref catch_all_config) = smtp_config.catch_all {
-            Mailbox::from_str(catch_all_config.recipient.as_str())
-                .context("Cannot parse SMTP catch-all recipient.")?;
-        }
-
-        AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_config.address)?
-            .credentials(Credentials::new(
-                smtp_config.username.clone(),
-                smtp_config.password.clone(),
-            ))
-            .build()
-    } else {
-        AsyncSmtpTransport::<Tokio1Executor>::unencrypted_localhost()
-    };
-
     let http_port = raw_config.port;
     let js_runtime = JsRuntime::init_platform(&raw_config.js_runtime)?;
+    let config = Config::from(raw_config);
+    let network = Network::create(&config)?;
+
     let api = Arc::new(Api::new(
-        Config::from(raw_config),
+        config,
         database,
-        Network::new(TokioDnsResolver::create(), email_transport),
+        network,
         create_templates()?,
         js_runtime,
     ));
