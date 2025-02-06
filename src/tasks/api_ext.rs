@@ -13,7 +13,7 @@ use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use std::cmp;
 use time::OffsetDateTime;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 use uuid::Uuid;
 
 /// Defines a maximum number of tasks that can be retrieved from the database at once.

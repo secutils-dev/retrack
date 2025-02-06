@@ -125,6 +125,7 @@ mod tests {
             smtp: None,
             components: ComponentsConfig::default(),
             scheduler: SchedulerJobsConfig {
+                enabled: true,
                 trackers_schedule: "0 * 0 * * *".to_string(),
                 tasks_run: "0 * 1 * * *".to_string(),
             },

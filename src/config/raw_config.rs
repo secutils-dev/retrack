@@ -85,6 +85,7 @@ mod tests {
         web_scraper_url = 'http://localhost:7272/'
 
         [scheduler]
+        enabled = true
         tasks_run = '0/30 * * * * *'
         trackers_schedule = '0/10 * * * * *'
 
@@ -131,6 +132,7 @@ mod tests {
         channel_buffer_size = 200
 
         [scheduler]
+        enabled = false
         trackers_schedule = '0 * * * * * *'
         trackers_run = '0 * * * * * *'
         tasks_run = '0/30 * * * * * *'
@@ -202,6 +204,7 @@ mod tests {
                 },
             },
             scheduler: SchedulerJobsConfig {
+                enabled: false,
                 tasks_run: "0/30 * * * * * *",
                 trackers_schedule: "0 * * * * * *",
             },

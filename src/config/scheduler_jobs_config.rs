@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 /// Configuration for the Retrack scheduler jobs.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct SchedulerJobsConfig {
+    /// Indicates whether the scheduler is enabled and started.
+    pub enabled: bool,
     /// The schedule to use for the `TasksRun` job.
     pub tasks_run: String,
     /// The schedule to use for the `TrackersSchedule` job.
@@ -12,6 +14,7 @@ pub struct SchedulerJobsConfig {
 impl Default for SchedulerJobsConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             tasks_run: "0/30 * * * * *".to_string(),
             trackers_schedule: "0/10 * * * * *".to_string(),
         }
@@ -26,6 +29,7 @@ mod tests {
     #[test]
     fn serialization_and_default() {
         assert_toml_snapshot!(SchedulerJobsConfig::default(), @r###"
+        enabled = true
         tasks_run = '0/30 * * * * *'
         trackers_schedule = '0/10 * * * * *'
         "###);
@@ -35,6 +39,7 @@ mod tests {
     fn deserialization() {
         let config: SchedulerJobsConfig = toml::from_str(
             r#"
+        enabled = true
         trackers_schedule = '0/10 * * * * *'
         trackers_run = '0/10 * * * * *'
         tasks_run = '0/30 * * * * *'

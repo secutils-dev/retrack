@@ -65,6 +65,7 @@ impl<DR: DnsResolver> Scheduler<DR> {
             table: SCHEDULER_JOBS_TABLE.to_string(),
         };
 
+        let is_scheduler_enabled = api.config.scheduler.enabled;
         let scheduler = Self {
             inner_scheduler: JobScheduler::new_with_storage_and_code(
                 Box::new(metadata_store),
@@ -81,6 +82,11 @@ impl<DR: DnsResolver> Scheduler<DR> {
             .await?,
             api,
         };
+
+        if !is_scheduler_enabled {
+            warn!("Scheduler is disabled – existing jobs won’t be resumed, and new jobs won’t be scheduled.");
+            return Ok(scheduler);
+        }
 
         // First, try to resume existing jobs.
         let resumed_unique_jobs = scheduler.resume().await?;
@@ -179,7 +185,7 @@ impl<DR: DnsResolver> Scheduler<DR> {
     pub async fn status(&mut self) -> anyhow::Result<SchedulerStatus> {
         match self.inner_scheduler.time_till_next_job().await {
             Ok(time_till_next_job) => Ok(SchedulerStatus {
-                operational: true,
+                operational: self.api.config.scheduler.enabled,
                 time_till_next_job,
             }),
             Err(err) => {
@@ -343,6 +349,8 @@ pub mod tests {
         .await?;
 
         let mut scheduler = Scheduler::start(api.clone()).await?;
+        assert!(scheduler.inner_scheduler.inited().await);
+
         assert!(scheduler
             .inner_scheduler
             .next_tick_for_job(trackers_run_job_id)
@@ -490,6 +498,60 @@ pub mod tests {
             ),
         ]
         "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn doesnt_resume_jobs_if_disabled(pool: PgPool) -> anyhow::Result<()> {
+        let mut mock_config = mock_scheduler_config(&pool).await?;
+        mock_config.scheduler.enabled = false;
+        let api = Arc::new(mock_api_with_config(pool, mock_config).await?);
+
+        let trackers_run_job_id = uuid!("00000000-0000-0000-0000-000000000001");
+        let trackers_schedule_job_id = uuid!("00000000-0000-0000-0000-000000000002");
+        let tasks_run_job_id = uuid!("00000000-0000-0000-0000-000000000003");
+
+        // Create tracker and tracker job.
+        let tracker = api
+            .trackers()
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker-one")
+                    .with_schedule("1 2 3 4 5 6")
+                    .build(),
+            )
+            .await?;
+        api.trackers()
+            .set_tracker_job(tracker.id, trackers_run_job_id)
+            .await?;
+
+        // Add job registrations.
+        mock_upsert_scheduler_job(
+            &api.db,
+            &mock_scheduler_job(
+                trackers_run_job_id,
+                SchedulerJob::TrackersRun,
+                "1 2 3 4 5 6",
+            ),
+        )
+        .await?;
+        mock_upsert_scheduler_job(
+            &api.db,
+            &mock_scheduler_job(
+                trackers_schedule_job_id,
+                SchedulerJob::TrackersSchedule,
+                "0 * 0 * * *",
+            ),
+        )
+        .await?;
+        mock_upsert_scheduler_job(
+            &api.db,
+            &mock_scheduler_job(tasks_run_job_id, SchedulerJob::TasksRun, "0 * 1 * * *"),
+        )
+        .await?;
+
+        let scheduler = Scheduler::start(api.clone()).await?;
+        assert!(!scheduler.inner_scheduler.inited().await);
 
         Ok(())
     }

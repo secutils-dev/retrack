@@ -154,6 +154,7 @@ pub mod tests {
                 },
             },
             scheduler: SchedulerJobsConfig {
+                enabled: true,
                 tasks_run: "0/30 * * * * *",
                 trackers_schedule: "0/10 * * * * *",
             },
