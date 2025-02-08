@@ -43,11 +43,14 @@ impl TrackersScheduleJob {
                 })?
                 .pattern
                 .to_string(),
-            move |_, scheduler| {
+            move |job_id, scheduler| {
                 let api = api.clone();
                 Box::pin(async move {
+                    debug!(job.id = %job_id, "Running job.");
                     if let Err(err) = Self::execute(api, scheduler).await {
-                        error!("Failed to execute trackers schedule job: {err:?}");
+                        error!(job.id = %job_id, "Job failed with unexpected error: {err:?}.");
+                    } else {
+                        debug!(job.id = %job_id, "Finished running job.");
                     }
                 })
             },

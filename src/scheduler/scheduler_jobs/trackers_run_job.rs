@@ -26,14 +26,26 @@ impl TrackersRunJob {
         existing_job_data: RawSchedulerJobStoredData,
     ) -> anyhow::Result<Option<Job>> {
         // Check #1: The job should have a valid metadata. If not, remove it.
-        let scheduler = api.scheduler();
-        let Some(job_meta) = scheduler.get_job_meta(existing_job_data.id).await? else {
+        let Some(Ok(job_meta)) = existing_job_data
+            .extra
+            .as_ref()
+            .map(|extra| SchedulerJobMetadata::try_from(extra.as_slice()))
+        else {
             error!(
                 job.id = %existing_job_data.id,
                 "The job doesn't have metadata and will be removed."
             );
             return Ok(None);
         };
+
+        // If the job was marked as running, remove it.
+        if job_meta.is_running {
+            error!(
+                job.id = %existing_job_data.id,
+                "The job was marked as running and will be removed."
+            );
+            return Ok(None);
+        }
 
         // Check #2: The job should be associated with a tracker. If not, remove it.
         let trackers = api.trackers();
@@ -593,6 +605,34 @@ mod tests {
             .get_tracker_by_job_id(job_id)
             .await?
             .is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn removes_if_job_is_running(pool: PgPool) -> anyhow::Result<()> {
+        let api = Arc::new(mock_api(pool).await?);
+
+        let job_id = uuid!("00000000-0000-0000-0000-000000000000");
+
+        // Create tracker with retry config.
+        let mut create_params = TrackerCreateParamsBuilder::new("tracker").build();
+        create_params.config.job = Some(SchedulerJobConfig {
+            schedule: "0 0 * * * *".to_string(),
+            retry_strategy: None,
+        });
+        let tracker = api.trackers().create_tracker(create_params).await?;
+        api.trackers().set_tracker_job(tracker.id, job_id).await?;
+
+        // Create associated tracker job.
+        let mut mock_job = mock_scheduler_job(job_id, SchedulerJob::TrackersRun, "0 10 10 10 * *");
+        mock_job.extra = Some(Vec::try_from(
+            &*SchedulerJobMetadata::new(SchedulerJob::TrackersRun).set_running(),
+        )?);
+        mock_upsert_scheduler_job(&api.db, &mock_job).await?;
+
+        let job = TrackersRunJob::try_resume(api.clone(), mock_job).await?;
+        assert!(job.is_none());
 
         Ok(())
     }
