@@ -15,6 +15,9 @@ export interface Config {
     executablePath?: string;
   };
   userAgent?: string;
+  server: {
+    bodyLimit: number;
+  };
 }
 
 export function configure(): Config {
@@ -30,6 +33,10 @@ export function configure(): Config {
       executablePath: process.env.RETRACK_WEB_SCRAPER_BROWSER_EXECUTABLE_PATH || undefined,
       screenshotsPath: process.env.RETRACK_WEB_SCRAPER_BROWSER_SCREENSHOTS_PATH,
       cdpEndpoint: process.env.RETRACK_WEB_SCRAPER_BROWSER_CDP_WS_ENDPOINT || undefined,
+    },
+    server: {
+      // Default body limit is 5MB.
+      bodyLimit: +(process.env.RETRACK_WEB_SCRAPER_SERVER_BODY_LIMIT ?? 0) || 5 * 1024 * 1024,
     },
     userAgent: process.env.RETRACK_WEB_SCRAPER_USER_AGENT,
   };

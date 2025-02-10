@@ -9,6 +9,7 @@ import type { BrowserEndpoint } from './utilities/browser.js';
 
 const config = configure();
 const server = fastify({
+  bodyLimit: config.server.bodyLimit,
   logger: config.isDev
     ? {
         level: config.logLevel,

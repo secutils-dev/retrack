@@ -14,6 +14,7 @@ await test('[/api/status] returns version from the config', async () => {
     isDev: false,
     logLevel: 'debug',
     browser: { ttlSec: 1, headless: true, sandbox: true },
+    server: { bodyLimit: 5 * 1024 * 1024 },
     port: 3,
   };
   const response = await registerStatusGetRoutes(createMock({ config: configMock })).inject({
