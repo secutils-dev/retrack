@@ -126,11 +126,9 @@ strip = true
 lto = true
 panic = "abort"
 
-[profile.dev.package.sqlx-macros]
-opt-level = 3
+[profile.dev]
+package.sqlx-macros.opt-level = 3
+package.insta.opt-level = 3
+package.similar.opt-level = 3
 
-[profile.dev.package.insta]
-opt-level = 3
 
-[profile.dev.package.similar]
-opt-level = 3
