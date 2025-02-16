@@ -24,7 +24,7 @@ pub async fn trackers_create_revision(
     match trackers.create_tracker_data_revision(*tracker_id).await {
         Ok(revision) => Ok(HttpResponse::Ok().json(revision)),
         Err(err) => {
-            error!("Failed to create tracker data revision: {err:?}");
+            error!(tracker.id = %tracker_id, "Failed to create tracker data revision: {err:?}");
             Err(err.into())
         }
     }

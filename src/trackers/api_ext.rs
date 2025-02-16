@@ -831,7 +831,6 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             })?;
 
         if !scraper_response.status().is_success() {
-            let is_client_error = scraper_response.status().is_client_error();
             let scraper_error_response = scraper_response
                 .json::<WebScraperErrorResponse>()
                 .await
@@ -841,15 +840,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     tracker.id
                 )
             })?;
-            if is_client_error {
-                bail!(RetrackError::client(scraper_error_response.message));
-            } else {
-                bail!(
-                    "Unexpected scraper error for the tracker ('{}'): {:?}",
-                    tracker.id,
-                    scraper_error_response.message
-                );
-            }
+            bail!(RetrackError::client(scraper_error_response.message));
         }
 
         Ok(TrackerDataRevision {
