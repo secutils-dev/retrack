@@ -1,8 +1,8 @@
-FROM rust:1.84-slim-bookworm AS builder
+FROM rust:1.85-slim-bookworm AS builder
 WORKDIR /app
 
 ARG TARGETARCH
-ARG UPX_VERSION=4.2.4
+ARG UPX_VERSION=5.0.0
 
 # Install dependencies.
 RUN set -x && apt-get update && apt-get install -y protobuf-compiler curl xz-utils
@@ -19,6 +19,7 @@ RUN --mount=type=cache,target=/app/target cargo build --release && \
     cp ./target/release/retrack ./ && \
     upx --best --lzma ./retrack
 
+# Check out https://gcr.io/distroless/cc-debian12:nonroot
 FROM gcr.io/distroless/cc-debian12:nonroot
 EXPOSE 7676
 

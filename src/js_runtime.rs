@@ -672,6 +672,7 @@ pub mod tests {
           "Deno.core.hasPromise()",
           "Deno.core.hasTickScheduled()",
           "Deno.core.hostObjectBrand=symbol",
+          "Deno.core.internalFdSymbol=symbol",
           "Deno.core.internalRidSymbol=symbol",
           "Deno.core.isAnyArrayBuffer()",
           "Deno.core.isArgumentsObject()",
