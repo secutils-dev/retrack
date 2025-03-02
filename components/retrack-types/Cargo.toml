@@ -14,11 +14,11 @@ serde_with = "3.12"
 time = "0.3"
 url = "2.5"
 utoipa = "5.3"
-uuid = "1.14"
+uuid = "1.15"
 
 [dev-dependencies]
 anyhow = "1.0.96"
-insta = "1.42.1"
+insta = "1.42.2"
 
 [features]
 default = [
