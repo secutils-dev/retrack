@@ -36,7 +36,7 @@ impl<DR: DnsResolver> Api<DR> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        scheduler::{database_ext::RawSchedulerJobStoredData, SchedulerJob, SchedulerJobMetadata},
+        scheduler::{SchedulerJob, SchedulerJobMetadata, database_ext::RawSchedulerJobStoredData},
         tests::{mock_api, mock_upsert_scheduler_job},
     };
     use sqlx::PgPool;

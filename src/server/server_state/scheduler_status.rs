@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
+use serde_with::{DurationMilliSeconds, serde_as, skip_serializing_none};
 use std::time::Duration;
 use utoipa::ToSchema;
 

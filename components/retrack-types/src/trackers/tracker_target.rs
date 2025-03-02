@@ -28,8 +28,8 @@ mod tests {
     use super::TrackerTarget;
     use crate::trackers::{ApiTarget, PageTarget, TargetRequest};
     use http::{
-        header::{AUTHORIZATION, CONTENT_TYPE},
         Method,
+        header::{AUTHORIZATION, CONTENT_TYPE},
     };
     use serde_json::json;
     use std::collections::HashMap;

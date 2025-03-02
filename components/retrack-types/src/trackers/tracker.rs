@@ -40,7 +40,7 @@ mod tests {
         tests::MockTrackerBuilder,
         trackers::{PageTarget, TrackerAction, TrackerTarget, WebhookAction},
     };
-    use http::{header::CONTENT_TYPE, Method};
+    use http::{Method, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use std::{collections::HashMap, time::Duration};
     use url::Url;

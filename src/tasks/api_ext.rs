@@ -3,11 +3,11 @@ use crate::{
     network::DnsResolver,
     tasks::{EmailAttachmentDisposition, EmailTaskType, HttpTaskType, Task, TaskType},
 };
-use anyhow::{bail, Context};
-use futures::{pin_mut, StreamExt};
+use anyhow::{Context, bail};
+use futures::{StreamExt, pin_mut};
 use lettre::{
-    message::{header::ContentType, Attachment, MultiPart, SinglePart},
     Message,
+    message::{Attachment, MultiPart, SinglePart, header::ContentType},
 };
 use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
@@ -228,11 +228,11 @@ mod tests {
             Email, EmailAttachment, EmailContent, EmailTaskType, HttpTaskType, Task, TaskType,
         },
         tests::{
-            mock_api, mock_api_with_network, mock_network_with_smtp, mock_smtp, mock_smtp_config,
-            MockSmtpServer, SmtpCatchAllConfig,
+            MockSmtpServer, SmtpCatchAllConfig, mock_api, mock_api_with_network,
+            mock_network_with_smtp, mock_smtp, mock_smtp_config,
         },
     };
-    use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
+    use http::{HeaderMap, HeaderName, HeaderValue, Method, header::CONTENT_TYPE};
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
     use serde_json::json;
@@ -245,11 +245,12 @@ mod tests {
     async fn properly_schedules_task(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
-        assert!(api
-            .db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?
-            .is_none());
+        assert!(
+            api.db
+                .get_task(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+                .is_none()
+        );
 
         let mut tasks = vec![
             Task {
@@ -290,11 +291,12 @@ mod tests {
         let task = api.db.get_task(tasks[1].id).await?;
         assert_eq!(task.as_ref(), Some(&tasks[1]));
 
-        assert!(api
-            .db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000003"))
-            .await?
-            .is_none());
+        assert!(
+            api.db
+                .get_task(uuid!("00000000-0000-0000-0000-000000000003"))
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }

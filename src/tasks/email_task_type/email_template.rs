@@ -65,8 +65,8 @@ impl EmailTemplate {
                         "error_message": error_message,
                         "home_link": api.config.public_url.as_str(),
                     }),
-                )?
-            )
+                )?,
+            ),
         };
 
         Ok(Email::html_with_attachments(

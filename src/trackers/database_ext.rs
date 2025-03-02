@@ -8,7 +8,7 @@ use crate::{
 use anyhow::{anyhow, bail};
 use raw_tracker::RawTracker;
 use retrack_types::trackers::{Tracker, TrackerDataRevision};
-use sqlx::{error::ErrorKind as SqlxErrorKind, query, query_as, Pool, Postgres};
+use sqlx::{Pool, Postgres, error::ErrorKind as SqlxErrorKind, query, query_as};
 use uuid::Uuid;
 
 /// A database extension for the trackers-related operations.
@@ -418,7 +418,7 @@ mod tests {
         error::Error as RetrackError,
         scheduler::SchedulerJob,
         tests::{
-            mock_scheduler_job, mock_upsert_scheduler_job, to_database_error, MockTrackerBuilder,
+            MockTrackerBuilder, mock_scheduler_job, mock_upsert_scheduler_job, to_database_error,
         },
     };
     use insta::assert_debug_snapshot;
@@ -427,7 +427,7 @@ mod tests {
     use sqlx::PgPool;
     use std::time::Duration;
     use time::OffsetDateTime;
-    use uuid::{uuid, Uuid};
+    use uuid::{Uuid, uuid};
 
     fn create_data_revision(
         id: Uuid,
@@ -471,10 +471,12 @@ mod tests {
         let tracker = trackers.get_tracker(trackers_list[0].id).await?.unwrap();
         assert_eq!(tracker, trackers_list.remove(0));
 
-        assert!(trackers
-            .get_tracker(uuid!("00000000-0000-0000-0000-000000000005"))
-            .await?
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker(uuid!("00000000-0000-0000-0000-000000000005"))
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -842,14 +844,16 @@ mod tests {
                 .await?,
             vec![trackers_list[1].clone()]
         );
-        assert!(trackers
-            .get_trackers(&[
-                "tag:1".to_string(),
-                "tag:2".to_string(),
-                "tag:3".to_string()
-            ])
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_trackers(&[
+                    "tag:1".to_string(),
+                    "tag:2".to_string(),
+                    "tag:3".to_string()
+                ])
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }
@@ -944,10 +948,12 @@ mod tests {
 
         // No data yet.
         for tracker in trackers_list.iter() {
-            assert!(trackers
-                .get_tracker_data_revisions(tracker.id, 100)
-                .await?
-                .is_empty());
+            assert!(
+                trackers
+                    .get_tracker_data_revisions(tracker.id, 100)
+                    .await?
+                    .is_empty()
+            );
         }
 
         let revisions = vec![
@@ -983,13 +989,15 @@ mod tests {
                 .await?,
             Some(revisions[1].clone())
         );
-        assert!(trackers
-            .get_tracker_data_revision(
-                trackers_list[0].id,
-                uuid!("00000000-0000-0000-0000-000000000003")
-            )
-            .await?
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker_data_revision(
+                    trackers_list[0].id,
+                    uuid!("00000000-0000-0000-0000-000000000003")
+                )
+                .await?
+                .is_none()
+        );
 
         assert_eq!(
             trackers
@@ -997,13 +1005,15 @@ mod tests {
                 .await?,
             Some(revisions[2].clone())
         );
-        assert!(trackers
-            .get_tracker_data_revision(
-                trackers_list[1].id,
-                uuid!("00000000-0000-0000-0000-000000000002")
-            )
-            .await?
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker_data_revision(
+                    trackers_list[1].id,
+                    uuid!("00000000-0000-0000-0000-000000000002")
+                )
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -1034,10 +1044,12 @@ mod tests {
 
         // No data yet.
         for tracker in trackers_list.iter() {
-            assert!(trackers
-                .get_tracker_data_revisions(tracker.id, 100)
-                .await?
-                .is_empty());
+            assert!(
+                trackers
+                    .get_tracker_data_revisions(tracker.id, 100)
+                    .await?
+                    .is_empty()
+            );
         }
 
         let mut revisions = vec![
@@ -1090,10 +1102,12 @@ mod tests {
             .await?;
         assert_eq!(tracker_two_data, vec![revisions.remove(0)]);
 
-        assert!(trackers
-            .get_tracker_data_revisions(uuid!("00000000-0000-0000-0000-000000000004"), 100)
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(uuid!("00000000-0000-0000-0000-000000000004"), 100)
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }
@@ -1195,14 +1209,18 @@ mod tests {
                 .await?
         );
 
-        assert!(trackers
-            .get_tracker_data_revisions(trackers_list[0].id, 100)
-            .await?
-            .is_empty());
-        assert!(trackers
-            .get_tracker_data_revisions(trackers_list[1].id, 100)
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(trackers_list[0].id, 100)
+                .await?
+                .is_empty()
+        );
+        assert!(
+            trackers
+                .get_tracker_data_revisions(trackers_list[1].id, 100)
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }
@@ -1273,14 +1291,18 @@ mod tests {
             .clear_tracker_data_revisions(trackers_list[1].id)
             .await?;
 
-        assert!(trackers
-            .get_tracker_data_revisions(trackers_list[0].id, 100)
-            .await?
-            .is_empty());
-        assert!(trackers
-            .get_tracker_data_revisions(trackers_list[1].id, 100)
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(trackers_list[0].id, 100)
+                .await?
+                .is_empty()
+        );
+        assert!(
+            trackers
+                .get_tracker_data_revisions(trackers_list[1].id, 100)
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }
@@ -1403,14 +1425,18 @@ mod tests {
             .enforce_tracker_data_revisions_limit(trackers_list[1].id, 0)
             .await?;
 
-        assert!(trackers
-            .get_tracker_data_revisions(trackers_list[0].id, 100)
-            .await?
-            .is_empty());
-        assert!(trackers
-            .get_tracker_data_revisions(trackers_list[1].id, 100)
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(trackers_list[0].id, 100)
+                .await?
+                .is_empty()
+        );
+        assert!(
+            trackers
+                .get_tracker_data_revisions(trackers_list[1].id, 100)
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }

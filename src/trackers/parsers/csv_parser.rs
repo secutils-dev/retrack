@@ -1,7 +1,7 @@
 use bytes::{Buf, Bytes};
 use mediatype::{
-    names::{CSV, TEXT},
     MediaType,
+    names::{CSV, TEXT},
 };
 use tracing::{debug, warn};
 

@@ -6,7 +6,7 @@ use crate::{
     templates::create_templates,
 };
 use actix_cors::Cors;
-use actix_web::{middleware, web, App, HttpServer, Result};
+use actix_web::{App, HttpServer, Result, middleware, web};
 use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;

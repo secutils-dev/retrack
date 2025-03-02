@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use retrack_types::trackers::{TrackerDataRevision, TrackerListRevisionsParams};
 use tracing::error;
 use uuid::Uuid;
@@ -42,12 +42,13 @@ mod tests {
             handlers::trackers_list_revisions::trackers_list_revisions,
             server_state::tests::mock_server_state,
         },
-        tests::{tracker_data_revisions_diff, TrackerCreateParamsBuilder},
+        tests::{TrackerCreateParamsBuilder, tracker_data_revisions_diff},
     };
     use actix_web::{
+        App,
         body::MessageBody,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use insta::assert_debug_snapshot;
     use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};

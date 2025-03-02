@@ -34,7 +34,7 @@ pub struct WebhookAction {
 #[cfg(test)]
 mod tests {
     use crate::trackers::WebhookAction;
-    use http::{header::CONTENT_TYPE, Method};
+    use http::{Method, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use serde_json::json;
     use std::collections::HashMap;

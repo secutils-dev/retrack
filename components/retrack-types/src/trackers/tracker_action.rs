@@ -53,7 +53,7 @@ impl TrackerAction {
 mod tests {
     use super::TrackerAction;
     use crate::trackers::{EmailAction, ServerLogAction, WebhookAction};
-    use http::{header::CONTENT_TYPE, Method};
+    use http::{Method, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use serde_json::json;
     use std::collections::HashMap;

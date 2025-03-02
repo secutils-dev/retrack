@@ -1,8 +1,8 @@
 use crate::config::{
-    database_config::DatabaseConfig, CacheConfig, ComponentsConfig, JsRuntimeConfig,
-    SchedulerJobsConfig, SmtpConfig, TrackersConfig,
+    CacheConfig, ComponentsConfig, JsRuntimeConfig, SchedulerJobsConfig, SmtpConfig,
+    TrackersConfig, database_config::DatabaseConfig,
 };
-use figment::{providers, providers::Format, Figment};
+use figment::{Figment, providers, providers::Format};
 use serde::{Deserialize, Serialize};
 use url::Url;
 

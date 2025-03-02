@@ -14,7 +14,7 @@ mod trackers;
 
 use crate::config::RawConfig;
 use anyhow::anyhow;
-use clap::{crate_authors, crate_description, crate_version, value_parser, Arg, Command};
+use clap::{Arg, Command, crate_authors, crate_description, crate_version, value_parser};
 use std::env;
 use tracing::info;
 
@@ -93,7 +93,7 @@ mod tests {
         network::{Smtp, SmtpTransport},
         templates::create_templates,
     };
-    use sqlx::{postgres::PgDatabaseError, PgPool};
+    use sqlx::{PgPool, postgres::PgDatabaseError};
 
     pub fn to_database_error(err: anyhow::Error) -> anyhow::Result<Box<PgDatabaseError>> {
         Ok(err

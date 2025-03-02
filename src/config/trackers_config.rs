@@ -1,6 +1,6 @@
 use byte_unit::Byte;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DurationMilliSeconds};
+use serde_with::{DurationMilliSeconds, serde_as};
 use std::{collections::HashSet, time::Duration};
 
 #[serde_as]

@@ -1,11 +1,11 @@
 use bytes::Bytes;
 use calamine::Reader;
 use mediatype::{
-    names::{
-        vnd::{MS_EXCEL, OPENXMLFORMATS_OFFICEDOCUMENT_SPREADSHEETML_SHEET},
-        APPLICATION,
-    },
     MediaType,
+    names::{
+        APPLICATION,
+        vnd::{MS_EXCEL, OPENXMLFORMATS_OFFICEDOCUMENT_SPREADSHEETML_SHEET},
+    },
 };
 use serde::Serialize;
 use std::io::{BufReader, Cursor};

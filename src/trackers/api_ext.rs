@@ -14,7 +14,7 @@ use crate::{
         web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
     },
 };
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use byte_unit::Byte;
 use croner::Cron;
 use http::Method;
@@ -574,12 +574,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             let schedule = match Cron::parse_pattern(job_config.schedule.as_str()) {
                 Ok(schedule) => schedule,
                 Err(err) => {
-                    bail!(RetrackError::client_with_root_cause(
-                        anyhow!(
-                            "Tracker schedule must be a valid cron expression, but the provided schedule ({}) cannot be parsed: {err}",
-                            job_config.schedule
-                        )
-                    ));
+                    bail!(RetrackError::client_with_root_cause(anyhow!(
+                        "Tracker schedule must be a valid cron expression, but the provided schedule ({}) cannot be parsed: {err}",
+                        job_config.schedule
+                    )));
                 }
             };
 
@@ -598,9 +596,9 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             if let Some(retry_strategy) = &job_config.retry_strategy {
                 let max_attempts = retry_strategy.max_attempts();
                 if max_attempts == 0 || max_attempts > MAX_TRACKER_RETRY_ATTEMPTS {
-                    bail!(RetrackError::client(
-                        format!("Tracker max retry attempts cannot be zero or greater than {MAX_TRACKER_RETRY_ATTEMPTS}, but received {max_attempts}.")
-                    ));
+                    bail!(RetrackError::client(format!(
+                        "Tracker max retry attempts cannot be zero or greater than {MAX_TRACKER_RETRY_ATTEMPTS}, but received {max_attempts}."
+                    )));
                 }
 
                 let min_interval = *retry_strategy.min_interval();
@@ -617,23 +615,19 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 {
                     let max_interval = *max_interval;
                     if max_interval < min_interval {
-                        bail!(RetrackError::client(
-                            format!(
-                                "Tracker retry strategy max interval cannot be less than {}, but received {}.",
-                                humantime::format_duration(min_interval),
-                                humantime::format_duration(max_interval)
-                            )
-                        ));
+                        bail!(RetrackError::client(format!(
+                            "Tracker retry strategy max interval cannot be less than {}, but received {}.",
+                            humantime::format_duration(min_interval),
+                            humantime::format_duration(max_interval)
+                        )));
                     }
 
                     if max_interval > MAX_TRACKER_RETRY_INTERVAL {
-                        bail!(RetrackError::client(
-                            format!(
-                                "Tracker retry strategy max interval cannot be greater than {}, but received {}.",
-                                humantime::format_duration(MAX_TRACKER_RETRY_INTERVAL),
-                                humantime::format_duration(max_interval)
-                            )
-                        ));
+                        bail!(RetrackError::client(format!(
+                            "Tracker retry strategy max interval cannot be greater than {}, but received {}.",
+                            humantime::format_duration(MAX_TRACKER_RETRY_INTERVAL),
+                            humantime::format_duration(max_interval)
+                        )));
                     }
                 }
             }
@@ -771,9 +765,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         if config.restrict_to_public_urls {
             for request in &target.requests {
                 if !self.api.network.is_public_web_url(&request.url).await {
-                    bail!(RetrackError::client(
-                        format!("Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.", request.url)
-                    ));
+                    bail!(RetrackError::client(format!(
+                        "Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received {}.",
+                        request.url
+                    )));
                 }
             }
         }
@@ -1123,9 +1118,9 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         };
 
         if !self.api.network.is_public_web_url(&script_url).await {
-            bail!(RetrackError::client(
-                format!("Tracker {script_ref} script URL must be either `http` or `https` and have a valid public reachable domain name, but received {script_url}.")
-            ));
+            bail!(RetrackError::client(format!(
+                "Tracker {script_ref} script URL must be either `http` or `https` and have a valid public reachable domain name, but received {script_url}."
+            )));
         }
 
         Ok(())
@@ -1201,15 +1196,15 @@ mod tests {
         scheduler::SchedulerJob,
         tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
         tests::{
+            TrackerCreateParamsBuilder, WebScraperContentRequest, WebScraperErrorResponse,
             load_fixture, mock_api, mock_api_with_config, mock_api_with_network, mock_config,
             mock_network_with_records, mock_scheduler_job, mock_upsert_scheduler_job,
-            TrackerCreateParamsBuilder, WebScraperContentRequest, WebScraperErrorResponse,
         },
     };
     use actix_web::ResponseError;
     use bytes::Bytes;
     use futures::StreamExt;
-    use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
+    use http::{HeaderMap, HeaderName, HeaderValue, Method, header::CONTENT_TYPE};
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
     use retrack_types::{
@@ -1226,8 +1221,8 @@ mod tests {
     use std::{collections::HashMap, iter, net::Ipv4Addr, str::FromStr, time::Duration};
     use time::OffsetDateTime;
     use trust_dns_resolver::{
-        proto::rr::{rdata::A, RData, Record},
         Name,
+        proto::rr::{RData, Record, rdata::A},
     };
     use url::Url;
     use uuid::uuid;
@@ -2921,12 +2916,14 @@ mod tests {
 
         // Clears job ID.
         api.trackers().clear_tracker_job(tracker.id).await?;
-        assert!(trackers
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         // Set job ID.
         api.trackers()
@@ -3040,10 +3037,12 @@ mod tests {
         let api = mock_api(pool).await?;
 
         let trackers = api.trackers();
-        assert!(trackers
-            .get_tracker(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+                .is_none()
+        );
 
         let tracker_one = trackers
             .create_tracker(
@@ -3151,12 +3150,14 @@ mod tests {
                 .await?,
             vec![tracker_two.clone()],
         );
-        assert!(trackers
-            .get_trackers(TrackersListParams {
-                tags: vec!["tag:unknown".to_string(), "tag:common".to_string()]
-            })
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_trackers(TrackersListParams {
+                    tags: vec!["tag:unknown".to_string(), "tag:common".to_string()]
+                })
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }
@@ -3258,10 +3259,12 @@ mod tests {
                 .await?,
             1
         );
-        assert!(trackers
-            .get_trackers(TrackersListParams::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_trackers(TrackersListParams::default())
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }

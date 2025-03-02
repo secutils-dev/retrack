@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{delete, web, HttpResponse};
+use actix_web::{HttpResponse, delete, web};
 use tracing::error;
 use uuid::Uuid;
 
@@ -47,10 +47,11 @@ mod tests {
         tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
+        App,
         body::MessageBody,
         http::Method,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
@@ -108,7 +109,10 @@ mod tests {
         assert_eq!(response.status(), 404);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            format!("Tracker ('{}') or data revision ('00000000-0000-0000-0000-000000000002') is not found.", tracker.id)
+            format!(
+                "Tracker ('{}') or data revision ('00000000-0000-0000-0000-000000000002') is not found.",
+                tracker.id
+            )
         );
 
         // Add tracker data revisions and check that it has been saved.
@@ -170,10 +174,12 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 204);
-        assert!(trackers_api
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers_api
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }

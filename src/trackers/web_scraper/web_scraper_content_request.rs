@@ -1,7 +1,7 @@
 use retrack_types::trackers::TrackerDataValue;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use serde_with::{serde_as, skip_serializing_none, DurationMilliSeconds};
+use serde_with::{DurationMilliSeconds, serde_as, skip_serializing_none};
 use std::time::Duration;
 
 /// Represents request to scrap web page content.

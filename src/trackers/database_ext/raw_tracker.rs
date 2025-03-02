@@ -413,7 +413,7 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
 #[cfg(test)]
 mod tests {
     use super::RawTracker;
-    use http::{header::CONTENT_TYPE, Method};
+    use http::{Method, header::CONTENT_TYPE};
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{

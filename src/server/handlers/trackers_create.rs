@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{post, web, HttpResponse};
+use actix_web::{HttpResponse, post, web};
 use retrack_types::trackers::{Tracker, TrackerCreateParams};
 use tracing::error;
 
@@ -38,10 +38,11 @@ mod tests {
         tests::mock_config,
     };
     use actix_web::{
+        App,
         body::MessageBody,
         http::Method,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
@@ -237,12 +238,14 @@ mod tests {
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
             r###"Tracker target URL must be either `http` or `https` and have a valid public reachable domain name, but received https://127.0.0.1/app."###
         );
-        assert!(server_state
-            .api
-            .trackers()
-            .get_trackers(Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            server_state
+                .api
+                .trackers()
+                .get_trackers(Default::default())
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }

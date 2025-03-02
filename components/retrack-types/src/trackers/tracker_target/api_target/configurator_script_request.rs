@@ -63,7 +63,7 @@ impl TryFrom<TargetRequest> for ConfiguratorScriptRequest {
 #[cfg(test)]
 mod tests {
     use crate::trackers::{ConfiguratorScriptRequest, TargetRequest};
-    use http::{header::CONTENT_TYPE, Method};
+    use http::{Method, header::CONTENT_TYPE};
     use serde_json::json;
     use std::collections::HashMap;
     use url::Url;

@@ -2,8 +2,8 @@ use crate::{
     api::Api,
     network::DnsResolver,
     scheduler::{
-        database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
-        scheduler_jobs::TrackersRunJob, CronExt, SchedulerJobMetadata,
+        CronExt, SchedulerJobMetadata, database_ext::RawSchedulerJobStoredData, job_ext::JobExt,
+        scheduler_job::SchedulerJob, scheduler_jobs::TrackersRunJob,
     },
 };
 use anyhow::Context;
@@ -119,10 +119,10 @@ impl TrackersScheduleJob {
 mod tests {
     use super::TrackersScheduleJob;
     use crate::{
-        scheduler::{scheduler_job::SchedulerJob, SchedulerJobMetadata},
+        scheduler::{SchedulerJobMetadata, scheduler_job::SchedulerJob},
         tests::{
-            mock_api_with_config, mock_config, mock_scheduler, mock_scheduler_job,
-            TrackerCreateParamsBuilder,
+            TrackerCreateParamsBuilder, mock_api_with_config, mock_config, mock_scheduler,
+            mock_scheduler_job,
         },
     };
     use futures::StreamExt;
@@ -329,13 +329,14 @@ mod tests {
         scheduler.shutdown().await?;
 
         // Tracker has not been assigned job ID.
-        assert!(api
-            .trackers()
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         let mut jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
         assert_eq!(jobs.len(), 1);
@@ -379,13 +380,14 @@ mod tests {
         scheduler.shutdown().await?;
 
         // Tracker has not been assigned job ID.
-        assert!(api
-            .trackers()
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         let mut jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
         assert_eq!(jobs.len(), 1);
@@ -426,13 +428,14 @@ mod tests {
         scheduler.shutdown().await?;
 
         // Tracker has not been assigned job ID.
-        assert!(api
-            .trackers()
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         let mut jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
         assert_eq!(jobs.len(), 1);

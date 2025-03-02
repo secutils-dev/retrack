@@ -2,7 +2,7 @@ use retrack_types::trackers::{
     ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs, ExtractorScriptResult,
     FormatterScriptArgs, FormatterScriptResult,
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_bytes::ByteBuf;
 use std::marker::PhantomData;
 use tokio::sync::oneshot;

@@ -2,7 +2,7 @@ mod raw_task;
 
 use crate::{
     database::Database,
-    tasks::{database_ext::raw_task::RawTask, Task},
+    tasks::{Task, database_ext::raw_task::RawTask},
 };
 use async_stream::try_stream;
 use futures::Stream;
@@ -87,15 +87,16 @@ mod tests {
     use insta::assert_debug_snapshot;
     use sqlx::PgPool;
     use time::OffsetDateTime;
-    use uuid::{uuid, Uuid};
+    use uuid::{Uuid, uuid};
 
     #[sqlx::test]
     async fn can_add_and_retrieve_tasks(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?
-            .is_none());
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+                .is_none()
+        );
 
         let tasks = vec![
             Task {
@@ -210,43 +211,50 @@ mod tests {
             db.insert_task(&task).await?;
         }
 
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?
-            .is_some());
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000002"))
-            .await?
-            .is_some());
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+                .is_some()
+        );
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000002"))
+                .await?
+                .is_some()
+        );
 
         db.remove_task(uuid!("00000000-0000-0000-0000-000000000001"))
             .await?;
 
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?
-            .is_none());
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000002"))
-            .await?
-            .is_some());
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+                .is_none()
+        );
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000002"))
+                .await?
+                .is_some()
+        );
 
         db.remove_task(uuid!("00000000-0000-0000-0000-000000000002"))
             .await?;
 
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000001"))
-            .await?
-            .is_none());
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000002"))
-            .await?
-            .is_none());
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000001"))
+                .await?
+                .is_none()
+        );
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000002"))
+                .await?
+                .is_none()
+        );
 
-        assert!(db
-            .get_task(uuid!("00000000-0000-0000-0000-000000000003"))
-            .await?
-            .is_none());
+        assert!(
+            db.get_task(uuid!("00000000-0000-0000-0000-000000000003"))
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }

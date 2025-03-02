@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{delete, web, HttpResponse};
+use actix_web::{HttpResponse, delete, web};
 use actix_web_lab::extract::Query;
 use retrack_types::trackers::TrackersListParams;
 use tracing::error;
@@ -37,10 +37,11 @@ mod tests {
         tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
+        App,
         body::MessageBody,
         http::Method,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use retrack_types::trackers::{EmailAction, TrackerAction};
     use sqlx::PgPool;

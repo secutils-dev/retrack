@@ -3,7 +3,7 @@ name = "retrack"
 version = "0.0.1"
 authors = ["Aleh Zasypkin <dev@retrack.dev>"]
 description = "Tracks changes in a web page, API, or file."
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "retrack"

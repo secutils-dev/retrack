@@ -7,7 +7,7 @@ mod scheduler_job_metadata;
 mod scheduler_jobs;
 
 use anyhow::anyhow;
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::RwLock;
 use tokio_cron_scheduler::{
@@ -84,7 +84,9 @@ impl<DR: DnsResolver> Scheduler<DR> {
         };
 
         if !is_scheduler_enabled {
-            warn!("Scheduler is disabled – existing jobs won’t be resumed, and new jobs won’t be scheduled.");
+            warn!(
+                "Scheduler is disabled – existing jobs won’t be resumed, and new jobs won’t be scheduled."
+            );
             return Ok(scheduler);
         }
 
@@ -202,12 +204,12 @@ impl<DR: DnsResolver> Scheduler<DR> {
 #[cfg(test)]
 pub mod tests {
     pub use super::database_ext::tests::{
-        mock_get_scheduler_job, mock_upsert_scheduler_job, RawSchedulerJobStoredData,
+        RawSchedulerJobStoredData, mock_get_scheduler_job, mock_upsert_scheduler_job,
     };
     use crate::{
         config::{Config, DatabaseConfig},
-        scheduler::{scheduler_job::SchedulerJob, Scheduler, SchedulerJobMetadata},
-        tests::{mock_api_with_config, mock_config, TrackerCreateParamsBuilder},
+        scheduler::{Scheduler, SchedulerJobMetadata, scheduler_job::SchedulerJob},
+        tests::{TrackerCreateParamsBuilder, mock_api_with_config, mock_config},
     };
     use anyhow::anyhow;
     use futures::StreamExt;
@@ -219,7 +221,7 @@ pub mod tests {
         JobScheduler, PostgresMetadataStore, PostgresNotificationStore, PostgresStore,
         SimpleJobCode, SimpleNotificationCode,
     };
-    use uuid::{uuid, Uuid};
+    use uuid::{Uuid, uuid};
 
     pub async fn mock_scheduler(pool: &PgPool) -> anyhow::Result<JobScheduler> {
         let connect_options = pool.connect_options();
@@ -351,21 +353,27 @@ pub mod tests {
         let mut scheduler = Scheduler::start(api.clone()).await?;
         assert!(scheduler.inner_scheduler.inited().await);
 
-        assert!(scheduler
-            .inner_scheduler
-            .next_tick_for_job(trackers_run_job_id)
-            .await?
-            .is_some());
-        assert!(scheduler
-            .inner_scheduler
-            .next_tick_for_job(trackers_schedule_job_id)
-            .await?
-            .is_some());
-        assert!(scheduler
-            .inner_scheduler
-            .next_tick_for_job(tasks_run_job_id)
-            .await?
-            .is_some());
+        assert!(
+            scheduler
+                .inner_scheduler
+                .next_tick_for_job(trackers_run_job_id)
+                .await?
+                .is_some()
+        );
+        assert!(
+            scheduler
+                .inner_scheduler
+                .next_tick_for_job(trackers_schedule_job_id)
+                .await?
+                .is_some()
+        );
+        assert!(
+            scheduler
+                .inner_scheduler
+                .next_tick_for_job(tasks_run_job_id)
+                .await?
+                .is_some()
+        );
 
         Ok(())
     }
@@ -452,12 +460,16 @@ pub mod tests {
         Scheduler::start(api.clone()).await?;
 
         // Old jobs should have been removed.
-        assert!(mock_get_scheduler_job(&api.db, trackers_schedule_job_id)
-            .await?
-            .is_none());
-        assert!(mock_get_scheduler_job(&api.db, tasks_run_job_id)
-            .await?
-            .is_none());
+        assert!(
+            mock_get_scheduler_job(&api.db, trackers_schedule_job_id)
+                .await?
+                .is_none()
+        );
+        assert!(
+            mock_get_scheduler_job(&api.db, tasks_run_job_id)
+                .await?
+                .is_none()
+        );
 
         let jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
         assert_eq!(jobs.len(), 2);

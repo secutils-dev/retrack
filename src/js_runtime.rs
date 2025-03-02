@@ -10,13 +10,13 @@ pub use self::{
     script_task::ScriptTask,
 };
 use crate::{config::JsRuntimeConfig, js_runtime::script::ScriptDefinition};
-use anyhow::{anyhow, Context};
-use deno_core::{serde_v8, v8, Extension, RuntimeOptions};
-use serde::{de::DeserializeOwned, Serialize};
+use anyhow::{Context, anyhow};
+use deno_core::{Extension, RuntimeOptions, serde_v8, v8};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -266,7 +266,7 @@ pub mod tests {
     use super::{JsRuntime, ScriptConfig};
     use crate::config::JsRuntimeConfig;
     use deno_core::error::CoreError;
-    use http::{header::CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, Method};
+    use http::{HeaderMap, HeaderName, HeaderValue, Method, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use retrack_types::trackers::{
         ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,

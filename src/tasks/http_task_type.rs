@@ -20,7 +20,7 @@ pub struct HttpTaskType {
 #[cfg(test)]
 mod tests {
     use crate::tasks::HttpTaskType;
-    use http::{header, HeaderMap, HeaderValue, Method};
+    use http::{HeaderMap, HeaderValue, Method, header};
 
     #[test]
     fn serialization() -> anyhow::Result<()> {

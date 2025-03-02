@@ -24,7 +24,7 @@ impl TaskType {
 mod tests {
     use super::TaskType;
     use crate::tasks::{Email, EmailContent, EmailTaskType, HttpTaskType};
-    use http::{header, HeaderMap, HeaderValue, Method};
+    use http::{HeaderMap, HeaderValue, Method, header};
 
     #[test]
     fn serialization() -> anyhow::Result<()> {

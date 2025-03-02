@@ -2,8 +2,8 @@ use crate::{
     api::Api,
     network::DnsResolver,
     scheduler::{
-        database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
-        CronExt, SchedulerJobMetadata,
+        CronExt, SchedulerJobMetadata, database_ext::RawSchedulerJobStoredData, job_ext::JobExt,
+        scheduler_job::SchedulerJob,
     },
 };
 use anyhow::Context;
@@ -154,14 +154,14 @@ impl TasksRunJob {
 
 #[cfg(test)]
 mod tests {
-    use super::{TasksRunJob, MAX_TASKS_TO_SEND};
+    use super::{MAX_TASKS_TO_SEND, TasksRunJob};
     use crate::{
-        scheduler::{scheduler_job::SchedulerJob, SchedulerJobMetadata},
+        scheduler::{SchedulerJobMetadata, scheduler_job::SchedulerJob},
         tasks::{Email, EmailContent, EmailTaskType, HttpTaskType, TaskType},
         tests::{
-            mock_api, mock_api_with_config, mock_api_with_network, mock_config,
+            MockSmtpServer, mock_api, mock_api_with_config, mock_api_with_network, mock_config,
             mock_network_with_smtp, mock_schedule_in_sec, mock_scheduler, mock_scheduler_job,
-            mock_smtp, mock_smtp_config, mock_upsert_scheduler_job, MockSmtpServer,
+            mock_smtp, mock_smtp_config, mock_upsert_scheduler_job,
         },
     };
     use futures::StreamExt;

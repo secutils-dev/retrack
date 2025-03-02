@@ -1,6 +1,6 @@
 use handlebars::JsonRender;
 use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
-use serde_json::{json, Value as JSONValue};
+use serde_json::{Value as JSONValue, json};
 use similar::TextDiff;
 
 /// Pretty prints the web page content revision data.
@@ -33,14 +33,13 @@ pub fn tracker_data_revisions_diff(
                 tracker_data_revision_pretty_print(&previous_revision.data.value().to_string())?;
 
             revisions_diff.push(TrackerDataRevision {
-                data: TrackerDataValue::new(json!(TextDiff::from_lines(
-                    &previous_value,
-                    &current_value
-                )
-                .unified_diff()
-                .context_radius(10000)
-                .missing_newline_hint(false)
-                .to_string())),
+                data: TrackerDataValue::new(json!(
+                    TextDiff::from_lines(&previous_value, &current_value)
+                        .unified_diff()
+                        .context_radius(10000)
+                        .missing_newline_hint(false)
+                        .to_string()
+                )),
                 ..current_revision
             });
         } else {

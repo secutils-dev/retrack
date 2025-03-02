@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use retrack_types::trackers::TrackerDataRevision;
 use tracing::error;
 use uuid::Uuid;
@@ -48,9 +48,10 @@ mod tests {
         tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
+        App,
         body::MessageBody,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use insta::assert_debug_snapshot;
     use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
@@ -104,7 +105,10 @@ mod tests {
         assert_eq!(response.status(), 404);
         assert_eq!(
             from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            format!("Tracker ('{}') or data revision ('00000000-0000-0000-0000-000000000002') is not found.", tracker.id)
+            format!(
+                "Tracker ('{}') or data revision ('00000000-0000-0000-0000-000000000002') is not found.",
+                tracker.id
+            )
         );
 
         // Add tracker data revisions.

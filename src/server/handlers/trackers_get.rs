@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use retrack_types::trackers::Tracker;
 use tracing::error;
 use uuid::Uuid;
@@ -39,9 +39,10 @@ mod tests {
         tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
+        App,
         body::MessageBody,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use sqlx::PgPool;
     use std::str::from_utf8;

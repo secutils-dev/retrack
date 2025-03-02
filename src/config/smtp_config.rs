@@ -1,6 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr, DurationMilliSeconds};
+use serde_with::{DisplayFromStr, DurationMilliSeconds, serde_as};
 use std::time::Duration;
 
 /// Configuration for the SMTP functionality.
@@ -45,7 +45,7 @@ fn default_throttle_delay() -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{smtp_config::SmtpCatchAllConfig, SmtpConfig};
+    use crate::config::{SmtpConfig, smtp_config::SmtpCatchAllConfig};
     use insta::{assert_debug_snapshot, assert_toml_snapshot};
     use regex::Regex;
     use std::time::Duration;

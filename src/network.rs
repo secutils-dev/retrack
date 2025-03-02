@@ -8,7 +8,7 @@ pub use self::{
     smtp::{Smtp, SmtpTransport},
 };
 use crate::config::Config;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use lettre::{
     message::Mailbox,
     transport::smtp::{authentication::Credentials, client::Tls},
@@ -87,9 +87,9 @@ pub mod tests {
     use super::Network;
     use std::net::Ipv4Addr;
     use trust_dns_resolver::{
-        error::{ResolveError, ResolveErrorKind},
-        proto::rr::{rdata::A, RData, Record},
         Name,
+        error::{ResolveError, ResolveErrorKind},
+        proto::rr::{RData, Record, rdata::A},
     };
     use url::Url;
 

@@ -19,7 +19,7 @@ pub enum ConfiguratorScriptResult {
 #[cfg(test)]
 mod tests {
     use crate::trackers::{ConfiguratorScriptRequest, ConfiguratorScriptResult};
-    use http::{header::CONTENT_TYPE, HeaderValue};
+    use http::{HeaderValue, header::CONTENT_TYPE};
     use insta::assert_debug_snapshot;
 
     #[test]

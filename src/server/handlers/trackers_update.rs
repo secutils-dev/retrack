@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{put, web, HttpResponse};
+use actix_web::{HttpResponse, put, web};
 use retrack_types::trackers::{Tracker, TrackerUpdateParams};
 use tracing::error;
 use uuid::Uuid;
@@ -43,13 +43,14 @@ mod tests {
             handlers::trackers_update::trackers_update,
             server_state::tests::{mock_server_state, mock_server_state_with_config},
         },
-        tests::{mock_config, TrackerCreateParamsBuilder},
+        tests::{TrackerCreateParamsBuilder, mock_config},
     };
     use actix_web::{
+        App,
         body::MessageBody,
         http::Method,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use insta::assert_debug_snapshot;
     use serde_json::json;

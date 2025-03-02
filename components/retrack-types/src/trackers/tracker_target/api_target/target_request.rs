@@ -48,8 +48,8 @@ impl TargetRequest {
 mod tests {
     use crate::trackers::TargetRequest;
     use http::{
-        header::{AUTHORIZATION, CONTENT_TYPE},
         Method,
+        header::{AUTHORIZATION, CONTENT_TYPE},
     };
     use serde_json::json;
     use std::collections::HashMap;

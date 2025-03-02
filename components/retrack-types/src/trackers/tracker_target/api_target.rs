@@ -36,8 +36,8 @@ pub struct ApiTarget {
 mod tests {
     use crate::trackers::{ApiTarget, TargetRequest};
     use http::{
-        header::{AUTHORIZATION, CONTENT_TYPE},
         Method,
+        header::{AUTHORIZATION, CONTENT_TYPE},
     };
     use serde_json::json;
     use std::collections::HashMap;

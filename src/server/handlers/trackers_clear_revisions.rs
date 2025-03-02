@@ -1,5 +1,5 @@
 use crate::{error::Error as RetrackError, server::ServerState};
-use actix_web::{delete, web, HttpResponse};
+use actix_web::{HttpResponse, delete, web};
 use tracing::error;
 use uuid::Uuid;
 
@@ -38,10 +38,11 @@ mod tests {
         tests::TrackerCreateParamsBuilder,
     };
     use actix_web::{
+        App,
         body::MessageBody,
         http::Method,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
     use serde_json::json;
@@ -136,10 +137,12 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), 204);
-        assert!(trackers_api
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers_api
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         Ok(())
     }

@@ -2,8 +2,8 @@ use crate::{
     api::Api,
     network::DnsResolver,
     scheduler::{
-        database_ext::RawSchedulerJobStoredData, job_ext::JobExt, scheduler_job::SchedulerJob,
-        CronExt, SchedulerJobMetadata,
+        CronExt, SchedulerJobMetadata, database_ext::RawSchedulerJobStoredData, job_ext::JobExt,
+        scheduler_job::SchedulerJob,
     },
     tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
 };
@@ -407,10 +407,10 @@ mod tests {
         scheduler::{SchedulerJob, SchedulerJobMetadata},
         tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
         tests::{
-            mock_api, mock_api_with_network, mock_get_scheduler_job, mock_network_with_smtp,
+            MockSmtpServer, SmtpCatchAllConfig, TrackerCreateParamsBuilder, mock_api,
+            mock_api_with_network, mock_get_scheduler_job, mock_network_with_smtp,
             mock_schedule_in_sec, mock_scheduler, mock_scheduler_job, mock_smtp, mock_smtp_config,
-            mock_upsert_scheduler_job, MockSmtpServer, SmtpCatchAllConfig,
-            TrackerCreateParamsBuilder,
+            mock_upsert_scheduler_job,
         },
     };
     use futures::StreamExt;
@@ -600,11 +600,12 @@ mod tests {
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
 
-        assert!(api
-            .trackers()
-            .get_tracker_by_job_id(job_id)
-            .await?
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -651,11 +652,12 @@ mod tests {
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
 
-        assert!(api
-            .trackers()
-            .get_tracker_by_job_id(job_id)
-            .await?
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -686,11 +688,12 @@ mod tests {
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
 
-        assert!(api
-            .trackers()
-            .get_tracker_by_job_id(job_id)
-            .await?
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -724,11 +727,12 @@ mod tests {
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
 
-        assert!(api
-            .trackers()
-            .get_tracker_by_job_id(job_id)
-            .await?
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -755,13 +759,14 @@ mod tests {
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
 
-        assert!(api
-            .trackers()
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         Ok(())
     }
@@ -797,11 +802,12 @@ mod tests {
             }]
         );
 
-        assert!(api
-            .trackers()
-            .get_tracker_by_job_id(job_id)
-            .await?
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -844,11 +850,12 @@ mod tests {
             }]
         );
 
-        assert!(api
-            .trackers()
-            .get_tracker_by_job_id(job_id)
-            .await?
-            .is_none());
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -1091,10 +1098,12 @@ mod tests {
                 .delay(Duration::from_secs(2));
         });
 
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
@@ -1202,10 +1211,12 @@ mod tests {
                 .delay(Duration::from_secs(2));
         });
 
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
@@ -1298,10 +1309,12 @@ mod tests {
                 .delay(Duration::from_secs(2));
         });
 
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
@@ -1330,10 +1343,12 @@ mod tests {
         content_mock.assert();
 
         // Check that content was NOT saved.
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Check that the tracker job meta was reset.
         let job = mock_get_scheduler_job(&api.db, job_id).await?.unwrap();
@@ -1438,10 +1453,12 @@ mod tests {
                 .delay(Duration::from_secs(2));
         });
 
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
@@ -1464,19 +1481,23 @@ mod tests {
         content_mock.assert();
 
         // Check that content was NOT saved.
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Check that the tracker job meta was reset.
         assert!(mock_get_scheduler_job(&api.db, job_id).await?.is_none());
-        assert!(trackers
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         let mut tasks_ids = api
             .db
@@ -1593,10 +1614,12 @@ mod tests {
                 .delay(Duration::from_secs(3));
         });
 
-        assert!(trackers
-            .get_tracker_data_revisions(tracker.id, Default::default())
-            .await?
-            .is_empty());
+        assert!(
+            trackers
+                .get_tracker_data_revisions(tracker.id, Default::default())
+                .await?
+                .is_empty()
+        );
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
@@ -1646,12 +1669,14 @@ mod tests {
 
         // Check that the tracker job meta was reset, so that it can be re-scheduled after retries.
         assert!(mock_get_scheduler_job(&api.db, job_id).await?.is_none());
-        assert!(trackers
-            .get_tracker(tracker.id)
-            .await?
-            .unwrap()
-            .job_id
-            .is_none());
+        assert!(
+            trackers
+                .get_tracker(tracker.id)
+                .await?
+                .unwrap()
+                .job_id
+                .is_none()
+        );
 
         // Check that error wasn't reported.
         let tasks_ids = api

@@ -1,4 +1,4 @@
-use crate::scheduler::{database_ext::RawSchedulerJobStoredData, SchedulerJobMetadata};
+use crate::scheduler::{SchedulerJobMetadata, database_ext::RawSchedulerJobStoredData};
 use tokio_cron_scheduler::Job;
 
 pub trait JobExt {

@@ -2,7 +2,7 @@ use crate::config::SmtpConfig;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use tokio::{
     sync::Mutex,
-    time::{interval, Interval, MissedTickBehavior},
+    time::{Interval, MissedTickBehavior, interval},
 };
 use tracing::{debug, log::error};
 

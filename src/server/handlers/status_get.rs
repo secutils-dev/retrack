@@ -2,7 +2,7 @@ use crate::{
     error::Error as RetrackError,
     server::{GetStatusParams, ServerState, Status},
 };
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use tracing::error;
 
 /// Gets server status.
@@ -39,9 +39,10 @@ pub async fn status_get(
 mod tests {
     use crate::server::{handlers::status_get::status_get, server_state::tests::mock_server_state};
     use actix_web::{
+        App,
         body::MessageBody,
-        test::{call_service, init_service, TestRequest},
-        web, App,
+        test::{TestRequest, call_service, init_service},
+        web,
     };
     use insta::assert_snapshot;
     use sqlx::PgPool;
