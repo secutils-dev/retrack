@@ -89,7 +89,8 @@ Content-Type: application/json
 {
   "extractor": "{{extractor}}",
   "userAgent": "Retrack/1.0.0",
-  "ignoreHTTPSErrors": true
+  "ignoreHTTPSErrors": true,
+  "tags": ["retrack"]
 }
 
 ### Execute extractor script (GH icon).

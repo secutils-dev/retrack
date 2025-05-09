@@ -35,6 +35,7 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
     (params: Protocol.CommandParameters['Runtime.callFunctionOn']) => Protocol.Runtime.RemoteObject
   >(() => ({ type: 'string', value: 'Hello from Retrack.dev!' }));
   const wss = new WebSocketServer({ port });
+  let scriptIdentifier = 0;
   wss.on('connection', function connection(ws) {
     ws.on('error', getOnSendCallback('error-event'));
 
@@ -56,10 +57,10 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
             id: message.id,
             result: {
               protocolVersion: '1.3',
-              product: 'Chrome/128.0.6613.113',
-              revision: '@9597ae93a15d4d03089b4e9997b1072228baa9ad',
-              userAgent: 'HeadlessChrome/128.0.0.0',
-              jsVersion: '12.8.374.24',
+              product: 'Chrome/136.0.7103.93',
+              revision: '@d15f7e0b7b458c1502136e8aee33a8187c49a489',
+              userAgent: 'HeadlessChrome/136.0.0.0',
+              jsVersion: '13.6.233.8',
             },
           }),
           getOnSendCallback('Browser.getVersion'),
@@ -180,7 +181,7 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
       }
 
       //  pw:protocol SEND ► {"id":21,"method":"Page.createIsolatedWorld","params":{"frameId":"B3A3B434CC5001702EA73A7B76F02DB4","grantUniveralAccess":true,"worldName":"__playwright_utility_world__"},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +1ms
-      //   pw:protocol ◀ RECV {"id":21,"result":{"executionContextId":2},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
+      //  pw:protocol ◀ RECV {"id":21,"result":{"executionContextId":2},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
       if (message.method === 'Page.createIsolatedWorld') {
         const worldParams = message.params as { frameId: string; worldName: string };
 
@@ -217,7 +218,11 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
       //   pw:protocol ◀ RECV {"id":12,"result":{"identifier":"1"},"sessionId":"AF1BE27C8937BCB6754D2280EC8DDD43"} +0ms
       if (message.method === 'Page.addScriptToEvaluateOnNewDocument') {
         return ws.send(
-          JSON.stringify({ id: message.id, result: { identifier: '1' }, sessionId: message.sessionId }),
+          JSON.stringify({
+            id: message.id,
+            result: { identifier: `${++scriptIdentifier}` },
+            sessionId: message.sessionId,
+          }),
           getOnSendCallback('Page.addScriptToEvaluateOnNewDocument'),
         );
       }
@@ -280,12 +285,14 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
           JSON.stringify({
             id: message.id,
             result: {
-              result: {
-                type: 'object',
-                className: 'UtilityScript',
-                description: 'UtilityScript',
-                objectId: utilityScriptObjectId,
-              },
+              result: (message.params as { expression: string }).expression.includes('CustomEvent')
+                ? { type: 'boolean', value: true }
+                : {
+                    type: 'object',
+                    className: 'UtilityScript',
+                    description: 'UtilityScript',
+                    objectId: utilityScriptObjectId,
+                  },
             },
             sessionId: message.sessionId,
           }),

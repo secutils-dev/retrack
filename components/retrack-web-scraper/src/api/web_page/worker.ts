@@ -83,8 +83,8 @@ const context = await browser.newContext({ ignoreHTTPSErrors, userAgent, viewpor
 // APIs (e.g., Locator -> Page -> Context -> Browser), making it infeasible to completely prevent this. Instead,
 // extractor scripts should be closely monitored for potentially malicious behavior (see `logger`), and responsible
 // actors should be penalized accordingly. Nevertheless, it's still valuable to remove methods that aren't meant to be
-// used from the API to make this intention clearer even though this obstacle can be bypassed by the sufficiently
-// motivated adversary. If it becomes a problem, it'd be easier to fork Playwright and remove the methods from the
+// used from the API to make this intention clearer even though this obstacle can be bypassed by the motivated enough
+// adversary. If it becomes a problem, it'd be easier to fork Playwright and remove the methods from the
 // source code directly.
 const browserPrototype = Object.getPrototypeOf(browser);
 delete browserPrototype.newBrowserCDPSession;

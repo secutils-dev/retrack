@@ -25,7 +25,7 @@ await test('[/api/web_page/execute] can run extractor scripts', async (t) => {
       };
     }
 
-    throw new Error(`Unexpected objectId: ${params.objectId}`);
+    return { type: 'undefined' };
   });
 
   const response = await registerExecuteRoutes(
