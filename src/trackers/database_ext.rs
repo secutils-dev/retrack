@@ -21,7 +21,8 @@ impl<'pool> TrackersDatabaseExt<'pool> {
         Self { pool }
     }
 
-    /// Retrieves all trackers that have all specified tags. If `tags` is empty, all trackers are returned.
+    /// Retrieves all trackers that have all specified tags. If the `tags` field is empty, all
+    /// trackers are returned.
     pub async fn get_trackers(&self, tags: &[String]) -> anyhow::Result<Vec<Tracker>> {
         let raw_trackers = if tags.is_empty() {
             query_as!(
@@ -99,8 +100,8 @@ ORDER BY updated_at
             bail!(match err.as_database_error() {
                 Some(database_error) if database_error.is_unique_violation() => {
                     RetrackError::client_with_root_cause(anyhow!(err).context(format!(
-                        "Tracker with such name ('{}') or id ('{}') already exists.",
-                        tracker.name, tracker.id
+                        "Tracker with such id ('{}') already exists.",
+                        tracker.id
                     )))
                 }
                 _ => RetrackError::from(anyhow!(err).context(format!(
@@ -169,7 +170,8 @@ WHERE id = $1
         Ok(result.rows_affected() > 0)
     }
 
-    /// Removes all trackers that have all specified tags. If `tags` is empty, all trackers are removed.
+    /// Removes all trackers that have all specified tags. If the `tags` field is empty, all
+    /// trackers are removed.
     pub async fn remove_trackers(&self, tags: &[String]) -> anyhow::Result<u64> {
         let result = if tags.is_empty() {
             query!(r#"DELETE FROM trackers"#).execute(self.pool).await?
@@ -316,7 +318,7 @@ LIMIT 1
         Ok(())
     }
 
-    /// Removes the oldest tracker data revisions that are beyond specified limit.
+    /// Removes the oldest tracker data revisions that are beyond the specified limit.
     pub async fn enforce_tracker_data_revisions_limit(
         &self,
         tracker_id: Uuid,
@@ -405,7 +407,7 @@ ORDER BY t.updated_at
 }
 
 impl Database {
-    /// Returns a database extension for the trackers operations performed on.
+    /// Returns a database extension for the tracker operations.
     pub fn trackers(&self) -> TrackersDatabaseExt {
         TrackersDatabaseExt::new(&self.pool)
     }
@@ -506,46 +508,22 @@ mod tests {
             )
             .await
             .unwrap_err()
-            .downcast::<RetrackError>()
-            .unwrap();
+            .downcast::<RetrackError>()?;
         assert_debug_snapshot!(
             insert_error.root_cause.to_string(),
-            @r###""Tracker with such name ('some-other-name') or id ('00000000-0000-0000-0000-000000000001') already exists.""###
+            @r###""Tracker with such id ('00000000-0000-0000-0000-000000000001') already exists.""###
         );
         assert_debug_snapshot!(
             to_database_error(insert_error.root_cause)?.message(),
             @r###""duplicate key value violates unique constraint \"trackers_pkey\"""###
         );
 
-        // Tracker with the same name, but different ID should not be allowed.
-        let insert_error = trackers
+        // Tracker with the same name should be allowed.
+        let insert_result = trackers
             .insert_tracker(
                 &MockTrackerBuilder::create(
                     uuid!("00000000-0000-0000-0000-000000000002"),
                     "some-name",
-                    3,
-                )?
-                .build(),
-            )
-            .await
-            .unwrap_err()
-            .downcast::<RetrackError>()
-            .unwrap();
-        assert_debug_snapshot!(
-            insert_error.root_cause.to_string(),
-            @r###""Tracker with such name ('some-name') or id ('00000000-0000-0000-0000-000000000002') already exists.""###
-        );
-        assert_debug_snapshot!(
-            to_database_error(insert_error.root_cause)?.message(),
-            @r###""duplicate key value violates unique constraint \"trackers_name_key\"""###
-        );
-
-        // Tracker with different name should be allowed.
-        let insert_result = trackers
-            .insert_tracker(
-                &MockTrackerBuilder::create(
-                    uuid!("00000000-0000-0000-0000-000000000003"),
-                    "some-other-name",
                     3,
                 )?
                 .build(),
@@ -1197,7 +1175,7 @@ mod tests {
             .await?;
         assert_eq!(tracker_data, vec![revisions[2].clone()]);
 
-        // Remove the rest of revisions.
+        // Remove the rest of the revisions.
         assert!(
             trackers
                 .remove_tracker_data_revision(trackers_list[0].id, revisions[1].id)
