@@ -7,12 +7,12 @@ services:
       - POSTGRES_HOST_AUTH_METHOD=trust
       - POSTGRES_DB=retrack
     volumes:
-      - db_vol:/var/lib/postgresql/data
+      - db_vol_retrack:/var/lib/postgresql/data
     networks:
       - net
 
 volumes:
-  db_vol:
+  db_vol_retrack:
     driver: local
 
 networks:
