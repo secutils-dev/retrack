@@ -81,7 +81,7 @@ impl TrackersRunJob {
             return Ok(None);
         };
 
-        // Check #5: If it's retry a job, but tracker doesn't have a retry strategy, remove the job.
+        // Check #5: If it's retry a job, but the tracker doesn't have a retry strategy, remove the job.
         if job_meta.retry_attempt > 0 && job_config.retry_strategy.is_none() {
             warn!(
                 tracker.id = %tracker.id,
@@ -94,8 +94,8 @@ impl TrackersRunJob {
         }
 
         // Check #6: The job should have the same parameters as during job creation. It's possible
-        // that we need to resume job that was scheduled for retry. In that case, the job schedule
-        // will be different from the tracker schedule, and it's expected.
+        // that we need to resume the job that was scheduled for retry. In that case, the job
+        // schedule will be different from the tracker schedule, and it's expected.
         let mut new_job = Self::create(
             api.clone(),
             if job_meta.retry_attempt > 0 {
@@ -135,7 +135,7 @@ impl TrackersRunJob {
         api: Arc<Api<DR>>,
         schedule: impl AsRef<str>,
     ) -> anyhow::Result<Job> {
-        // Now, create and schedule new job.
+        // Now, create and schedule a new job.
         let mut job = Job::new_async(
             Cron::parse_pattern(schedule.as_ref())
                 .with_context(|| format!("Cannot parse tracker's schedule: {}", schedule.as_ref()))?
@@ -188,7 +188,7 @@ impl TrackersRunJob {
             return Ok(());
         };
 
-        // Check #3: The tracker associated with the job should have schedule.
+        // Check #3: The tracker associated with the job should have a schedule.
         let Some(ref job_config) = tracker.config.job else {
             warn!(
                 tracker.id = %tracker.id,
@@ -202,7 +202,7 @@ impl TrackersRunJob {
             return Ok(());
         };
 
-        // Check #4: If it's retry a job, but tracker doesn't have a retry strategy, remove the job.
+        // Check #4: If it's retry a job, but the tracker doesn't have a retry strategy, remove the job.
         if job_meta.retry_attempt > 0 && job_config.retry_strategy.is_none() {
             warn!(
                 tracker.id = %tracker.id,
@@ -249,7 +249,7 @@ impl TrackersRunJob {
             .set_job_meta(job_id, job_meta.set_running())
             .await?;
 
-        // Try to create a new revision. If a revision is returned that means that tracker
+        // Try to create a new revision. If a revision is returned, that means that the tracker
         // detected changes.
         match trackers.create_tracker_data_revision(tracker.id).await {
             Ok(new_revision) => {

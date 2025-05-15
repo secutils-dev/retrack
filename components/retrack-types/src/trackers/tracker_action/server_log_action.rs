@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct ServerLogAction {
     /// Optional custom script (Deno) to format tracker revision content for action. The script
-    /// accept both previous and current tracker revision content as arguments and should return
+    /// accepts both previous and current tracker revision content as arguments and should return
     /// a serializable value that will be consumed by the action. If the script is not provided or
     /// returns `null` or `undefined`, the action will receive the current tracker revision content
     /// as is.

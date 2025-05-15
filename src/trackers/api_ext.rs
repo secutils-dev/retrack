@@ -228,7 +228,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .await
     }
 
-    /// Fetches data revision for the specified tracker, and persists it if allowed by config and
+    /// Fetches data revision for the specified tracker and persists it if allowed by config and
     /// if the data has changed.
     pub async fn create_tracker_data_revision(
         &self,
@@ -240,7 +240,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             )));
         };
 
-        // Fetch last revision to provide it to the extractor of the new revision.
+        // Fetch the last revision to provide it to the extractor of the new revision.
         let last_revision = self
             .trackers
             .get_tracker_data_revisions(tracker.id, 1)
@@ -257,7 +257,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             }
         };
 
-        // If the last revision has the same original data value, drop newly fetched revision.
+        // If the last revision has the same original data value, drop a newly fetched revision.
         let last_revision = if let Some(last_revision) = last_revision {
             // Return the last revision without re-running actions if data hasn't changed.
             if last_revision.data.original() == new_revision.data.original() {
@@ -269,18 +269,12 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         };
 
         // Iterate through all tracker actions and execute them.
-        let last_revision_value = last_revision.map(|r| r.data);
         for action in tracker.actions.iter() {
-            self.execute_tracker_action(
-                &tracker,
-                action,
-                &mut new_revision.data,
-                last_revision_value.as_ref(),
-            )
-            .await?
+            self.execute_tracker_action(&tracker, action, &mut new_revision, last_revision.as_ref())
+                .await?
         }
 
-        // Insert new revision if allowed by the config.
+        // Insert a new revision if allowed by the config.
         let max_revisions = min(
             tracker.config.revisions,
             self.api.config.trackers.max_revisions,
@@ -373,21 +367,25 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         &self,
         tracker: &Tracker,
         action: &TrackerAction,
-        new_data_value: &mut TrackerDataValue,
-        previous_data_value: Option<&TrackerDataValue>,
+        new_revision: &mut TrackerDataRevision,
+        previous_revision: Option<&TrackerDataRevision>,
     ) -> anyhow::Result<()> {
         // If the latest data value has no modifications, use previous original value as
         // previous value. Otherwise, use the modification from the previous data value based on
         // the highest index of the latest data value modifications.
-        let previous_value = previous_data_value.and_then(|previous_data_value| {
-            if new_data_value.mods().is_none() {
-                Some(previous_data_value.original())
-            } else {
-                previous_data_value
-                    .mods()?
-                    .get(new_data_value.mods()?.len() - 1)
-            }
-        });
+        let new_data_value = &mut new_revision.data;
+        let previous_value =
+            previous_revision
+                .map(|rev| &rev.data)
+                .and_then(|previous_data_value| {
+                    if new_data_value.mods().is_none() {
+                        Some(previous_data_value.original())
+                    } else {
+                        previous_data_value
+                            .mods()?
+                            .get(new_data_value.mods()?.len() - 1)
+                    }
+                });
 
         let new_value = new_data_value.value();
         let changed = if let Some(previous_value) = previous_value {
@@ -406,8 +404,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             return Ok(());
         }
 
-        // Format action payload, if needed. If formatter specified, but returns `null`, action
-        // should be skipped.
+        // Format action payload, if needed. If the formatter is specified, but returns `null`, the
+        // action should be skipped.
         let action_payload = if let Some(formatter) = action.formatter() {
             let formatter_result = self
                 .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
@@ -483,7 +481,9 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                             url: action.url.clone(),
                             method: action.method.clone().unwrap_or(Method::POST),
                             headers: action.headers.clone(),
-                            body: Some(serde_json::to_vec(&action_payload)?),
+                            body: Some(serde_json::to_vec(
+                                &json!({ "payload": &action_payload, "revision": new_revision }),
+                            )?),
                         }),
                         Database::utc_now()?,
                     )
@@ -1404,9 +1404,7 @@ mod tests {
                 target: target.clone(),
                 config: config.clone(),
                 tags: tags.clone(),
-                actions: iter::repeat(
-                    TrackerAction::ServerLog(Default::default())
-                ).take(11).collect()
+                actions: iter::repeat_n(TrackerAction::ServerLog(Default::default()), 11).collect()
             }).await),
             @r###""Tracker cannot have more than 10 actions.""###
         );
@@ -1854,13 +1852,13 @@ mod tests {
                 name: "name".to_string(),
                 enabled: true,
                 target: TrackerTarget::Api(ApiTarget {
-                    requests: iter::repeat(TargetRequest {
+                    requests: iter::repeat_n(TargetRequest {
                         url: "https://retrack.dev".parse()?,
                         method: None,
                         headers: None,
                         body: None,
                         media_type: None,
-                    }).take(11).collect::<Vec<_>>(),
+                    }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None,
                 }),
@@ -2380,9 +2378,9 @@ mod tests {
         // Too many actions.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                actions: Some(iter::repeat(
-                    TrackerAction::ServerLog(Default::default())
-                ).take(11).collect()),
+                actions: Some(
+                    iter::repeat_n(TrackerAction::ServerLog(Default::default()), 11).collect()
+                ),
                 ..Default::default()
             }).await),
             @r###""Tracker cannot have more than 10 actions.""###
@@ -2741,13 +2739,13 @@ mod tests {
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 target: Some(TrackerTarget::Api(ApiTarget {
-                    requests: iter::repeat(TargetRequest {
+                    requests: iter::repeat_n(TargetRequest {
                         url: "https://retrack.dev".parse()?,
                         method: None,
                         headers: None,
                         body: None,
                         media_type: None,
-                    }).take(11).collect::<Vec<_>>(),
+                    }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None
                 })),
@@ -4353,7 +4351,9 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(&json!("\"rev_1\""))?),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
+                )?),
             })
         );
 
@@ -4453,7 +4453,9 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(&json!("\"rev_2\""))?),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
+                )?),
             })
         );
 
@@ -4565,7 +4567,9 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(&json!("\"rev_1\"_webhook$"))?),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_1\"_webhook$", "revision": tracker_data[0] })
+                )?),
             })
         );
 
@@ -4665,7 +4669,9 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(&json!("\"rev_2\"_webhook$"))?),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_2\"_webhook$", "revision": tracker_data[0] })
+                )?),
             })
         );
 
