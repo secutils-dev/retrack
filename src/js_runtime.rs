@@ -725,6 +725,7 @@ pub mod tests {
           "Deno.core.ops.op_event_loop_has_more_work()",
           "Deno.core.ops.op_format_file_name()",
           "Deno.core.ops.op_get_constructor_name()",
+          "Deno.core.ops.op_get_ext_import_meta_proto()",
           "Deno.core.ops.op_get_extras_binding_object()",
           "Deno.core.ops.op_get_non_index_property_names()",
           "Deno.core.ops.op_get_promise_details()",
