@@ -87,7 +87,7 @@ struct RawApiTargetRequest<'s> {
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 enum RawTrackerAction<'s> {
     Email {
-        to: Cow<'s, Vec<String>>,
+        to: Cow<'s, [String]>,
         formatter: Option<Cow<'s, str>>,
     },
     Webhook {
