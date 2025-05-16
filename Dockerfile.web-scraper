@@ -37,5 +37,5 @@ RUN set -x && npm ci --production && npm cache clean --force && \
 USER node
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["xvfb-run", "--auto-servernum", "--server-args='-screen 0 1280x720x24'", "node", "src/index.js"]
+CMD ["xvfb-run", "--auto-servernum", "--server-args", "-screen 0 1280x720x24", "node", "src/index.js"]
 
