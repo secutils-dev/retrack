@@ -5,6 +5,8 @@ mod parsers;
 mod tracker_data_revisions_diff;
 mod web_scraper;
 
+pub use api_ext::TrackersApiExt;
+
 #[cfg(test)]
 pub mod tests {
     pub use crate::trackers::{

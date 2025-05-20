@@ -1,5 +1,5 @@
 use crate::config::{
-    CacheConfig, ComponentsConfig, JsRuntimeConfig, SchedulerJobsConfig, SmtpConfig,
+    CacheConfig, ComponentsConfig, JsRuntimeConfig, SchedulerJobsConfig, SmtpConfig, TasksConfig,
     TrackersConfig, database_config::DatabaseConfig,
 };
 use figment::{Figment, providers, providers::Format};
@@ -21,6 +21,8 @@ pub struct RawConfig {
     pub components: ComponentsConfig,
     /// Configuration for the scheduler jobs.
     pub scheduler: SchedulerJobsConfig,
+    /// Configuration for the tasks.
+    pub tasks: TasksConfig,
     /// Configuration for the trackers.
     pub trackers: TrackersConfig,
     /// Configuration for the SMTP functionality.
@@ -46,15 +48,16 @@ impl Default for RawConfig {
         let port = 7676;
         Self {
             port,
-            db: DatabaseConfig::default(),
             public_url: Url::parse(&format!("http://localhost:{port}"))
                 .expect("Cannot parse public URL parameter."),
-            components: ComponentsConfig::default(),
-            scheduler: SchedulerJobsConfig::default(),
-            trackers: TrackersConfig::default(),
-            js_runtime: JsRuntimeConfig::default(),
+            db: Default::default(),
+            components: Default::default(),
+            scheduler: Default::default(),
+            tasks: Default::default(),
+            trackers: Default::default(),
+            js_runtime: Default::default(),
             smtp: None,
-            cache: CacheConfig::default(),
+            cache: Default::default(),
         }
     }
 }
@@ -88,6 +91,14 @@ mod tests {
         enabled = true
         tasks_run = '0/30 * * * * *'
         trackers_schedule = '0/10 * * * * *'
+        [tasks.http.retry_strategy]
+        type = 'constant'
+        interval = 30000
+        max_attempts = 3
+        [tasks.email.retry_strategy]
+        type = 'constant'
+        interval = 30000
+        max_attempts = 3
 
         [trackers]
         max_revisions = 30
@@ -136,6 +147,16 @@ mod tests {
         trackers_schedule = '0 * * * * * *'
         trackers_run = '0 * * * * * *'
         tasks_run = '0/30 * * * * * *'
+
+        [tasks.http.retry_strategy]
+        type = 'constant'
+        interval = 30000
+        max_attempts = 3
+
+        [tasks.email.retry_strategy]
+        type = 'constant'
+        interval = 30000
+        max_attempts = 3
 
         [trackers]
         schedules = ['@hourly']
@@ -207,6 +228,20 @@ mod tests {
                 enabled: false,
                 tasks_run: "0/30 * * * * * *",
                 trackers_schedule: "0 * * * * * *",
+            },
+            tasks: TasksConfig {
+                http: HttpTaskConfig {
+                    retry_strategy: Constant {
+                        interval: 30s,
+                        max_attempts: 3,
+                    },
+                },
+                email: EmailTaskConfig {
+                    retry_strategy: Constant {
+                        interval: 30s,
+                        max_attempts: 3,
+                    },
+                },
             },
             trackers: TrackersConfig {
                 max_revisions: 11,

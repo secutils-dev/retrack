@@ -17,6 +17,16 @@
         "ordinal": 2,
         "name": "scheduled_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "retry_attempt",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "tags",
+        "type_info": "TextArray"
       }
     ],
     "parameters": {
@@ -27,6 +37,8 @@
     "nullable": [
       false,
       false,
+      false,
+      true,
       false
     ]
   },

@@ -5,14 +5,20 @@ mod js_runtime_config;
 mod raw_config;
 mod scheduler_jobs_config;
 mod smtp_config;
+mod tasks_config;
 mod trackers_config;
 
 use url::Url;
 
 pub use self::{
-    cache_config::CacheConfig, components_config::ComponentsConfig,
-    database_config::DatabaseConfig, js_runtime_config::JsRuntimeConfig, raw_config::RawConfig,
-    scheduler_jobs_config::SchedulerJobsConfig, smtp_config::SmtpConfig,
+    cache_config::CacheConfig,
+    components_config::ComponentsConfig,
+    database_config::DatabaseConfig,
+    js_runtime_config::JsRuntimeConfig,
+    raw_config::RawConfig,
+    scheduler_jobs_config::SchedulerJobsConfig,
+    smtp_config::SmtpConfig,
+    tasks_config::{TaskRetryStrategy, TasksConfig},
     trackers_config::TrackersConfig,
 };
 
@@ -31,6 +37,8 @@ pub struct Config {
     pub components: ComponentsConfig,
     /// Configuration for the scheduler jobs.
     pub scheduler: SchedulerJobsConfig,
+    /// Configuration for the tasks.
+    pub tasks: TasksConfig,
     /// Configuration for the trackers.
     pub trackers: TrackersConfig,
     /// Configuration for the embedded JS Runtime.
@@ -52,6 +60,7 @@ impl From<RawConfig> for Config {
             smtp: raw_config.smtp,
             components: raw_config.components,
             scheduler: raw_config.scheduler,
+            tasks: raw_config.tasks,
             trackers: raw_config.trackers,
             js_runtime: raw_config.js_runtime,
         }
@@ -157,6 +166,20 @@ pub mod tests {
                 enabled: true,
                 tasks_run: "0/30 * * * * *",
                 trackers_schedule: "0/10 * * * * *",
+            },
+            tasks: TasksConfig {
+                http: HttpTaskConfig {
+                    retry_strategy: Constant {
+                        interval: 30s,
+                        max_attempts: 3,
+                    },
+                },
+                email: EmailTaskConfig {
+                    retry_strategy: Constant {
+                        interval: 30s,
+                        max_attempts: 3,
+                    },
+                },
             },
             trackers: TrackersConfig {
                 max_revisions: 30,

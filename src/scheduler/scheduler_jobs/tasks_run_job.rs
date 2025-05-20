@@ -305,6 +305,7 @@ mod tests {
                             format!("message {n}"),
                         )),
                     }),
+                    vec![],
                     OffsetDateTime::from_unix_timestamp(946720800 + n)?,
                 )
                 .await?;
@@ -381,6 +382,7 @@ mod tests {
                     headers: None,
                     body: None,
                 }),
+                vec![],
                 OffsetDateTime::from_unix_timestamp(946720800)?,
             )
             .await?;

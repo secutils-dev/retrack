@@ -1,7 +1,12 @@
 use crate::{
     api::Api,
+    config::TaskRetryStrategy,
+    error::Error as RetrackError,
     network::DnsResolver,
-    tasks::{EmailAttachmentDisposition, EmailTaskType, HttpTaskType, Task, TaskType},
+    tasks::{
+        EmailAttachmentDisposition, EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, Task,
+        TaskType,
+    },
 };
 use anyhow::{Context, bail};
 use futures::{StreamExt, pin_mut};
@@ -11,9 +16,9 @@ use lettre::{
 };
 use reqwest_middleware::ClientBuilder;
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
-use std::cmp;
+use std::{cmp, ops::Add};
 use time::OffsetDateTime;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 /// Defines a maximum number of tasks that can be retrieved from the database at once.
@@ -34,12 +39,15 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
     pub async fn schedule_task(
         &self,
         task_type: TaskType,
+        tags: Vec<String>,
         scheduled_at: OffsetDateTime,
     ) -> anyhow::Result<Task> {
         let task = Task {
             id: Uuid::now_v7(),
             task_type,
+            tags,
             scheduled_at,
+            retry_attempt: None,
         };
 
         self.api.db.insert_task(&task).await?;
@@ -56,19 +64,54 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         pin_mut!(pending_tasks_ids);
 
         let mut executed_tasks = 0;
+        let tasks = &self.api.db;
         while let Some(task_id) = pending_tasks_ids.next().await {
-            if let Some(task) = self.api.db.get_task(task_id?).await? {
-                let task_id = task.id;
-                let task_type = task.task_type.type_tag();
-                if let Err(err) = self.execute_task(task).await {
-                    error!(task.id = %task_id, task.task_type = task_type, "Failed to execute task: {err:?}");
+            let Some(task) = tasks.get_task(task_id?).await? else {
+                continue;
+            };
+
+            let task_id = task.id;
+            let task_type = task.task_type.type_tag();
+            if let Err(err) = self.execute_task(&task).await {
+                error!(task.id = %task_id, task.task_type = task_type, task.tags = ?task.tags, "Failed to execute task: {err:?}");
+
+                // Check if there are still retries left.
+                let retry_strategy = self.get_task_retry_strategy(&task.task_type);
+                let retry_attempt = task.retry_attempt.unwrap_or_default();
+                if retry_attempt >= retry_strategy.max_attempts() {
+                    warn!(
+                        task.id = %task_id, task.task_type = task_type, task.tags = ?task.tags,
+                        "Retry limit reached ('{retry_attempt}') for a task."
+                    );
+
+                    // Remove the task and report the error.
+                    self.report_error(&task, err).await;
+                    tasks.remove_task(task_id).await?;
                 } else {
-                    debug!(task.id = %task_id, task.task_type = task_type, "Successfully executed task.");
-                    executed_tasks += 1;
-                    self.api.db.remove_task(task_id).await?;
+                    let retry_in = retry_strategy.interval(retry_attempt + 1);
+                    let next_at = OffsetDateTime::now_utc().add(retry_in);
+                    warn!(
+                        task.id = %task_id, task.task_type = task_type, task.tags = ?task.tags,
+                        metrics.task_retries = retry_attempt + 1,
+                        "Scheduled a task retry in {} ({next_at}).",
+                        humantime::format_duration(retry_in)
+                    );
+
+                    // Re-schedule the task to retry.
+                    tasks
+                        .update_task(&Task {
+                            retry_attempt: Some(retry_attempt + 1),
+                            scheduled_at: next_at,
+                            ..task
+                        })
+                        .await?;
                 }
+            } else {
+                debug!(task.id = %task_id, task.task_type = task_type, task.tags = ?task.tags, "Successfully executed task.");
+                tasks.remove_task(task_id).await?;
             }
 
+            executed_tasks += 1;
             if executed_tasks >= limit {
                 break;
             }
@@ -77,16 +120,16 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         Ok(executed_tasks)
     }
 
-    /// Executes task and removes it from the database, if it was executed successfully.
-    async fn execute_task(&self, task: Task) -> anyhow::Result<()> {
-        match task.task_type {
+    /// Executes task and removes it from the database if it was executed successfully.
+    async fn execute_task(&self, task: &Task) -> anyhow::Result<()> {
+        match &task.task_type {
             TaskType::Email(email_task) => {
-                debug!(task.id = %task.id, "Executing email task.");
+                debug!(task.id = %task.id, task.task_type = task.task_type.type_tag(), task.tags = ?task.tags, "Executing email task.");
                 self.send_email(task.id, email_task, task.scheduled_at)
                     .await?;
             }
             TaskType::Http(http_task) => {
-                debug!(task.id = %task.id, "Executing HTTP task.");
+                debug!(task.id = %task.id, task.task_type = task.task_type.type_tag(), task.tags = ?task.tags, "Executing HTTP task.");
                 self.send_http_request(http_task, task.scheduled_at).await?;
             }
         }
@@ -94,11 +137,20 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         Ok(())
     }
 
+    /// Returns retry strategy for the specified task type.
+    fn get_task_retry_strategy(&self, task_type: &TaskType) -> &TaskRetryStrategy {
+        let tasks_config = &self.api.config.tasks;
+        match task_type {
+            TaskType::Email(_) => &tasks_config.email.retry_strategy,
+            TaskType::Http(_) => &tasks_config.http.retry_strategy,
+        }
+    }
+
     /// Send email using configured SMTP server.
     async fn send_email(
         &self,
         task_id: Uuid,
-        task: EmailTaskType,
+        task: &EmailTaskType,
         timestamp: OffsetDateTime,
     ) -> anyhow::Result<()> {
         let Some(ref smtp) = self.api.network.smtp else {
@@ -106,7 +158,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
             bail!("SMTP is not configured.");
         };
 
-        let email = task.content.into_email(self.api).await?;
+        let email = task.content.clone().into_email(self.api).await?;
         let catch_all_recipient = smtp.config.catch_all.as_ref().and_then(|catch_all| {
             // Checks if the email text matches the regular expression specified in `text_matcher`.
             if catch_all.text_matcher.is_match(&email.text) {
@@ -128,7 +180,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
                     format!("Cannot parse catch-all TO address: {}", catch_all_recipient)
                 })?)
         } else {
-            for to in task.to {
+            for to in task.to.iter() {
                 message_builder = message_builder.to(to
                     .parse()
                     .with_context(|| format!("Cannot parse TO address: {to}"))?);
@@ -176,31 +228,39 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
     }
 
     /// Send HTTP request with the specified parameters.
-    async fn send_http_request(&self, task: HttpTaskType, _: OffsetDateTime) -> anyhow::Result<()> {
+    async fn send_http_request(
+        &self,
+        task: &HttpTaskType,
+        _: OffsetDateTime,
+    ) -> anyhow::Result<()> {
         // Start building request.
         let client = ClientBuilder::new(reqwest::Client::new())
             .with(TracingMiddleware::<SpanBackendWithUrl>::new())
             .build();
-        let request_builder = client.request(task.method, task.url);
+        let request_builder = client.request(task.method.clone(), task.url.clone());
 
         // Add headers, if any.
-        let request_builder = if let Some(headers) = task.headers {
-            request_builder.headers(headers)
+        let request_builder = if let Some(ref headers) = task.headers {
+            request_builder.headers(headers.clone())
         } else {
             request_builder
         };
 
         // Add body, if any.
-        let request_builder = if let Some(body) = task.body {
-            request_builder.body(body)
+        let request_builder = if let Some(ref body) = task.body {
+            request_builder.body(body.clone())
         } else {
             request_builder
         };
 
-        let response = client
-            .execute(request_builder.build()?)
-            .await?
-            .error_for_status()?;
+        let response = client.execute(request_builder.build()?).await?;
+        if response.status().is_client_error() || response.status().is_server_error() {
+            bail!(RetrackError::client(format!(
+                "Failed to execute HTTP task ({}): {}",
+                response.status(),
+                response.text().await?
+            )));
+        }
 
         let response_status = response.status().as_u16();
         let response_text = response.text().await?;
@@ -211,6 +271,49 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         );
 
         Ok(())
+    }
+
+    /// Reports an error that occurred during task execution (after all retries).
+    async fn report_error(&self, task: &Task, error: anyhow::Error) {
+        let task_type = task.task_type.type_tag();
+        let Some(ref smtp) = self.api.network.smtp else {
+            warn!(
+                task.id = %task.id, task.task_type = task_type, task.tags = ?task.tags,
+                "Failed to report failed task: SMTP configuration is missing."
+            );
+            return;
+        };
+
+        let Some(ref catch_all_recipient) = smtp.config.catch_all else {
+            warn!(
+               task.id = %task.id, task.task_type = task_type, task.tags = ?task.tags,
+                "Failed to report failed task: catch-all recipient is missing."
+            );
+            return;
+        };
+
+        let email_task = TaskType::Email(EmailTaskType {
+            to: vec![catch_all_recipient.recipient.clone()],
+            content: EmailContent::Template(EmailTemplate::TaskFailed {
+                task_id: task.id,
+                task_type: task_type.to_string(),
+                task_tags: task.tags.join(", "),
+                error_message: error
+                    .downcast::<RetrackError>()
+                    .map(|err| format!("{err}"))
+                    .unwrap_or_else(|_| "Unknown error".to_string()),
+            }),
+        });
+
+        let tasks_schedule_result = self
+            .schedule_task(email_task, task.tags.clone(), OffsetDateTime::now_utc())
+            .await;
+        if let Err(err) = tasks_schedule_result {
+            error!(
+                task.id = %task.id, task.task_type = task_type, task.tags = ?task.tags,
+                "Failed to report failed task: {err:?}."
+            );
+        }
     }
 }
 
@@ -224,21 +327,25 @@ impl<DR: DnsResolver> Api<DR> {
 #[cfg(test)]
 mod tests {
     use crate::{
+        config::SmtpConfig,
         tasks::{
-            Email, EmailAttachment, EmailContent, EmailTaskType, HttpTaskType, Task, TaskType,
+            Email, EmailAttachment, EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, Task,
+            TaskType,
         },
         tests::{
             MockSmtpServer, SmtpCatchAllConfig, mock_api, mock_api_with_network,
             mock_network_with_smtp, mock_smtp, mock_smtp_config,
         },
     };
+    use futures::StreamExt;
     use http::{HeaderMap, HeaderName, HeaderValue, Method, header::CONTENT_TYPE};
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
+    use regex::Regex;
     use serde_json::json;
     use sqlx::PgPool;
-    use std::str::from_utf8;
-    use time::OffsetDateTime;
+    use std::{ops::Add, str::from_utf8, sync::Arc};
+    use time::{Duration, OffsetDateTime};
     use uuid::uuid;
 
     #[sqlx::test]
@@ -262,7 +369,9 @@ mod tests {
                         "email text".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
             },
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
@@ -273,14 +382,16 @@ mod tests {
                         "email text #2".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
             },
         ];
 
         let tasks_api = api.tasks();
         for task in tasks.iter_mut() {
             task.id = tasks_api
-                .schedule_task(task.task_type.clone(), task.scheduled_at)
+                .schedule_task(task.task_type.clone(), task.tags.clone(), task.scheduled_at)
                 .await?
                 .id;
         }
@@ -325,7 +436,9 @@ mod tests {
                         "email text".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720700)?,
+                retry_attempt: None,
             },
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
@@ -337,14 +450,16 @@ mod tests {
                         "html #2",
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
             },
         ];
 
         let tasks_api = api.tasks();
         for task in tasks.iter_mut() {
             task.id = tasks_api
-                .schedule_task(task.task_type.clone(), task.scheduled_at)
+                .schedule_task(task.task_type.clone(), task.tags.clone(), task.scheduled_at)
                 .await?
                 .id;
         }
@@ -412,13 +527,15 @@ mod tests {
                     vec![EmailAttachment::inline("logo", "image/png", vec![1, 2, 3])],
                 )),
             }),
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
             scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+            retry_attempt: None,
         }];
 
         let tasks_api = api.tasks();
         for task in tasks.iter_mut() {
             task.id = tasks_api
-                .schedule_task(task.task_type.clone(), task.scheduled_at)
+                .schedule_task(task.task_type.clone(), task.tags.clone(), task.scheduled_at)
                 .await?
                 .id;
         }
@@ -481,6 +598,7 @@ mod tests {
                             format!("email text {n}"),
                         )),
                     }),
+                    vec!["tag1".to_string(), "tag2".to_string()],
                     OffsetDateTime::from_unix_timestamp(946720800 + n)?,
                 )
                 .await?;
@@ -562,7 +680,9 @@ mod tests {
         ];
 
         for (task_type, scheduled_at) in tasks.into_iter() {
-            api.tasks().schedule_task(task_type, scheduled_at).await?;
+            api.tasks()
+                .schedule_task(task_type, vec![], scheduled_at)
+                .await?;
         }
 
         assert_eq!(api.tasks().execute_pending_tasks(4).await?, 3);
@@ -649,7 +769,9 @@ mod tests {
         ];
 
         for (task_type, scheduled_at) in tasks.into_iter() {
-            api.tasks().schedule_task(task_type, scheduled_at).await?;
+            api.tasks()
+                .schedule_task(task_type, vec![], scheduled_at)
+                .await?;
         }
 
         assert_eq!(api.tasks().execute_pending_tasks(4).await?, 3);
@@ -707,6 +829,7 @@ mod tests {
                     headers: None,
                     body: None,
                 }),
+                vec![],
                 OffsetDateTime::from_unix_timestamp(946720800)?,
             )
             .await?;
@@ -734,6 +857,7 @@ mod tests {
                     headers: None,
                     body: Some(serde_json::to_vec(&vec![1, 2, 3])?),
                 }),
+                vec![],
                 OffsetDateTime::from_unix_timestamp(946720800)?,
             )
             .await?;
@@ -769,6 +893,7 @@ mod tests {
                     ])),
                     body: Some(serde_json::to_vec(&vec![1, 2, 3])?),
                 }),
+                vec![],
                 OffsetDateTime::from_unix_timestamp(946720800)?,
             )
             .await?;
@@ -782,7 +907,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn keep_http_task_if_execution_fails(pool: PgPool) -> anyhow::Result<()> {
+    async fn schedules_retry_if_http_task_execution_fails(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let tasks_api = api.tasks();
 
@@ -803,14 +928,159 @@ mod tests {
                     headers: None,
                     body: None,
                 }),
+                vec![],
                 OffsetDateTime::from_unix_timestamp(946720800)?,
             )
             .await?;
 
-        assert_eq!(tasks_api.execute_pending_tasks(3).await?, 0);
-        assert!(api.db.get_task(task.id).await?.is_some());
+        assert_eq!(tasks_api.execute_pending_tasks(3).await?, 1);
+
+        let rescheduled_task = api.db.get_task(task.id).await?.unwrap();
+        assert_eq!(rescheduled_task.task_type, task.task_type);
+        assert_eq!(rescheduled_task.retry_attempt, Some(1));
+        assert!(
+            (OffsetDateTime::now_utc().add(Duration::seconds(30)) - rescheduled_task.scheduled_at)
+                < Duration::seconds(5)
+        );
+        server_handler_mock.assert();
+
+        api.db
+            .update_task(&Task {
+                scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                ..rescheduled_task.clone()
+            })
+            .await?;
+        assert_eq!(tasks_api.execute_pending_tasks(3).await?, 1);
+
+        let rescheduled_task = api.db.get_task(task.id).await?.unwrap();
+        assert_eq!(rescheduled_task.task_type, task.task_type);
+        assert_eq!(rescheduled_task.retry_attempt, Some(2));
+        assert!(
+            (OffsetDateTime::now_utc().add(Duration::seconds(30)) - rescheduled_task.scheduled_at)
+                < Duration::seconds(5)
+        );
+        server_handler_mock.assert_hits(2);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_executes_task_after_retry(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let tasks_api = api.tasks();
+
+        let server = MockServer::start();
+        let server_handler_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/some/execute");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&json!({ "ok": true }));
+        });
+
+        let task = tasks_api
+            .schedule_task(
+                TaskType::Http(HttpTaskType {
+                    url: format!("{}/api/some/execute", server.base_url()).parse()?,
+                    method: Method::POST,
+                    headers: None,
+                    body: None,
+                }),
+                vec![],
+                OffsetDateTime::from_unix_timestamp(946720800)?,
+            )
+            .await?;
+        api.db
+            .update_task(&Task {
+                retry_attempt: Some(1),
+                ..task.clone()
+            })
+            .await?;
+
+        assert_eq!(tasks_api.execute_pending_tasks(3).await?, 1);
+        assert!(api.db.get_task(task.id).await?.is_none());
 
         server_handler_mock.assert();
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn removes_task_and_reports_error_if_all_retries_exhausted(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
+        smtp_server.start();
+
+        let smtp_config = SmtpConfig {
+            catch_all: Some(SmtpCatchAllConfig {
+                recipient: "dev@retrack.dev".to_string(),
+                text_matcher: Regex::new(r"alpha")?,
+            }),
+            ..mock_smtp_config(smtp_server.host.to_string(), smtp_server.port)
+        };
+        let api = Arc::new(
+            mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?,
+        );
+        let tasks_api = api.tasks();
+
+        let server = MockServer::start();
+        let server_handler_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/some/execute");
+            then.status(400)
+                .header("Content-Type", "application/json")
+                .body("Uh oh (failed retry)!");
+        });
+
+        let task = tasks_api
+            .schedule_task(
+                TaskType::Http(HttpTaskType {
+                    url: format!("{}/api/some/execute", server.base_url()).parse()?,
+                    method: Method::POST,
+                    headers: None,
+                    body: None,
+                }),
+                vec!["tag1".to_string(), "tag2".to_string()],
+                OffsetDateTime::from_unix_timestamp(946720800)?,
+            )
+            .await?;
+        api.db
+            .update_task(&Task {
+                retry_attempt: Some(3),
+                ..task.clone()
+            })
+            .await?;
+
+        assert_eq!(tasks_api.execute_pending_tasks(3).await?, 1);
+        assert!(api.db.get_task(task.id).await?.is_none());
+        server_handler_mock.assert();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(
+                OffsetDateTime::now_utc().add(std::time::Duration::from_secs(3600 * 24 * 365)),
+                10,
+            )
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 1);
+
+        let report_error_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            report_error_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec!["dev@retrack.dev".to_string()],
+                content: EmailContent::Template(EmailTemplate::TaskFailed {
+                    task_id: task.id,
+                    task_type: task.task_type.type_tag().to_string(),
+                    task_tags: "tag1, tag2".to_string(),
+                    error_message:
+                        "Failed to execute HTTP task (400 Bad Request): Uh oh (failed retry)!"
+                            .to_string(),
+                })
+            })
+        );
 
         Ok(())
     }

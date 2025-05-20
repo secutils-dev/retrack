@@ -75,9 +75,11 @@ async fn main() -> Result<(), anyhow::Error> {
 mod tests {
     use crate::{
         api::Api,
-        config::{ComponentsConfig, Config, SchedulerJobsConfig, SmtpConfig},
+        config::{CacheConfig, Config, SchedulerJobsConfig, SmtpConfig, TrackersConfig},
         database::Database,
-        network::{DnsResolver, Network},
+        js_runtime::JsRuntime,
+        network::{DnsResolver, Network, Smtp, SmtpTransport},
+        templates::create_templates,
     };
     use bytes::Bytes;
     use lettre::transport::smtp::authentication::Credentials;
@@ -87,12 +89,6 @@ mod tests {
     use url::Url;
 
     pub use crate::{config::tests::*, network::tests::*, scheduler::tests::*, trackers::tests::*};
-    use crate::{
-        config::{CacheConfig, DatabaseConfig, JsRuntimeConfig, TrackersConfig},
-        js_runtime::JsRuntime,
-        network::{Smtp, SmtpTransport},
-        templates::create_templates,
-    };
     use sqlx::{PgPool, postgres::PgDatabaseError};
 
     pub fn to_database_error(err: anyhow::Error) -> anyhow::Result<Box<PgDatabaseError>> {
@@ -118,22 +114,23 @@ mod tests {
     pub fn mock_config() -> anyhow::Result<Config> {
         Ok(Config {
             public_url: Url::parse("http://localhost:1234")?,
-            db: DatabaseConfig::default(),
+            db: Default::default(),
             cache: CacheConfig {
                 http_cache_path: Some("./target/http-cache".into()),
             },
             smtp: None,
-            components: ComponentsConfig::default(),
+            components: Default::default(),
             scheduler: SchedulerJobsConfig {
                 enabled: true,
                 trackers_schedule: "0 * 0 * * *".to_string(),
                 tasks_run: "0 * 1 * * *".to_string(),
             },
+            tasks: Default::default(),
             trackers: TrackersConfig {
                 restrict_to_public_urls: false,
                 ..Default::default()
             },
-            js_runtime: JsRuntimeConfig::default(),
+            js_runtime: Default::default(),
         })
     }
 

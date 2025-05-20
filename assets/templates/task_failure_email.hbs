@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>{{task_type}} task failed</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {{> email_styles}}
+</head>
+<body>
+<div class="container">
+  <p>There was an error while running Retrack task:</p>
+  <hr />
+  <p><b>Task ({{task_type}}):</b> {{task_id}} <small><i>{{task_tags}}</i></small></p>
+  <hr />
+  <p><b>{{error_message}}</b></p>
+  <hr />
+  <p>Please check tracker action configuration that triggered the task.</p>
+  <a href="{{home_link}}"><img src="cid:retrack-logo" alt="Retrack logo" width="64" height="16"/></a>
+</div>
+</body>
+</html>

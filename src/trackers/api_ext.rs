@@ -362,6 +362,19 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         self.trackers.update_tracker_job(id, None).await
     }
 
+    /// Returns tracker-specific tags for the task originated from the tracker.
+    pub fn get_task_tags(tracker: &Tracker, task_type: &TaskType) -> Vec<String> {
+        tracker
+            .tags
+            .iter()
+            .cloned()
+            .chain([
+                format!("@retrack:tracker:id:{}", tracker.id),
+                format!("@retrack:task:type:{}", task_type.type_tag()),
+            ])
+            .collect()
+    }
+
     /// Executes tracker action.
     async fn execute_tracker_action(
         &self,
@@ -449,23 +462,22 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         let tasks_api = self.api.tasks();
         match action {
             TrackerAction::Email(action) => {
+                let task_type = TaskType::Email(EmailTaskType {
+                    to: action.to.clone(),
+                    content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                        tracker_id: tracker.id,
+                        tracker_name: tracker.name.clone(),
+                        // If the payload is a JSON string, remove quotes, otherwise use
+                        // JSON as is.
+                        result: Ok(action_payload
+                            .as_str()
+                            .map(|value| value.to_owned())
+                            .unwrap_or_else(|| action_payload.to_string())),
+                    }),
+                });
+                let task_tags = TrackersApiExt::<DR>::get_task_tags(tracker, &task_type);
                 let task = tasks_api
-                    .schedule_task(
-                        TaskType::Email(EmailTaskType {
-                            to: action.to.clone(),
-                            content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
-                                tracker_id: tracker.id,
-                                tracker_name: tracker.name.clone(),
-                                // If the payload is a JSON string, remove quotes, otherwise use
-                                // JSON as is.
-                                result: Ok(action_payload
-                                    .as_str()
-                                    .map(|value| value.to_owned())
-                                    .unwrap_or_else(|| action_payload.to_string())),
-                            }),
-                        }),
-                        Database::utc_now()?,
-                    )
+                    .schedule_task(task_type, task_tags, Database::utc_now()?)
                     .await?;
                 info!(
                     tracker.id = %tracker.id,
@@ -475,18 +487,17 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 );
             }
             TrackerAction::Webhook(action) => {
+                let task_type = TaskType::Http(HttpTaskType {
+                    url: action.url.clone(),
+                    method: action.method.clone().unwrap_or(Method::POST),
+                    headers: action.headers.clone(),
+                    body: Some(serde_json::to_vec(
+                        &json!({ "payload": &action_payload, "revision": new_revision }),
+                    )?),
+                });
+                let task_tags = TrackersApiExt::<DR>::get_task_tags(tracker, &task_type);
                 let task = tasks_api
-                    .schedule_task(
-                        TaskType::Http(HttpTaskType {
-                            url: action.url.clone(),
-                            method: action.method.clone().unwrap_or(Method::POST),
-                            headers: action.headers.clone(),
-                            body: Some(serde_json::to_vec(
-                                &json!({ "payload": &action_payload, "revision": new_revision }),
-                            )?),
-                        }),
-                        Database::utc_now()?,
-                    )
+                    .schedule_task(task_type, task_tags, Database::utc_now()?)
                     .await?;
                 info!(
                     tracker.id = %tracker.id,
@@ -4263,6 +4274,7 @@ mod tests {
             .create_tracker(
                 TrackerCreateParamsBuilder::new("tracker")
                     .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag".to_string()])
                     .with_actions(vec![
                         TrackerAction::Email(EmailAction {
                             to: vec![
@@ -4340,6 +4352,14 @@ mod tests {
                 }),
             })
         );
+        assert_eq!(
+            email_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:email".to_string()
+            ]
+        );
 
         let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
         assert_eq!(
@@ -4355,6 +4375,14 @@ mod tests {
                     &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
                 )?),
             })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
         );
 
         // Clear action tasks.
@@ -4442,6 +4470,14 @@ mod tests {
                 }),
             })
         );
+        assert_eq!(
+            email_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:email".to_string()
+            ]
+        );
 
         let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
         assert_eq!(
@@ -4457,6 +4493,14 @@ mod tests {
                     &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
                 )?),
             })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
         );
 
         Ok(())
@@ -4475,6 +4519,7 @@ mod tests {
             .create_tracker(
                 TrackerCreateParamsBuilder::new("tracker")
                     .with_schedule("0 0 * * * *")
+                    .with_tags(vec![])
                     .with_actions(vec![
                         TrackerAction::Email(EmailAction {
                             to: vec![
@@ -4556,6 +4601,13 @@ mod tests {
                 }),
             })
         );
+        assert_eq!(
+            email_task.tags,
+            vec![
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:email".to_string()
+            ]
+        );
 
         let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
         assert_eq!(
@@ -4571,6 +4623,13 @@ mod tests {
                     &json!({ "payload": "\"rev_1\"_webhook$", "revision": tracker_data[0] })
                 )?),
             })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
         );
 
         // Clear action tasks.

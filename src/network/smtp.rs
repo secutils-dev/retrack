@@ -1,4 +1,5 @@
-use crate::config::SmtpConfig;
+use crate::{config::SmtpConfig, error::Error as RetrackError};
+use anyhow::bail;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use tokio::{
     sync::Mutex,
@@ -42,20 +43,24 @@ impl Smtp {
         interval.reset();
 
         let smtp_response = smtp_response?;
-        if smtp_response.is_positive() {
-            debug!(
-                "SMTP server succeeded with {}: {:?}",
-                smtp_response.code(),
-                smtp_response.first_line()
-            );
-        } else {
+        if !smtp_response.is_positive() {
             error!(
                 "SMTP server failed with {}: {:?}",
                 smtp_response.code(),
                 smtp_response.first_line()
             );
+            bail!(RetrackError::client(format!(
+                "Failed to send email ({}): {:?}",
+                smtp_response.code(),
+                smtp_response.first_line()
+            )));
         }
 
+        debug!(
+            "SMTP server succeeded with {}: {:?}",
+            smtp_response.code(),
+            smtp_response.first_line()
+        );
         Ok(())
     }
 }
@@ -382,7 +387,7 @@ pub mod tests {
                 if client_state.mail_transaction.sender.is_none() {
                     stream.write_all(NO_MAIL_TRANSACTION)?;
                 } else {
-                    // arg is in format of TO:<email>
+                    // arg is in the format of TO:<email>
                     match self
                         .re_mail_user
                         .captures(&arg[3..])

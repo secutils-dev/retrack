@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tasks SET task_type = $2, tags = $3, scheduled_at = $4, retry_attempt = $5 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "TextArray",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b175126d65a0975d841093e8e5a096787fe84e8d23ac29ed6d7d453b6de7b5c1"
+}

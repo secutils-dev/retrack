@@ -2,17 +2,19 @@ mod raw_task;
 
 use crate::{
     database::Database,
+    error::Error as RetrackError,
     tasks::{Task, database_ext::raw_task::RawTask},
 };
+use anyhow::{anyhow, bail};
 use async_stream::try_stream;
 use futures::Stream;
 use sqlx::{query, query_as};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-/// Extends primary database with the tasks-related methods.
+/// Extends the primary database with the tasks-related methods.
 impl Database {
-    /// Retrieves task from the database using ID.
+    /// Retrieves the task from the database using ID.
     pub async fn get_task(&self, id: Uuid) -> anyhow::Result<Option<Task>> {
         query_as!(RawTask, r#"SELECT * FROM tasks WHERE id = $1"#, id)
             .fetch_optional(&self.pool)
@@ -25,13 +27,50 @@ impl Database {
     pub async fn insert_task(&self, task: &Task) -> anyhow::Result<()> {
         let raw_task = RawTask::try_from(task)?;
         query!(
-            r#"INSERT INTO tasks (id, task_type, scheduled_at) VALUES ($1, $2, $3)"#,
+            r#"INSERT INTO tasks (id, task_type, tags, scheduled_at, retry_attempt) VALUES ($1, $2, $3, $4, $5)"#,
             raw_task.id,
             raw_task.task_type,
-            raw_task.scheduled_at
+            &raw_task.tags,
+            raw_task.scheduled_at,
+            raw_task.retry_attempt,
         )
         .execute(&self.pool)
         .await?;
+
+        Ok(())
+    }
+
+    /// Updates the task in the database.
+    pub async fn update_task(&self, task: &Task) -> anyhow::Result<()> {
+        let raw_task = RawTask::try_from(task)?;
+        let result = query!(
+            r#"UPDATE tasks SET task_type = $2, tags = $3, scheduled_at = $4, retry_attempt = $5 WHERE id = $1"#,
+            raw_task.id,
+            raw_task.task_type,
+            &raw_task.tags,
+            raw_task.scheduled_at,
+            raw_task.retry_attempt
+        )
+            .execute(&self.pool)
+            .await;
+
+        let task_type = task.task_type.type_tag();
+        match result {
+            Ok(result) => {
+                if result.rows_affected() == 0 {
+                    bail!(RetrackError::client(format!(
+                        "Task ('{}', {task_type}) doesn't exist.",
+                        task.id
+                    )));
+                }
+            }
+            Err(err) => {
+                bail!(RetrackError::from(anyhow!(err).context(format!(
+                    "Couldn't update task ('{}', {task_type}) due to unknown reason.",
+                    task.id
+                ))));
+            }
+        }
 
         Ok(())
     }
@@ -45,7 +84,7 @@ impl Database {
         Ok(())
     }
 
-    /// Retrieves a list of tasks IDs that are scheduled at or before specified date.
+    /// Retrieves a list of tasks IDs that are scheduled at or before the specified date.
     pub fn get_tasks_ids(
         &self,
         scheduled_before_or_at: OffsetDateTime,
@@ -108,7 +147,9 @@ mod tests {
                         "email text".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
             },
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
@@ -119,7 +160,9 @@ mod tests {
                         "email text #2".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: Some(1),
             },
         ];
 
@@ -146,7 +189,12 @@ mod tests {
                         ),
                     },
                 ),
+                tags: [
+                    "tag1",
+                    "tag2",
+                ],
                 scheduled_at: 2000-01-01 10:00:00.0 +00:00:00,
+                retry_attempt: None,
             },
         )
         "###);
@@ -169,11 +217,175 @@ mod tests {
                         ),
                     },
                 ),
+                tags: [
+                    "tag1",
+                    "tag2",
+                ],
                 scheduled_at: 2000-01-01 10:00:00.0 +00:00:00,
+                retry_attempt: Some(
+                    1,
+                ),
             },
         )
         "###);
         assert_debug_snapshot!(db.get_task(uuid!("00000000-0000-0000-0000-000000000003")).await?, @"None");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_update_task(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tasks = vec![
+            Task {
+                id: uuid!("00000000-0000-0000-0000-000000000001"),
+                task_type: TaskType::Email(EmailTaskType {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    content: EmailContent::Custom(Email::text(
+                        "subj".to_string(),
+                        "email text".to_string(),
+                    )),
+                }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
+                scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
+            },
+            Task {
+                id: uuid!("00000000-0000-0000-0000-000000000002"),
+                task_type: TaskType::Email(EmailTaskType {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    content: EmailContent::Custom(Email::text(
+                        "subj #2".to_string(),
+                        "email text #2".to_string(),
+                    )),
+                }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
+                scheduled_at: OffsetDateTime::from_unix_timestamp(946720900)?,
+                retry_attempt: Some(1),
+            },
+        ];
+
+        for task in tasks {
+            db.insert_task(&task).await?;
+        }
+
+        db.update_task(&Task {
+            id: uuid!("00000000-0000-0000-0000-000000000001"),
+            task_type: TaskType::Email(EmailTaskType {
+                to: vec!["dev@retrack.dev".to_string()],
+                content: EmailContent::Custom(Email::text(
+                    "subj".to_string(),
+                    "email text".to_string(),
+                )),
+            }),
+            tags: vec!["tag3".to_string(), "tag4".to_string()],
+            scheduled_at: OffsetDateTime::from_unix_timestamp(946730800)?,
+            retry_attempt: Some(1),
+        })
+        .await?;
+        db.update_task(&Task {
+            id: uuid!("00000000-0000-0000-0000-000000000002"),
+            task_type: TaskType::Email(EmailTaskType {
+                to: vec!["dev@retrack.dev".to_string()],
+                content: EmailContent::Custom(Email::text(
+                    "subj #2".to_string(),
+                    "email text #2".to_string(),
+                )),
+            }),
+            tags: vec!["tag3".to_string(), "tag4".to_string()],
+            scheduled_at: OffsetDateTime::from_unix_timestamp(946730900)?,
+            retry_attempt: Some(2),
+        })
+        .await?;
+
+        assert_debug_snapshot!(db.get_task(uuid!("00000000-0000-0000-0000-000000000001")).await?, @r###"
+        Some(
+            Task {
+                id: 00000000-0000-0000-0000-000000000001,
+                task_type: Email(
+                    EmailTaskType {
+                        to: [
+                            "dev@retrack.dev",
+                        ],
+                        content: Custom(
+                            Email {
+                                subject: "subj",
+                                text: "email text",
+                                html: None,
+                                attachments: None,
+                            },
+                        ),
+                    },
+                ),
+                tags: [
+                    "tag3",
+                    "tag4",
+                ],
+                scheduled_at: 2000-01-01 12:46:40.0 +00:00:00,
+                retry_attempt: Some(
+                    1,
+                ),
+            },
+        )
+        "###);
+        assert_debug_snapshot!(db.get_task(uuid!("00000000-0000-0000-0000-000000000002")).await?, @r###"
+        Some(
+            Task {
+                id: 00000000-0000-0000-0000-000000000002,
+                task_type: Email(
+                    EmailTaskType {
+                        to: [
+                            "dev@retrack.dev",
+                        ],
+                        content: Custom(
+                            Email {
+                                subject: "subj #2",
+                                text: "email text #2",
+                                html: None,
+                                attachments: None,
+                            },
+                        ),
+                    },
+                ),
+                tags: [
+                    "tag3",
+                    "tag4",
+                ],
+                scheduled_at: 2000-01-01 12:48:20.0 +00:00:00,
+                retry_attempt: Some(
+                    2,
+                ),
+            },
+        )
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn correctly_handles_non_existent_tasks_on_update(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let update_error = db
+            .update_task(&Task {
+                id: uuid!("00000000-0000-0000-0000-000000000001"),
+                task_type: TaskType::Email(EmailTaskType {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    content: EmailContent::Custom(Email::text(
+                        "subj".to_string(),
+                        "email text".to_string(),
+                    )),
+                }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
+                scheduled_at: OffsetDateTime::from_unix_timestamp(946730800)?,
+                retry_attempt: Some(1),
+            })
+            .await
+            .unwrap_err()
+            .downcast::<crate::error::Error>()?;
+        assert_debug_snapshot!(
+            update_error,
+            @r###""Task ('00000000-0000-0000-0000-000000000001', email) doesn't exist.""###
+        );
 
         Ok(())
     }
@@ -192,7 +404,9 @@ mod tests {
                         "email text".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
             },
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000002"),
@@ -203,7 +417,9 @@ mod tests {
                         "email text #2".to_string(),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                retry_attempt: None,
             },
         ];
 
@@ -278,7 +494,9 @@ mod tests {
                         format!("email text {n}"),
                     )),
                 }),
+                tags: vec!["tag1".to_string(), "tag2".to_string()],
                 scheduled_at: OffsetDateTime::from_unix_timestamp(946720700 + n)?,
+                retry_attempt: None,
             })
             .await?;
         }

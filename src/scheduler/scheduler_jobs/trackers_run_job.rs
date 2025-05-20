@@ -6,6 +6,7 @@ use crate::{
         scheduler_job::SchedulerJob,
     },
     tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
+    trackers::TrackersApiExt,
 };
 use anyhow::Context;
 use croner::Cron;
@@ -380,9 +381,10 @@ impl TrackersRunJob {
             }),
         });
 
+        let task_tags = TrackersApiExt::<DR>::get_task_tags(&tracker, &email_task);
         let tasks_schedule_result = api
             .tasks()
-            .schedule_task(email_task, OffsetDateTime::now_utc())
+            .schedule_task(email_task, task_tags, OffsetDateTime::now_utc())
             .await;
         if let Err(err) = tasks_schedule_result {
             error!(
@@ -1286,11 +1288,12 @@ mod tests {
                         configurator: None,
                         extractor: None,
                     }))
+                    .with_tags(vec!["tag1".to_string(), "tag2".to_string()])
                     .build(),
             )
             .await?;
 
-        // Create tracker job.
+        // Create the tracker job.
         let job_schedule = mock_schedule_in_sec(1);
         let job_id = scheduler
             .add(TrackersRunJob::create(api.clone(), &job_schedule)?)
@@ -1374,7 +1377,7 @@ mod tests {
             .await;
         assert_eq!(tasks_ids.len(), 1);
 
-        let task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        let mut task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
         assert_eq!(
             task.task_type,
             TaskType::Email(EmailTaskType {
@@ -1387,6 +1390,16 @@ mod tests {
                     )
                 })
             })
+        );
+        task.tags.sort();
+        assert_eq!(
+            task.tags,
+            vec![
+                "@retrack:task:type:email".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "tag1".to_string(),
+                "tag2".to_string(),
+            ]
         );
 
         Ok(())
