@@ -1,4 +1,5 @@
 use byte_unit::Byte;
+use retrack_types::trackers::TrackerAction;
 use serde::{Deserialize, Serialize};
 use serde_with::{DurationMilliSeconds, serde_as};
 use std::{collections::HashSet, time::Duration};
@@ -21,8 +22,11 @@ pub struct TrackersConfig {
     pub min_retry_interval: Duration,
     /// Indicates whether to restrict the tracker to publicly reachable HTTP and HTTPS URLs only.
     pub restrict_to_public_urls: bool,
-    /// The maximum size of any give tracker script (configurators, extractors, formatters etc.).
+    /// The maximum size of any give tracker script (configurators, extractors, formatters, etc.).
     pub max_script_size: Byte,
+    /// The default actions to be applied to all trackers. Always applied after the tracker-specific
+    /// actions.
+    pub default_actions: Option<Vec<TrackerAction>>,
 }
 
 impl Default for TrackersConfig {
@@ -40,6 +44,8 @@ impl Default for TrackersConfig {
             restrict_to_public_urls: true,
             // Default is 4KiB.
             max_script_size: Byte::from_u64(4096),
+            // Don't add any default actions by default.
+            default_actions: None,
         }
     }
 }
@@ -49,6 +55,7 @@ mod tests {
     use crate::config::TrackersConfig;
     use byte_unit::Byte;
     use insta::assert_toml_snapshot;
+    use retrack_types::trackers::{EmailAction, TrackerAction};
     use std::time::Duration;
 
     #[test]
@@ -71,6 +78,16 @@ mod tests {
             min_retry_interval: Duration::from_secs(3),
             restrict_to_public_urls: false,
             max_script_size: Byte::from_u64(8192),
+            default_actions: Some(vec![
+                TrackerAction::ServerLog(Default::default()),
+                TrackerAction::Email(EmailAction {
+                    to: vec!["dev@retrack.dev".to_string()],
+                    formatter: Some(
+                        "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();"
+                            .to_string(),
+                    ),
+                }),
+            ]),
         };
         assert_toml_snapshot!(config, @r###"
         max_revisions = 10
@@ -80,6 +97,14 @@ mod tests {
         min_retry_interval = 3000
         restrict_to_public_urls = false
         max_script_size = '8 KiB'
+
+        [[default_actions]]
+        type = 'log'
+
+        [[default_actions]]
+        type = 'email'
+        to = ['dev@retrack.dev']
+        formatter = '''(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();'''
         "###);
     }
 
@@ -107,6 +132,7 @@ mod tests {
         schedules = ['@', '@hourly']
         restrict_to_public_urls = false
         max_script_size = '8 KiB'
+        default_actions = [{ type = 'log' }, { type = 'email', to = ['dev@retrack.dev'], formatter = '''(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();''' }]
     "#,
         )
         .unwrap();
@@ -124,6 +150,16 @@ mod tests {
                 min_retry_interval: Duration::from_secs(3),
                 restrict_to_public_urls: false,
                 max_script_size: Byte::from_u64(8192),
+                default_actions: Some(vec![
+                    TrackerAction::ServerLog(Default::default()),
+                    TrackerAction::Email(EmailAction {
+                        to: vec!["dev@retrack.dev".to_string()],
+                        formatter: Some(
+                            "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();"
+                                .to_string(),
+                        ),
+                    }),
+                ]),
             }
         );
     }

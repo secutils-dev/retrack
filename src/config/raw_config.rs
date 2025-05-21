@@ -166,6 +166,9 @@ mod tests {
         min_retry_interval = 60_000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
+
+        [[trackers.default_actions]]
+        type = 'log'
     "#,
         )
         .unwrap();
@@ -256,6 +259,15 @@ mod tests {
                 restrict_to_public_urls: true,
                 max_script_size: Byte(
                     4096,
+                ),
+                default_actions: Some(
+                    [
+                        ServerLog(
+                            ServerLogAction {
+                                formatter: None,
+                            },
+                        ),
+                    ],
                 ),
             },
             smtp: None,

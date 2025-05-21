@@ -191,6 +191,7 @@ pub mod tests {
                 max_script_size: Byte(
                     4096,
                 ),
+                default_actions: None,
             },
             js_runtime: JsRuntimeConfig {
                 max_heap_size: 10485760,

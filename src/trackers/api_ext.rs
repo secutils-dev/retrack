@@ -74,6 +74,9 @@ pub const MAX_TRACKER_EMAIL_ACTION_RECIPIENTS_COUNT: usize = 10;
 /// Defines the maximum count of tracker webhook action headers.
 pub const MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT: usize = 20;
 
+/// Defines a prefix for the tracker task tags.
+const TRACKER_TASK_TAG_PREFIX: &str = "@retrack";
+
 pub struct TrackersApiExt<'a, DR: DnsResolver> {
     api: &'a Api<DR>,
     trackers: TrackersDatabaseExt<'a>,
@@ -268,8 +271,12 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             None
         };
 
-        // Iterate through all tracker actions and execute them.
-        for action in tracker.actions.iter() {
+        // Iterate through all tracker actions, including default ones, and execute them.
+        for action in tracker
+            .actions
+            .iter()
+            .chain(self.api.config.trackers.default_actions.iter().flatten())
+        {
             self.execute_tracker_action(&tracker, action, &mut new_revision, last_revision.as_ref())
                 .await?
         }
@@ -369,8 +376,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .iter()
             .cloned()
             .chain([
-                format!("@retrack:tracker:id:{}", tracker.id),
-                format!("@retrack:task:type:{}", task_type.type_tag()),
+                format!("{TRACKER_TASK_TAG_PREFIX}:tracker:id:{}", tracker.id),
+                format!(
+                    "{TRACKER_TASK_TAG_PREFIX}:task:type:{}",
+                    task_type.type_tag()
+                ),
             ])
             .collect()
     }
@@ -4478,6 +4488,438 @@ mod tests {
                 "@retrack:task:type:email".to_string()
             ]
         );
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
+                )?),
+            })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_execute_tracker_actions_combined_with_default_actions(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+        config.trackers.default_actions = Some(vec![TrackerAction::Webhook(WebhookAction {
+            url: "https://retrack.dev".parse()?,
+            method: None,
+            headers: Some(HeaderMap::from_iter([(
+                CONTENT_TYPE,
+                HeaderValue::from_static("text/plain"),
+            )])),
+            formatter: None,
+        })]);
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag".to_string()])
+                    .with_actions(vec![TrackerAction::Email(EmailAction {
+                        to: vec![
+                            "dev@retrack.dev".to_string(),
+                            "dev-2@retrack.dev".to_string(),
+                        ],
+                        formatter: None,
+                    })])
+                    .build(),
+            )
+            .await?;
+
+        let content = TrackerDataValue::new(json!("\"rev_1\""));
+        let mut server_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        let scheduled_before_or_at = OffsetDateTime::now_utc()
+            .checked_add(time::Duration::days(1))
+            .unwrap();
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        server_mock.delete();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 2);
+
+        let email_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            email_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec![
+                    "dev@retrack.dev".to_string(),
+                    "dev-2@retrack.dev".to_string(),
+                ],
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: Ok("\"rev_1\"".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            email_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:email".to_string()
+            ]
+        );
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
+                )?),
+            })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
+        );
+
+        // Clear action tasks.
+        api.db.remove_task(email_task.id).await?;
+        api.db.remove_task(http_task.id).await?;
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        let mut server_mock = server.mock(|when, then| {
+            let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
+            scraper_request.previous_content = Some(&content);
+
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        server_mock.delete();
+
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        // Now, let's change content.
+        let new_content = TrackerDataValue::new(json!("\"rev_2\""));
+        let server_mock = server.mock(|when, then| {
+            let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
+            scraper_request.previous_content = Some(&content);
+
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(new_content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 2);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_2\""));
+        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 2);
+
+        let email_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            email_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec![
+                    "dev@retrack.dev".to_string(),
+                    "dev-2@retrack.dev".to_string(),
+                ],
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: Ok("\"rev_2\"".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            email_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:email".to_string()
+            ]
+        );
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
+                )?),
+            })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_execute_only_default_actions(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+        config.trackers.default_actions = Some(vec![TrackerAction::Webhook(WebhookAction {
+            url: "https://retrack.dev".parse()?,
+            method: None,
+            headers: Some(HeaderMap::from_iter([(
+                CONTENT_TYPE,
+                HeaderValue::from_static("text/plain"),
+            )])),
+            formatter: None,
+        })]);
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag".to_string()])
+                    .build(),
+            )
+            .await?;
+
+        let content = TrackerDataValue::new(json!("\"rev_1\""));
+        let mut server_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        let scheduled_before_or_at = OffsetDateTime::now_utc()
+            .checked_add(time::Duration::days(1))
+            .unwrap();
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        server_mock.delete();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 1);
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(
+                    &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
+                )?),
+            })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
+        );
+
+        // Clear action tasks.
+        api.db.remove_task(http_task.id).await?;
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        let mut server_mock = server.mock(|when, then| {
+            let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
+            scraper_request.previous_content = Some(&content);
+
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+        server_mock.delete();
+
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        // Now, let's change content.
+        let new_content = TrackerDataValue::new(json!("\"rev_2\""));
+        let server_mock = server.mock(|when, then| {
+            let mut scraper_request = WebScraperContentRequest::try_from(&tracker).unwrap();
+            scraper_request.previous_content = Some(&content);
+
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(new_content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 2);
+        assert_eq!(tracker_data[0].data.value(), &json!("\"rev_2\""));
+        assert_eq!(tracker_data[1].data.value(), &json!("\"rev_1\""));
+
+        server_mock.assert();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 1);
 
         let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
         assert_eq!(
