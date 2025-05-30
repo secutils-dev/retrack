@@ -29,10 +29,10 @@ use retrack_types::{
         ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult, PageTarget,
         ServerLogAction, Tracker, TrackerAction, TrackerCreateParams, TrackerDataRevision,
         TrackerDataValue, TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams,
-        TrackersListParams, WebhookAction,
+        TrackersListParams, WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
     },
 };
-use serde_json::json;
+use serde_json::{Value as JsonValue, json};
 use std::{
     borrow::Cow,
     cmp::min,
@@ -57,7 +57,7 @@ const MAX_TRACKER_RETRY_INTERVAL: Duration = Duration::from_secs(12 * 3600);
 pub const MAX_TRACKER_NAME_LENGTH: usize = 100;
 
 /// Defines the maximum length of a tracker tag.
-pub const MAX_TRACKER_TAG_LENGTH: usize = 50;
+pub const MAX_TRACKER_TAG_LENGTH: usize = 100;
 
 /// Defines the maximum count of tracker tags.
 pub const MAX_TRACKER_TAGS_COUNT: usize = 20;
@@ -231,11 +231,23 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .await
     }
 
-    /// Fetches data revision for the specified tracker and persists it if allowed by config and
-    /// if the data has changed.
+    /// Tries to fetch a new data revision for the specified tracker and persists it if allowed by
+    /// config and if the data has changed. Executes actions regardless of the result.
     pub async fn create_tracker_data_revision(
         &self,
         tracker_id: Uuid,
+    ) -> anyhow::Result<TrackerDataRevision> {
+        self.create_tracker_data_revision_with_retry(tracker_id, None)
+            .await
+    }
+
+    /// Tries to fetch a new data revision for the specified tracker and persists it if allowed by
+    /// config and if the data has changed. When `retry_attempt` is specified, it suppresses error
+    /// actions in failure scenarios if there are still retry attempts remaining.
+    pub async fn create_tracker_data_revision_with_retry(
+        &self,
+        tracker_id: Uuid,
+        retry_attempt: Option<u32>,
     ) -> anyhow::Result<TrackerDataRevision> {
         let Some(tracker) = self.get_tracker(tracker_id).await? else {
             bail!(RetrackError::client(format!(
@@ -249,14 +261,39 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .get_tracker_data_revisions(tracker.id, 1)
             .await?
             .pop();
-        let mut new_revision = match tracker.target {
-            TrackerTarget::Page(_) => {
-                self.create_tracker_page_data_revision(&tracker, &last_revision)
-                    .await?
-            }
-            TrackerTarget::Api(_) => {
-                self.create_tracker_api_data_revision(&tracker, &last_revision)
-                    .await?
+        let new_revision = match tracker.target {
+            TrackerTarget::Page(_) => self
+                .create_tracker_page_data_revision(&tracker, &last_revision)
+                .await
+                .map_err(RetrackError::client_with_root_cause),
+            TrackerTarget::Api(_) => self
+                .create_tracker_api_data_revision(&tracker, &last_revision)
+                .await
+                .map_err(RetrackError::client_with_root_cause),
+        };
+
+        // Iterate through all tracker actions, including default ones, and execute them.
+        let actions = tracker
+            .actions
+            .iter()
+            .chain(self.api.config.trackers.default_actions.iter().flatten());
+        let new_revision = match new_revision {
+            Ok(new_revision) => new_revision,
+            Err(err) => {
+                // Don't execute actions if retries aren't exhausted yet.
+                let has_retries_left = retry_attempt
+                    .and_then(|attempt| {
+                        Some(attempt < tracker.config.job.as_ref()?.retry_strategy?.max_attempts())
+                    })
+                    .unwrap_or_default();
+                if !has_retries_left {
+                    for action in actions {
+                        self.execute_tracker_action(&tracker, action, Err(err.to_string()))
+                            .await?
+                    }
+                }
+
+                return Err(err.into());
             }
         };
 
@@ -264,6 +301,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         let last_revision = if let Some(last_revision) = last_revision {
             // Return the last revision without re-running actions if data hasn't changed.
             if last_revision.data.original() == new_revision.data.original() {
+                debug!(
+                    tracker.id = %tracker.id,
+                    tracker.name = tracker.name,
+                    "Skipping actions for a new data revision since content hasn't changed."
+                );
                 return Ok(last_revision);
             }
             Some(last_revision)
@@ -271,14 +313,33 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             None
         };
 
-        // Iterate through all tracker actions, including default ones, and execute them.
-        for action in tracker
-            .actions
-            .iter()
-            .chain(self.api.config.trackers.default_actions.iter().flatten())
-        {
-            self.execute_tracker_action(&tracker, action, &mut new_revision, last_revision.as_ref())
-                .await?
+        for (action_index, action) in actions.enumerate() {
+            match self
+                .get_action_payload(action, &new_revision, last_revision.as_ref())
+                .await
+            {
+                Ok(Some(action_payload)) => {
+                    self.execute_tracker_action(&tracker, action, Ok(action_payload))
+                        .await?
+                }
+                Ok(None) => {
+                    debug!(
+                        tracker.id = %tracker.id,
+                        tracker.name = tracker.name,
+                        tracker.action = action.type_tag(),
+                        "Skipping action for a new data revision as requested by action formatter ({action_index})."
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        tracker.id = %tracker.id,
+                        tracker.name = tracker.name,
+                        tracker.action = action.type_tag(),
+                        "Failed to retrieve payload for action ({action_index}): {err}"
+                    );
+                    bail!(RetrackError::client_with_root_cause(err));
+                }
+            }
         }
 
         // Insert a new revision if allowed by the config.
@@ -292,7 +353,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 .await?;
         }
 
-        // Enforce revisions limit and displace old revisions if needed.
+        // Enforce revision limit and displace old revisions if needed.
         self.trackers
             .enforce_tracker_data_revisions_limit(tracker.id, max_revisions)
             .await?;
@@ -385,18 +446,34 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .collect()
     }
 
-    /// Executes tracker action.
-    async fn execute_tracker_action(
+    /// Calculates action payload for the success case.
+    async fn get_action_payload<'r>(
         &self,
-        tracker: &Tracker,
         action: &TrackerAction,
-        new_revision: &mut TrackerDataRevision,
+        new_revision: &'r TrackerDataRevision,
         previous_revision: Option<&TrackerDataRevision>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<Cow<'r, JsonValue>>> {
+        // If no formatter is specified, use the new revision data value as an action payload.
+        let Some(formatter) = action.formatter() else {
+            return Ok(Some(Cow::Borrowed(new_revision.data.value())));
+        };
+
+        // Retrieve the formatter script content.
+        let formatter = self
+            .get_script_content(formatter)
+            .await
+            .with_context(|| {
+                format!(
+                    "Cannot retrieve tracker action formatter script ({})",
+                    action.type_tag()
+                )
+            })
+            .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
+
         // If the latest data value has no modifications, use previous original value as
         // previous value. Otherwise, use the modification from the previous data value based on
         // the highest index of the latest data value modifications.
-        let new_data_value = &mut new_revision.data;
+        let new_data_value = &new_revision.data;
         let previous_value =
             previous_revision
                 .map(|rev| &rev.data)
@@ -410,65 +487,41 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     }
                 });
 
-        let new_value = new_data_value.value();
-        let changed = if let Some(previous_value) = previous_value {
-            previous_value != new_value
-        } else {
-            true
-        };
-
-        if !changed {
-            debug!(
-                tracker.id = %tracker.id,
-                tracker.name = tracker.name,
-                "Skipping action `{}` for a new data revision since content hasn't changed.",
-                action.type_tag()
-            );
-            return Ok(());
-        }
-
-        // Format action payload, if needed. If the formatter is specified, but returns `null`, the
-        // action should be skipped.
-        let action_payload = if let Some(formatter) = action.formatter() {
-            let formatter_result = self
-                .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
-                    self.get_script_content(tracker, formatter).await?,
-                    FormatterScriptArgs {
-                        action: action.type_tag(),
-                        new_content: new_value.clone(),
-                        previous_content: previous_value.cloned(),
-                    },
+        // Format action payload, if needed.
+        let formatter_result = self
+            .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
+                formatter,
+                FormatterScriptArgs {
+                    action: action.type_tag(),
+                    new_content: new_data_value.value().clone(),
+                    previous_content: previous_value.cloned(),
+                },
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to execute action formatter script ({}).",
+                    action.type_tag()
                 )
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to execute action \"formatter\" script ({}).",
-                        action.type_tag()
-                    )
-                })
-                .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
-            match formatter_result {
-                // Formatter empty content that means we should abort action.
-                Some(FormatterScriptResult { content: None }) => {
-                    debug!(
-                        tracker.id = %tracker.id,
-                        tracker.name = tracker.name,
-                        "Skipping action `{}` for a new data revision as requested by action formatter.",
-                        action.type_tag()
-                    );
-                    return Ok(());
-                }
-                // Formatter returned a content, use it as an action payload.
-                Some(FormatterScriptResult {
-                    content: Some(content),
-                }) => Cow::Owned(content),
-                // Formatter didn't return any content, use the new value as an action payload.
-                None => Cow::Borrowed(new_value),
-            }
-        } else {
-            Cow::Borrowed(new_value)
-        };
+            })
+            .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
 
+        // If the formatter doesn't return anything, use the original new revision value as an
+        // action payload. If it returns content, use it as the action payload instead. If it
+        // returns `null`, it's a signal to abort the action completely.
+        Ok(formatter_result.map_or_else(
+            || Some(Cow::Borrowed(new_data_value.value())),
+            |formatter_result| formatter_result.content.map(Cow::Owned),
+        ))
+    }
+
+    /// Executes tracker action.
+    async fn execute_tracker_action(
+        &self,
+        tracker: &Tracker,
+        action: &TrackerAction,
+        payload: Result<Cow<'_, JsonValue>, String>,
+    ) -> anyhow::Result<()> {
         let tasks_api = self.api.tasks();
         match action {
             TrackerAction::Email(action) => {
@@ -479,10 +532,12 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         tracker_name: tracker.name.clone(),
                         // If the payload is a JSON string, remove quotes, otherwise use
                         // JSON as is.
-                        result: Ok(action_payload
-                            .as_str()
-                            .map(|value| value.to_owned())
-                            .unwrap_or_else(|| action_payload.to_string())),
+                        result: payload.map(|payload| {
+                            payload
+                                .as_str()
+                                .map(|value| value.to_owned())
+                                .unwrap_or_else(|| payload.to_string())
+                        }),
                     }),
                 });
                 let task_tags = TrackersApiExt::<DR>::get_task_tags(tracker, &task_type);
@@ -492,6 +547,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 info!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
+                    tracker.tags = ?tracker.tags,
                     task.id = %task.id,
                     "Scheduled email task."
                 );
@@ -501,9 +557,15 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     url: action.url.clone(),
                     method: action.method.clone().unwrap_or(Method::POST),
                     headers: action.headers.clone(),
-                    body: Some(serde_json::to_vec(
-                        &json!({ "payload": &action_payload, "revision": new_revision }),
-                    )?),
+                    body: Some(serde_json::to_vec(&WebhookActionPayload {
+                        tracker_id: tracker.id,
+                        tracker_name: tracker.name.clone(),
+                        result: payload
+                            .map(|payload| {
+                                WebhookActionPayloadResult::Success(payload.into_owned())
+                            })
+                            .unwrap_or_else(WebhookActionPayloadResult::Failure),
+                    })?),
                 });
                 let task_tags = TrackersApiExt::<DR>::get_task_tags(tracker, &task_type);
                 let task = tasks_api
@@ -512,6 +574,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 info!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
+                    tracker.tags = ?tracker.tags,
                     task.id = %task.id,
                     "Scheduled HTTP task."
                 );
@@ -520,7 +583,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 info!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
-                    "Fetched new data revision: {action_payload:?}"
+                    tracker.tags = ?tracker.tags,
+                    "Fetched new data revision: {payload:?}"
                 );
             }
         };
@@ -814,13 +878,14 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         previous_revision: &Option<TrackerDataRevision>,
     ) -> anyhow::Result<TrackerDataRevision> {
         let TrackerTarget::Page(ref target) = tracker.target else {
-            bail!(RetrackError::client(format!(
-                "Tracker ('{}') target is not `Page`.",
-                tracker.id
-            )));
+            bail!("Tracker ('{}') target is not `Page`.", tracker.id);
         };
 
-        let extractor = self.get_script_content(tracker, &target.extractor).await?;
+        let extractor = self
+            .get_script_content(&target.extractor)
+            .await
+            .context("Cannot retrieve tracker extractor script")
+            .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
         let scraper_request = WebScraperContentRequest {
             extractor: extractor.as_ref(),
             extractor_params: target.params.as_ref(),
@@ -831,7 +896,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             previous_content: previous_revision.as_ref().map(|rev| &rev.data),
         };
 
-        let scraper_response = self.http_client()
+        let scraper_response = self
+            .http_client()
             .post(format!(
                 "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()
@@ -839,35 +905,26 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .json(&scraper_request)
             .send()
             .await
-            .map_err(|err| {
-                anyhow!(
-                    "Could not connect to the web scraper service to extract content for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?;
+            .context("Cannot connect to the web scraper service")?;
 
         if !scraper_response.status().is_success() {
-            let scraper_error_response = scraper_response
-                .json::<WebScraperErrorResponse>()
-                .await
-                .map_err(|err| {
-                anyhow!(
-                    "Could not deserialize scraper error response for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?;
-            bail!(RetrackError::client(scraper_error_response.message));
+            let scraper_error_response =
+                scraper_response
+                    .json::<WebScraperErrorResponse>()
+                    .await
+                    .context("Cannot deserialize the web scraper service error response")?;
+            bail!(scraper_error_response.message);
         }
 
         Ok(TrackerDataRevision {
             id: Uuid::now_v7(),
             tracker_id: tracker.id,
-            data: TrackerDataValue::new(scraper_response.json().await.map_err(|err| {
-                anyhow!(
-                    "Could not deserialize scraper response for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?),
+            data: TrackerDataValue::new(
+                scraper_response
+                    .json()
+                    .await
+                    .context("Cannot deserialize the web scraper service response")?,
+            ),
             created_at: Database::utc_now()?,
         })
     }
@@ -879,14 +936,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         last_revision: &Option<TrackerDataRevision>,
     ) -> anyhow::Result<TrackerDataRevision> {
         let TrackerTarget::Api(ref target) = tracker.target else {
-            bail!(RetrackError::client(format!(
-                "Tracker ('{}') target is not `Api`.",
-                tracker.id
-            )));
+            bail!("Tracker ('{}') target is not `Api`.", tracker.id);
         };
 
-        // Run configurator script, if specified to check if there are any overrides to the request
-        // parameters need to be made.
+        // Run the configurator script, if specified, to check if there are any overrides to the
+        // request parameters need to be made.
         let (requests_override, response_body_override) =
             if let Some(ref configurator) = target.configurator {
                 // Prepare requests for the configurator script.
@@ -897,7 +951,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
                 let result = self
                     .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                        self.get_script_content(tracker, configurator).await?,
+                        self.get_script_content(configurator)
+                            .await
+                            .context("Cannot retrieve tracker configurator script")
+                            .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?,
                         ConfiguratorScriptArgs {
                             tags: tracker.tags.clone(),
                             previous_content: last_revision.as_ref().map(|rev| rev.data.clone()),
@@ -905,7 +962,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         },
                     )
                     .await
-                    .context("Failed to execute \"configurator\" script.")
+                    .context("Cannot execute tracker configurator script")
                     .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?;
                 match result {
                     Some(ConfiguratorScriptResult::Requests(configurator_requests)) => {
@@ -927,7 +984,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 (None, None)
             };
 
-        // If configurator overrides the response body, use it instead of making any requests.
+        // If the configurator overrides the response body, use it instead of making any requests.
         let responses = if let Some(response_body_override) = response_body_override {
             vec![response_body_override]
         } else {
@@ -951,9 +1008,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 // Add body, if any.
                 let request_builder = if let Some(ref body) = request.body {
                     request_builder.body(serde_json::to_vec(body).with_context(|| {
-                        format!(
-                            "Cannot serialize a body of the API target request ({request_index})."
-                        )
+                        format!("Cannot serialize a body of the API request ({request_index}).")
                     })?)
                 } else {
                     request_builder
@@ -968,29 +1023,24 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
                 let api_response = client.execute(request_builder.build()?).await?;
                 if !api_response.status().is_success() {
-                    let is_client_error = api_response.status().is_client_error();
-                    if is_client_error {
-                        bail!(RetrackError::client(format!(
-                            "Failed to execute API target request ({request_index}): {}",
-                            api_response.text().await?
-                        )));
-                    } else {
-                        bail!(
-                            "Unexpected API target request error ({request_index}): {}",
-                            api_response.text().await?
-                        );
-                    }
+                    bail!(
+                        "Failed to execute the API request ({request_index}): {} {}",
+                        api_response.status(),
+                        api_response.text().await?
+                    );
                 }
 
-                // Read response, parse, and extract data with extractor script, if specified.
-                let response_bytes = api_response.bytes().await.with_context(|| {
-                    format!("Failed to read API target request response ({request_index}).")
-                })?;
+                // Read response, parse, and extract data with the extractor script, if specified.
+                let response_bytes = api_response
+                    .bytes()
+                    .await
+                    .with_context(|| format!("Failed to read API response ({request_index})."))?;
 
                 debug!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
-                    "Fetched API target request response ({request_index}) with {} bytes.",
+                    tracker.tags = ?tracker.tags,
+                    "Fetched the API response ({request_index}) with {} bytes.",
                     response_bytes.len()
                 );
 
@@ -1001,10 +1051,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 responses.push(
                     (match media_type {
                         Some(ref media_type) if XlsParser::supports(media_type) => {
-                            XlsParser::parse(&response_bytes)?
+                            XlsParser::parse(&response_bytes).with_context(|| format!("Failed to parse the API response as XLS file ({request_index})."))?
                         }
                         Some(ref media_type) if CsvParser::supports(media_type) => {
-                            CsvParser::parse(&response_bytes)?
+                            CsvParser::parse(&response_bytes).with_context(|| format!("Failed to parse the API response as CSV file ({request_index})."))?
                         }
                         _ => response_bytes,
                     })
@@ -1022,9 +1072,13 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 tracker.name = tracker.name,
                 "Extracting data with the API target extractor script ({extractor})."
             );
+
             let result = self
                 .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
-                    self.get_script_content(tracker, extractor).await?,
+                    self.get_script_content(extractor)
+                        .await
+                        .context("Cannot retrieve tracker extractor script")
+                        .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?,
                     ExtractorScriptArgs {
                         tags: tracker.tags.clone(),
                         previous_content: last_revision.as_ref().map(|rev| rev.data.clone()),
@@ -1032,7 +1086,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     },
                 )
                 .await
-                .context("Failed to execute \"extractor\" script.")
+                .context("Failed to execute tracker extractor script")
                 .map_err(|err| anyhow!(RetrackError::client_with_root_cause(err)))?
                 .unwrap_or_default();
             result.body
@@ -1045,22 +1099,13 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             debug!(
                 tracker.id = %tracker.id,
                 tracker.name = tracker.name,
-                "Extracted data from the API target extractor script with {} bytes.",
+                "Extracted data from the tracker extractor script with {} bytes.",
                 response_bytes.len()
             );
-            serde_json::from_slice(&response_bytes).map_err(|err| {
-                anyhow!(
-                    "Could not deserialize API target extractor result for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?
+            serde_json::from_slice(&response_bytes)
+                .context("Cannot deserialize tracker extractor script result")?
         } else if responses.len() == 1 {
-            serde_json::from_slice(&responses[0]).map_err(|err| {
-                anyhow!(
-                    "Could not deserialize API target response for the tracker ('{}'): {err:?}",
-                    tracker.id
-                )
-            })?
+            serde_json::from_slice(&responses[0]).context("Cannot deserialize API response")?
         } else {
             json!(&responses)
         };
@@ -1149,11 +1194,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
     /// Takes script reference saved as a tracker script and returns its content. If the script
     /// reference is a valid URL, its content will be fetched from the remote server.
-    async fn get_script_content(
-        &self,
-        tracker: &Tracker,
-        script_ref: &str,
-    ) -> anyhow::Result<String> {
+    async fn get_script_content(&self, script_ref: &str) -> anyhow::Result<String> {
         // First check if script is a URL pointing to a remote script.
         let Ok(url) = Url::parse(script_ref) else {
             return Ok(script_ref.to_string());
@@ -1162,14 +1203,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         // Make sure that URL is allowed.
         let config = &self.api.config.trackers;
         if config.restrict_to_public_urls && !self.api.network.is_public_web_url(&url).await {
-            error!(
-                tracker.id = %tracker.id,
-                tracker.name = tracker.name,
-                "Attempted to fetch remote script from not allowed URL: {script_ref}"
-            );
-            bail!(RetrackError::client(format!(
-                "Attempted to fetch remote script from not allowed URL: {script_ref}"
-            )));
+            bail!("Attempted to fetch remote script from not allowed URL: {script_ref}");
         }
 
         Ok(self
@@ -1234,7 +1268,7 @@ mod tests {
             ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker,
             TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
             TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
-            WebhookAction,
+            WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
         },
     };
     use serde_json::json;
@@ -1385,10 +1419,10 @@ mod tests {
                 enabled: true,
                 target: target.clone(),
                 config: config.clone(),
-                tags: vec!["a".repeat(51)],
+                tags: vec!["a".repeat(101)],
                 actions: actions.clone()
             }).await),
-            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+            @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
 
         // Empty tag.
@@ -1401,7 +1435,7 @@ mod tests {
                 tags: vec!["tag".to_string(), "".to_string()],
                 actions: actions.clone()
             }).await),
-            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+            @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
 
         // Too many tags.
@@ -2372,10 +2406,10 @@ mod tests {
         // Very long tag.
         assert_debug_snapshot!(
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
-                tags: Some(vec!["a".repeat(51)]),
+                tags: Some(vec!["a".repeat(101)]),
                 ..Default::default()
             }).await),
-            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+            @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
 
         // Empty tag.
@@ -2384,7 +2418,7 @@ mod tests {
                 tags: Some(vec!["tag".to_string(), "".to_string()]),
                 ..Default::default()
             }).await),
-            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+            @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
 
         // Too many tags.
@@ -3193,9 +3227,9 @@ mod tests {
         // Very long tag.
         assert_debug_snapshot!(
             list_and_fail(api.get_trackers(TrackersListParams {
-                tags: vec!["a".repeat(51)]
+                tags: vec!["a".repeat(101)]
             }).await),
-            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+            @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
 
         // Empty tag.
@@ -3203,7 +3237,7 @@ mod tests {
             list_and_fail(api.get_trackers(TrackersListParams {
                 tags: vec!["tag".to_string(), "".to_string()]
             }).await),
-            @r###""Tracker tags cannot be empty or longer than 50 characters.""###
+            @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
 
         // Too many tags.
@@ -4381,9 +4415,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_1\"")),
+                })?),
             })
         );
         assert_eq!(
@@ -4499,9 +4535,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name,
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_2\"")),
+                })?),
             })
         );
         assert_eq!(
@@ -4512,6 +4550,215 @@ mod tests {
                 "@retrack:task:type:http".to_string()
             ]
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_execute_tracker_actions_in_fail_scenarios(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("0 0 * * * *")
+                    .with_tags(vec!["tag".to_string()])
+                    .with_actions(vec![
+                        TrackerAction::Email(EmailAction {
+                            to: vec![
+                                "dev@retrack.dev".to_string(),
+                                "dev-2@retrack.dev".to_string(),
+                            ],
+                            formatter: None,
+                        }),
+                        TrackerAction::Webhook(WebhookAction {
+                            url: "https://retrack.dev".parse()?,
+                            method: None,
+                            headers: Some(HeaderMap::from_iter([(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static("text/plain"),
+                            )])),
+                            formatter: None,
+                        }),
+                    ])
+                    .build(),
+            )
+            .await?;
+
+        let server_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(400)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&WebScraperErrorResponse {
+                    message: "Uh oh".to_string(),
+                });
+        });
+
+        let scheduled_before_or_at = OffsetDateTime::now_utc()
+            .checked_add(time::Duration::days(1))
+            .unwrap();
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        assert_debug_snapshot!(trackers.create_tracker_data_revision(tracker.id).await.unwrap_err(), @r###""Uh oh""###);
+
+        server_mock.assert();
+
+        let mut tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(tasks_ids.len(), 2);
+
+        let email_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            email_task.task_type,
+            TaskType::Email(EmailTaskType {
+                to: vec![
+                    "dev@retrack.dev".to_string(),
+                    "dev-2@retrack.dev".to_string(),
+                ],
+                content: EmailContent::Template(EmailTemplate::TrackerCheckResult {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: Err("Uh oh".to_string()),
+                }),
+            })
+        );
+        assert_eq!(
+            email_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:email".to_string()
+            ]
+        );
+
+        let http_task = api.db.get_task(tasks_ids.remove(0)?).await?.unwrap();
+        assert_eq!(
+            http_task.task_type,
+            TaskType::Http(HttpTaskType {
+                url: "https://retrack.dev".parse()?,
+                method: Method::POST,
+                headers: Some(HeaderMap::from_iter([(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain"),
+                )])),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name,
+                    result: WebhookActionPayloadResult::Failure("Uh oh".to_string()),
+                })?),
+            })
+        );
+        assert_eq!(
+            http_task.tags,
+            vec![
+                "tag".to_string(),
+                format!("@retrack:tracker:id:{}", tracker.id),
+                "@retrack:task:type:http".to_string()
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn dont_execute_tracker_actions_in_fail_scenarios_if_retries_left(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_config(TrackerConfig {
+                        job: Some(SchedulerJobConfig {
+                            schedule: "0 0 * * * *".to_string(),
+                            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                                interval: Duration::from_secs(60),
+                                max_attempts: 1,
+                            }),
+                        }),
+                        ..Default::default()
+                    })
+                    .with_tags(vec!["tag".to_string()])
+                    .with_actions(vec![
+                        TrackerAction::Email(EmailAction {
+                            to: vec![
+                                "dev@retrack.dev".to_string(),
+                                "dev-2@retrack.dev".to_string(),
+                            ],
+                            formatter: None,
+                        }),
+                        TrackerAction::Webhook(WebhookAction {
+                            url: "https://retrack.dev".parse()?,
+                            method: None,
+                            headers: Some(HeaderMap::from_iter([(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static("text/plain"),
+                            )])),
+                            formatter: None,
+                        }),
+                    ])
+                    .build(),
+            )
+            .await?;
+
+        let server_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(400)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&WebScraperErrorResponse {
+                    message: "Uh oh".to_string(),
+                });
+        });
+
+        let scheduled_before_or_at = OffsetDateTime::now_utc()
+            .checked_add(time::Duration::days(1))
+            .unwrap();
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
+
+        assert_debug_snapshot!(trackers.create_tracker_data_revision_with_retry(tracker.id, Some(0)).await.unwrap_err(), @r###""Uh oh""###);
+
+        server_mock.assert();
+
+        let tasks_ids = api
+            .db
+            .get_tasks_ids(scheduled_before_or_at, 2)
+            .collect::<Vec<_>>()
+            .await;
+        assert!(tasks_ids.is_empty());
 
         Ok(())
     }
@@ -4626,9 +4873,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_1\"")),
+                })?),
             })
         );
         assert_eq!(
@@ -4744,9 +4993,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name,
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_2\"")),
+                })?),
             })
         );
         assert_eq!(
@@ -4838,9 +5089,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_1\"", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_1\"")),
+                })?),
             })
         );
         assert_eq!(
@@ -4931,9 +5184,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_2\"", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name,
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_2\"")),
+                })?),
             })
         );
         assert_eq!(
@@ -5061,9 +5316,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_1\"_webhook$", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name.clone(),
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_1\"_webhook$")),
+                })?),
             })
         );
         assert_eq!(
@@ -5170,9 +5427,11 @@ mod tests {
                     CONTENT_TYPE,
                     HeaderValue::from_static("text/plain"),
                 )])),
-                body: Some(serde_json::to_vec(
-                    &json!({ "payload": "\"rev_2\"_webhook$", "revision": tracker_data[0] })
-                )?),
+                body: Some(serde_json::to_vec(&WebhookActionPayload {
+                    tracker_id: tracker.id,
+                    tracker_name: tracker.name,
+                    result: WebhookActionPayloadResult::Success(json!("\"rev_2\"_webhook$")),
+                })?),
             })
         );
 

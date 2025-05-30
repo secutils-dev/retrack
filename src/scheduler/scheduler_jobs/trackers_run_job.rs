@@ -252,7 +252,10 @@ impl TrackersRunJob {
 
         // Try to create a new revision. If a revision is returned, that means that the tracker
         // detected changes.
-        match trackers.create_tracker_data_revision(tracker.id).await {
+        match trackers
+            .create_tracker_data_revision_with_retry(tracker.id, Some(job_meta.retry_attempt))
+            .await
+        {
             Ok(new_revision) => {
                 debug!(
                     tracker.id = %tracker.id,
@@ -264,7 +267,7 @@ impl TrackersRunJob {
                 );
 
                 // If it was a retry attempt, remove the job to let scheduler reschedule it using
-                // latest tracker schedule. Otherwise, just mark the job as not running.
+                // the latest tracker schedule. Otherwise, just mark the job as not running.
                 if job_meta.retry_attempt > 0 {
                     trackers.clear_tracker_job(tracker.id).await?;
                     job_scheduler.remove(&job_id).await?;
@@ -296,7 +299,7 @@ impl TrackersRunJob {
                         );
 
                         // Remove the job and update the tracker to remove the job reference to
-                        // allow scheduling job to re-schedule tracker and report the error.
+                        // allow the scheduling job to re-schedule tracker and report the error.
                         trackers.clear_tracker_job(tracker.id).await?;
                         job_scheduler.remove(&job_id).await?;
                         Self::report_error(&api, tracker, err).await;
@@ -1386,7 +1389,7 @@ mod tests {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name,
                     result: Err(
-                        "Failed to execute API target request (0): Uh oh (failed-job)!".to_string()
+                        "Failed to execute the API request (0): 400 Bad Request Uh oh (failed-job)!".to_string()
                     )
                 })
             })
@@ -1531,7 +1534,7 @@ mod tests {
                     tracker_id: tracker.id,
                     tracker_name: tracker.name,
                     result: Err(
-                        "Failed to execute API target request (0): Uh oh (failed retry)!"
+                        "Failed to execute the API request (0): 400 Bad Request Uh oh (failed retry)!"
                             .to_string()
                     )
                 })

@@ -220,6 +220,46 @@ Accept: application/json
   "tags": ["app:test"]
 }
 
+### Create tracker (target: api, with configurator)
+< {%
+  const configurator = `
+    (() => {
+      global.test = 2;
+    })();
+  `;
+  const extractor = `
+    (() => {
+    })();
+  `;
+  const formatter = `
+    (() => {
+      if (context.action === 'email') {
+        return { content: 'For email the new divisor is ' + context.newContent.value + ', old was ' + (context.previousContent?.value ?? '-') };
+      }
+      return { content: 'New divisor is ' + context.newContent.value + ', old was ' + (context.previousContent?.value ?? '-') };
+    })();
+  `;
+  request.variables.set("configurator", configurator.replaceAll('\n', '').trim());
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim());
+  request.variables.set("formatter", formatter.replaceAll('\n', '').trim());
+%}
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[Test] Counter (api, configurator)",
+  "target": {
+    "type": "api",
+    "requests": [{ "url": "https://retrack.dev" }],
+    "configurator": "{{configurator}}",
+    "extractor": "{{extractor}}"
+  },
+  "actions": [{ "type": "log" }],
+  "config": { "revisions": 10 },
+  "tags": ["app:test"]
+}
+
 ### Disable tracker
 PUT {{host}}/api/trackers/{{tracker}}
 Content-Type: application/json

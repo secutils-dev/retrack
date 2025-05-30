@@ -1,19 +1,19 @@
 use crate::scheduler::SchedulerJob;
 use serde::{Deserialize, Serialize};
 
-/// Application specific metadata of the scheduler job.
+/// Application-specific metadata of the scheduler job.
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct SchedulerJobMetadata {
     /// The type of the job.
     pub job_type: SchedulerJob,
     /// Indicates whether the job is currently running.
     pub is_running: bool,
-    /// If job is being re-tried, contains current retry attempt.
+    /// If the job is being re-tried, contains the current retry attempt.
     pub retry_attempt: u32,
 }
 
 impl SchedulerJobMetadata {
-    /// Creates a new job state without retry state.
+    /// Creates a new job state without a retry state.
     pub fn new(job_type: SchedulerJob) -> Self {
         Self {
             job_type,

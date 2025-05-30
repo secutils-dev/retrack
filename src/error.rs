@@ -6,7 +6,7 @@ use std::fmt::{Debug, Display, Formatter};
 
 pub use error_kind::ErrorKind;
 
-/// Application specific error type.
+/// Application-specific error type.
 #[derive(thiserror::Error)]
 pub struct Error {
     pub root_cause: anyhow::Error,

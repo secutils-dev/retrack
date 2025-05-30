@@ -13,7 +13,7 @@ pub use self::{
     tracker::Tracker,
     tracker_action::{
         EmailAction, FormatterScriptArgs, FormatterScriptResult, ServerLogAction, TrackerAction,
-        WebhookAction,
+        WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
     },
     tracker_config::TrackerConfig,
     tracker_create_params::TrackerCreateParams,
