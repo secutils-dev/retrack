@@ -1,4 +1,4 @@
-use crate::trackers::ConfiguratorScriptRequest;
+use crate::trackers::{ConfiguratorScriptRequest, TargetResponse};
 use serde::Deserialize;
 
 /// Result of the "configurator" script execution.
@@ -7,19 +7,15 @@ use serde::Deserialize;
 pub enum ConfiguratorScriptResult {
     /// Configurator script modifications for the request.
     Requests(Vec<ConfiguratorScriptRequest>),
-    /// Configurator script modifications for the response. If body is provided, the actual request
-    /// is not sent and the response is returned immediately.
-    Response {
-        /// HTTP body that should be treated as response body.
-        #[serde(with = "serde_bytes")]
-        body: Vec<u8>,
-    },
+    /// Configurator script modifications for the response. If responses are provided, the actual
+    /// requests aren't sent and the responses are returned immediately.
+    Responses(Vec<TargetResponse>),
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::{ConfiguratorScriptRequest, ConfiguratorScriptResult};
-    use http::{HeaderValue, header::CONTENT_TYPE};
+    use crate::trackers::{ConfiguratorScriptRequest, ConfiguratorScriptResult, TargetResponse};
+    use http::{HeaderValue, StatusCode, header::CONTENT_TYPE};
     use insta::assert_debug_snapshot;
 
     #[test]
@@ -33,7 +29,8 @@ mod tests {
         "body": [1, 2 ,3],
         "headers": {
             "Content-Type": "text/plain"
-        }
+        },
+        "acceptStatuses": [200]
     }]
 }
           "#
@@ -48,6 +45,7 @@ mod tests {
                 ),
                 media_type: None,
                 body: Some(vec![1, 2, 3]),
+                accept_statuses: Some([StatusCode::OK].into_iter().collect()),
             }])
         );
 
@@ -55,15 +53,23 @@ mod tests {
             serde_json::from_str::<ConfiguratorScriptResult>(
                 r#"
 {
-    "response": {
+    "responses": [{
+        "status": 200,
+        "headers": {
+            "Content-Type": "text/plain"
+        },
         "body": [1, 2 ,3]
-    }
+    }]
 }
           "#
             )?,
-            ConfiguratorScriptResult::Response {
+            ConfiguratorScriptResult::Responses(vec![TargetResponse {
+                status: StatusCode::OK,
+                headers: vec![(CONTENT_TYPE, HeaderValue::from_static("text/plain"))]
+                    .into_iter()
+                    .collect(),
                 body: vec![1, 2, 3],
-            }
+            }])
         );
 
         assert_eq!(
@@ -80,9 +86,13 @@ mod tests {
             "Content-Type": "text/plain"
         }
     }],
-    "response": {
+    "responses": [{
+        "status": 200,
+        "headers": {
+            "Content-Type": "text/plain"
+        },
         "body": [1, 2 ,3]
-    }
+    }]
 }
           "#
             ).unwrap_err(), @r###"Error("expected value", line: 8, column: 6)"###);

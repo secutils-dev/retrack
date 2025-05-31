@@ -22,7 +22,8 @@ pub use self::{
     tracker_list_revisions_params::TrackerListRevisionsParams,
     tracker_target::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
-        ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest, TrackerTarget,
+        ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest, TargetResponse,
+        TrackerTarget,
     },
     tracker_update_params::TrackerUpdateParams,
     trackers_list_params::TrackersListParams,

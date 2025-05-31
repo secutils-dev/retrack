@@ -1,8 +1,8 @@
-use crate::trackers::TrackerDataValue;
+use crate::trackers::{TargetResponse, TrackerDataValue};
 use serde::Serialize;
 use serde_with::skip_serializing_none;
 
-/// Context available to the "extractor" scripts through global `context` variable.
+/// Context available to the "extractor" scripts through the global `context` variable.
 #[skip_serializing_none]
 #[derive(Serialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -15,13 +15,15 @@ pub struct ExtractorScriptArgs {
 
     /// Optional HTTP body returned from the API.
     #[serde(default)]
-    pub responses: Option<Vec<Vec<u8>>>,
+    pub responses: Option<Vec<TargetResponse>>,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::{ExtractorScriptArgs, TrackerDataValue};
+    use crate::trackers::{ExtractorScriptArgs, TargetResponse, TrackerDataValue};
+    use http::{StatusCode, header::CONTENT_TYPE};
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn serialization() -> anyhow::Result<()> {
@@ -43,12 +45,23 @@ mod tests {
         let context = ExtractorScriptArgs {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             previous_content: Some(previous_content),
-            responses: Some(vec![serde_json::to_vec(&body)?]),
+            responses: Some(vec![TargetResponse {
+                status: StatusCode::OK,
+                headers: (&[(CONTENT_TYPE, "application/json".to_string())]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>())
+                    .try_into()?,
+                body: serde_json::to_vec(&body)?,
+            }]),
         };
         let context_json = json!({
             "tags": ["tag1", "tag2"],
             "previousContent": { "original": { "key": "value" } },
-            "responses": [[123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125]],
+            "responses": [{
+                "status": 200,
+                "headers": { "content-type": "application/json" },
+                "body": [123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125]
+            }],
         });
         assert_eq!(serde_json::to_value(&context)?, context_json);
 

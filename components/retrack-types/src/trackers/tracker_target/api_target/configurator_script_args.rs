@@ -46,6 +46,7 @@ mod tests {
                 headers: None,
                 media_type: None,
                 body: Some(serde_json::to_vec(&json!({ "body": "value" }))?),
+                accept_statuses: None,
             }],
         };
         let context_json = json!({

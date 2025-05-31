@@ -4,7 +4,7 @@ mod page_target;
 pub use self::{
     api_target::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
-        ExtractorScriptArgs, ExtractorScriptResult, TargetRequest,
+        ExtractorScriptArgs, ExtractorScriptResult, TargetRequest, TargetResponse,
     },
     page_target::PageTarget,
 };

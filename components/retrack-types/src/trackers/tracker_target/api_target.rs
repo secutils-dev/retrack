@@ -8,13 +8,14 @@ mod configurator_script_result;
 mod extractor_script_args;
 mod extractor_script_result;
 mod target_request;
+mod target_response;
 
 pub use self::{
     configurator_script_args::ConfiguratorScriptArgs,
     configurator_script_request::ConfiguratorScriptRequest,
     configurator_script_result::ConfiguratorScriptResult,
     extractor_script_args::ExtractorScriptArgs, extractor_script_result::ExtractorScriptResult,
-    target_request::TargetRequest,
+    target_request::TargetRequest, target_response::TargetResponse,
 };
 
 /// Tracker's target for HTTP API.
@@ -36,7 +37,7 @@ pub struct ApiTarget {
 mod tests {
     use crate::trackers::{ApiTarget, TargetRequest};
     use http::{
-        Method,
+        Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
     };
     use serde_json::json;
@@ -146,6 +147,7 @@ mod tests {
                 ),
                 body: Some(json!({ "key": "value" })),
                 media_type: Some("text/plain; charset=UTF-8".parse()?),
+                accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
             }],
             configurator: None,
             extractor: None,
@@ -161,7 +163,8 @@ mod tests {
                 "body": {
                     "key": "value"
                 },
-                "mediaType": "text/plain; charset=UTF-8"
+                "mediaType": "text/plain; charset=UTF-8",
+                "acceptStatuses": [403]
             }]
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -182,6 +185,7 @@ mod tests {
                 ),
                 body: Some(json!({ "key": "value" })),
                 media_type: Some("text/plain; charset=UTF-8".parse()?),
+                accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
             }],
             configurator: Some(
                 "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
@@ -200,7 +204,8 @@ mod tests {
                 "body": {
                     "key": "value"
                 },
-                "mediaType": "text/plain; charset=UTF-8"
+                "mediaType": "text/plain; charset=UTF-8",
+                "acceptStatuses": [403]
             }],
             "configurator": "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
         });
@@ -222,6 +227,7 @@ mod tests {
                 ),
                 body: Some(json!({ "key": "value" })),
                 media_type: Some("text/plain; charset=UTF-8".parse()?),
+                accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
             }],
             configurator: Some(
                 "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
@@ -243,7 +249,8 @@ mod tests {
                 "body": {
                     "key": "value"
                 },
-                "mediaType": "text/plain; charset=UTF-8"
+                "mediaType": "text/plain; charset=UTF-8",
+                "acceptStatuses": [403]
             }],
             "configurator": "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();",
             "extractor": "((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"

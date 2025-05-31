@@ -1,4 +1,4 @@
-use http::{HeaderMap, HeaderName, HeaderValue, Method};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use mediatype::MediaType;
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
@@ -6,10 +6,16 @@ use retrack_types::{
         ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker, TrackerAction,
         TrackerConfig, TrackerTarget, WebhookAction,
     },
+    utils::StatusCodeLocal,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use std::{borrow::Cow, collections::HashMap, str::FromStr, time::Duration};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    time::Duration,
+};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -73,6 +79,7 @@ struct RawApiTarget<'s> {
     extractor: Option<Cow<'s, str>>,
 }
 
+#[serde_as]
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawApiTargetRequest<'s> {
     url: Cow<'s, str>,
@@ -82,6 +89,8 @@ struct RawApiTargetRequest<'s> {
     body: Option<Vec<u8>>,
     #[serde(borrow)]
     media_type: Option<MediaType<'s>>,
+    #[serde_as(as = "Option<HashSet<StatusCodeLocal>>")]
+    accept_statuses: Option<HashSet<StatusCode>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -203,6 +212,7 @@ fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<TrackerTarget> {
                             .map(|body| serde_json::from_slice(&body))
                             .transpose()?,
                         media_type: request.media_type.map(|media_type| media_type.into()),
+                        accept_statuses: request.accept_statuses,
                     })
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?,
@@ -309,6 +319,7 @@ impl TryFrom<&Tracker> for RawTracker {
                                         .media_type
                                         .as_ref()
                                         .map(|media_type| media_type.to_ref()),
+                                    accept_statuses: request.accept_statuses.clone(),
                                 })
                             })
                             .collect::<anyhow::Result<Vec<_>>>()?,
@@ -413,7 +424,7 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
 #[cfg(test)]
 mod tests {
     use super::RawTracker;
-    use http::{Method, header::CONTENT_TYPE};
+    use http::{Method, StatusCode, header::CONTENT_TYPE};
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
@@ -527,6 +538,7 @@ mod tests {
                     ),
                     body: Some(json!({ "key": "value" })),
                     media_type: Some("application/json".parse()?),
+                    accept_statuses: Some([StatusCode::OK, StatusCode::FORBIDDEN].into_iter().collect()),
                 }],
                 configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                 extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context)) })();".to_string())

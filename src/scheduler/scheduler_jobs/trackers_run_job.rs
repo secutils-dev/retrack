@@ -1445,7 +1445,7 @@ mod tests {
         let trackers = api.trackers();
         let tracker = trackers.create_tracker(create_params).await?;
 
-        // Create tracker job.
+        // Create a tracker job.
         let job_schedule = mock_schedule_in_sec(1);
         let job_id = scheduler
             .add(TrackersRunJob::create(api.clone(), &job_schedule)?)

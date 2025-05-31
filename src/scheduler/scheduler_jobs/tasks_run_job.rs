@@ -19,7 +19,7 @@ const MAX_TASKS_TO_SEND: usize = 100;
 /// The job run on a regular interval to check if there are any pending tasks that need to be run.
 pub(crate) struct TasksRunJob;
 impl TasksRunJob {
-    /// Tries to resume existing `TasksRunJob` job.
+    /// Tries to resume the existing `TasksRunJob` job.
     pub fn try_resume<DR: DnsResolver>(
         api: Arc<Api<DR>>,
         existing_job_data: RawSchedulerJobStoredData,
@@ -45,7 +45,7 @@ impl TasksRunJob {
             return Ok(None);
         }
 
-        // If the schedule has changed, remove existing job and create a new one.
+        // If the schedule has changed, remove the existing job and create a new one.
         let mut new_job = Self::create(api)?;
         Ok(if new_job.are_schedules_equal(&existing_job_data)? {
             new_job.set_raw_job_data(existing_job_data)?;
@@ -103,7 +103,7 @@ impl TasksRunJob {
             return Ok(());
         };
 
-        // The job shouldn't be already running. If not, skip it.
+        // The job shouldn't be yet running. If not, skip it.
         if job_meta.is_running {
             debug!(
                 job.id = %job_id,
@@ -323,7 +323,7 @@ mod tests {
             101
         );
 
-        // Start scheduler and wait for a few seconds, then stop it.
+        // Start the scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
 
         while api
@@ -399,10 +399,10 @@ mod tests {
                 .is_running
         );
 
-        // Start scheduler and wait for a few seconds, then stop it.
+        // Start the scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
 
-        // First, wait until job is running.
+        // First, wait until the job is running.
         let mut is_running = false;
         while !is_running {
             is_running = scheduler_api
@@ -413,7 +413,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        // Then, wait until job is stopped.
+        // Then, wait until the job is stopped.
         while is_running {
             is_running = scheduler_api
                 .get_job_meta(job_id)

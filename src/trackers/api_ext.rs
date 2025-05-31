@@ -27,9 +27,10 @@ use retrack_types::{
     trackers::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
         ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult, PageTarget,
-        ServerLogAction, Tracker, TrackerAction, TrackerCreateParams, TrackerDataRevision,
-        TrackerDataValue, TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams,
-        TrackersListParams, WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
+        ServerLogAction, TargetResponse, Tracker, TrackerAction, TrackerCreateParams,
+        TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams, TrackerTarget,
+        TrackerUpdateParams, TrackersListParams, WebhookAction, WebhookActionPayload,
+        WebhookActionPayloadResult,
     },
 };
 use serde_json::{Value as JsonValue, json};
@@ -941,7 +942,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
         // Run the configurator script, if specified, to check if there are any overrides to the
         // request parameters need to be made.
-        let (requests_override, response_body_override) =
+        let (requests_override, responses_override) =
             if let Some(ref configurator) = target.configurator {
                 // Prepare requests for the configurator script.
                 let mut configurator_requests = Vec::with_capacity(target.requests.len());
@@ -977,7 +978,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                             (Some(requests), None)
                         }
                     }
-                    Some(ConfiguratorScriptResult::Response { body }) => (None, Some(body)),
+                    Some(ConfiguratorScriptResult::Responses(responses)) => (None, Some(responses)),
                     _ => (None, None),
                 }
             } else {
@@ -985,8 +986,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             };
 
         // If the configurator overrides the response body, use it instead of making any requests.
-        let responses = if let Some(response_body_override) = response_body_override {
-            vec![response_body_override]
+        let responses = if let Some(responses_override) = responses_override {
+            responses_override
         } else {
             let client = self.http_client();
 
@@ -1021,16 +1022,23 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     request_builder
                 };
 
+                // Read response, parse, and extract data with the extractor script, if specified.
                 let api_response = client.execute(request_builder.build()?).await?;
-                if !api_response.status().is_success() {
+
+                // Check if status should be accepted.
+                let status = api_response.status();
+                let should_accept_status = request.accept_statuses.as_ref().map_or_else(
+                    || status.is_success(),
+                    |statuses| statuses.contains(&status),
+                );
+                if !should_accept_status {
                     bail!(
-                        "Failed to execute the API request ({request_index}): {} {}",
-                        api_response.status(),
+                        "Failed to execute the API request ({request_index}): {status} {}",
                         api_response.text().await?
                     );
                 }
 
-                // Read response, parse, and extract data with the extractor script, if specified.
+                let headers = api_response.headers().clone();
                 let response_bytes = api_response
                     .bytes()
                     .await
@@ -1040,15 +1048,18 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
                     tracker.tags = ?tracker.tags,
-                    "Fetched the API response ({request_index}) with {} bytes.",
-                    response_bytes.len()
+                    "Fetched the API response ({request_index}) with {} bytes ({}, {} headers).",
+                    response_bytes.len(),
+                    status,
+                    headers.len()
                 );
 
-                let media_type = request
-                    .media_type
-                    .as_ref()
-                    .map(|media_type| media_type.to_ref());
-                responses.push(
+                // Media-type-based parsing is only performed for success responses.
+                let body = if status.is_success() {
+                    let media_type = request
+                        .media_type
+                        .as_ref()
+                        .map(|media_type| media_type.to_ref());
                     (match media_type {
                         Some(ref media_type) if XlsParser::supports(media_type) => {
                             XlsParser::parse(&response_bytes).with_context(|| format!("Failed to parse the API response as XLS file ({request_index})."))?
@@ -1057,9 +1068,16 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                             CsvParser::parse(&response_bytes).with_context(|| format!("Failed to parse the API response as CSV file ({request_index})."))?
                         }
                         _ => response_bytes,
-                    })
-                    .to_vec(),
-                );
+                    }).to_vec()
+                } else {
+                    response_bytes.to_vec()
+                };
+
+                responses.push(TargetResponse {
+                    status,
+                    headers,
+                    body,
+                });
             }
 
             responses
@@ -1105,7 +1123,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             serde_json::from_slice(&response_bytes)
                 .context("Cannot deserialize tracker extractor script result")?
         } else if responses.len() == 1 {
-            serde_json::from_slice(&responses[0]).context("Cannot deserialize API response")?
+            serde_json::from_slice(&responses[0].body).context("Cannot deserialize API response")?
         } else {
             json!(&responses)
         };
@@ -1259,7 +1277,7 @@ mod tests {
     use actix_web::ResponseError;
     use bytes::Bytes;
     use futures::StreamExt;
-    use http::{HeaderMap, HeaderName, HeaderValue, Method, header::CONTENT_TYPE};
+    use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE};
     use httpmock::MockServer;
     use insta::assert_debug_snapshot;
     use retrack_types::{
@@ -1327,6 +1345,7 @@ mod tests {
                         ),
                         body: Some(json!({ "key": "value" })),
                         media_type: Some("application/json".parse()?),
+                        accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                     }],
                     configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                     extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
@@ -1913,6 +1932,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None,
@@ -1936,6 +1956,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -1973,6 +1994,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -1996,6 +2018,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: Some("".to_string()),
                     extractor: None
@@ -2019,6 +2042,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2044,6 +2068,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: Some("".to_string())
@@ -2067,6 +2092,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: Some(
@@ -2800,6 +2826,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None
@@ -2819,6 +2846,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -2838,6 +2866,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: Some("".to_string()),
                     extractor: None
@@ -2857,6 +2886,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2878,6 +2908,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: Some("".to_string())
@@ -2897,6 +2928,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: Some(
@@ -2933,6 +2965,7 @@ mod tests {
                         headers: None,
                         body: None,
                         media_type: None,
+                        accept_statuses: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -3523,6 +3556,7 @@ mod tests {
                             )])),
                             body: None,
                             media_type: Some("application/json".parse()?),
+                            accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                         }],
                         configurator: None,
                         extractor: None,
@@ -3541,6 +3575,7 @@ mod tests {
                             headers: None,
                             body: Some(json!({ "key": "value" })),
                             media_type: Some("application/json".parse()?),
+                            accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                         }],
                         configurator: Some(format!("((context) => ({{ requests: [{{ url: '{}', method: 'POST', headers: {{ 'x-custom-header': 'x-custom-value' }}, body: Deno.core.encode(JSON.stringify({{ key: `overridden-${{JSON.parse(Deno.core.decode(context.requests[0].body)).key}}` }})) }}] }}))(context);", server.url("/api/post-call"))),
                         extractor: None
@@ -3712,12 +3747,13 @@ mod tests {
                             )])),
                             body: None,
                             media_type: Some("application/json".parse()?),
+                            accept_statuses: None,
                         }],
                         configurator: None,
                         extractor: Some(
                             r#"
 ((context) => {{
-  const newBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0])));
+  const newBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body)));
   return {
     body: Deno.core.encode(
       JSON.stringify({ name: `${newBody}_modified_${JSON.stringify(context.previousContent)}`, value: 1 })
@@ -3801,6 +3837,99 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_non_success_code(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![
+                            TargetRequest {
+                                url: server.url("/api/get-call").parse()?,
+                                method: None,
+                                headers: None,
+                                body: None,
+                                media_type: Some("application/json".parse()?),
+                                accept_statuses: None,
+                            },
+                            TargetRequest {
+                                url: server.url("/api/get-call-fail").parse()?,
+                                method: None,
+                                headers: None,
+                                body: None,
+                                media_type: Some("application/json".parse()?),
+                                accept_statuses: Some(
+                                    [StatusCode::FORBIDDEN].into_iter().collect(),
+                                ),
+                            },
+                        ],
+                        configurator: None,
+                        extractor: Some(
+                            r#"
+((context) => {{
+  const successBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body)));
+  const failBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[1].body)));
+  return {
+    body: Deno.core.encode(
+      JSON.stringify({
+        success: `${successBody.result} (${context.responses[0].status}, ${context.responses[0].headers['x-response']})`,
+        failure: `${failBody.error} (${context.responses[1].status}, ${context.responses[1].headers['x-response']})`
+      })
+    )
+  };
+}})(context);"#.to_string(),
+                        ),
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let success_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .header("x-response", "x-success")
+                .json_body_obj(&json!({ "result": "Yahoo!" }));
+        });
+
+        let fail_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/api/get-call-fail");
+            then.status(403)
+                .header("Content-Type", "application/json")
+                .header("x-response", "x-failure")
+                .json_body_obj(&json!({ "error": "Uh oh" }));
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].tracker_id, tracker.id);
+        assert_eq!(
+            tracker_data[0].data,
+            TrackerDataValue::new(json!({
+                "success": "Yahoo! (200, x-success)",
+                "failure": "Uh oh (403, x-failure)"
+            }))
+        );
+
+        success_mock.assert();
+        fail_mock.assert();
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn properly_saves_api_target_revision_with_configurator_response(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -3824,17 +3953,20 @@ mod tests {
                             )])),
                             body: Some(serde_json::Value::String("rev_1".to_string())),
                             media_type: Some("application/json".parse()?),
+                            accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                         }],
                         configurator: Some(
                             r#"
 ((context) => {{
   const newBody = JSON.parse(Deno.core.decode(context.requests[0].body));
   return {
-    response: {
+    responses: [{
+      status: 200,
+      headers: {},
       body: Deno.core.encode(
         JSON.stringify({ name: `${newBody}_modified_${JSON.stringify(context.previousContent)}`, value: 1 })
       )
-    }
+    }]
   };
 }})(context);"#
                                 .to_string(),
@@ -3918,6 +4050,7 @@ mod tests {
                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                     .parse()?,
                             ),
+                            accept_statuses: None,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4031,6 +4164,7 @@ mod tests {
                             headers: None,
                             body: None,
                             media_type: Some("text/csv".parse()?),
+                            accept_statuses: None,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4115,6 +4249,7 @@ mod tests {
                                 headers: None,
                                 body: None,
                                 media_type: Some("text/csv".parse()?),
+                                accept_statuses: None,
                             },
                             TargetRequest {
                                 url: server.url("/api/json-call").parse()?,
@@ -4125,14 +4260,15 @@ mod tests {
                                 )])),
                                 body: Some(json!({ "key": "value" })),
                                 media_type: Some("application/json".parse()?),
+                                accept_statuses: None,
                             },
                         ],
                         configurator: None,
                         extractor: Some(
                             r#"
 ((context) => {{
-  const csvResponse = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0])));
-  const jsonResponse = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[1])));
+  const csvResponse = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body)));
+  const jsonResponse = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[1].body)));
   return {
     body: Deno.core.encode(
       JSON.stringify({ csv: csvResponse[0][1], json: jsonResponse.key })
@@ -4217,6 +4353,7 @@ mod tests {
                             )])),
                             body: Some(json!({ "key": "value" })),
                             media_type: Some("application/json".parse()?),
+                            accept_statuses: None,
                         }],
                         configurator: Some(server.url("/configurator.js")),
                         extractor: Some(server.url("/extractor.js")),
@@ -4254,7 +4391,7 @@ mod tests {
                 .body(
                     r#"
 ((context) => {{
-  const newBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0])));
+  const newBody = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body)));
   return {
     body: Deno.core.encode(
       JSON.stringify(`${newBody}_modified_${JSON.stringify(context.previousContent)}`)

@@ -266,12 +266,12 @@ pub mod tests {
     use super::{JsRuntime, ScriptConfig};
     use crate::config::JsRuntimeConfig;
     use deno_core::error::CoreError;
-    use http::{HeaderMap, HeaderName, HeaderValue, Method, header::CONTENT_TYPE};
+    use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use retrack_types::trackers::{
         ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
         ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
-        TrackerDataValue,
+        TargetResponse, TrackerDataValue,
     };
     use serde::{Deserialize, Serialize};
     use serde_bytes::ByteBuf;
@@ -317,7 +317,7 @@ pub mod tests {
         // Supports known scripts.
         let result = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => {{ return { requests: [{ url: "https://retrack.dev/x-url", method: "POST", mediaType: "application/json", headers: { "x-key": "x-value" }, body: Deno.core.encode(JSON.stringify({ ...context, requests: [{...context.requests[0], body: JSON.parse(Deno.core.decode(context.requests[0].body))}] })) }] }; } })();"#,
+                r#"(() => {{ return { requests: [{ url: "https://retrack.dev/x-url", method: "POST", mediaType: "application/json", headers: { "x-key": "x-value" }, acceptStatuses: [404], body: Deno.core.encode(JSON.stringify({ ...context, requests: [{...context.requests[0], body: JSON.parse(Deno.core.decode(context.requests[0].body))}] })) }] }; } })();"#,
                 ConfiguratorScriptArgs {
                     tags: vec!["tag1".to_string(), "tag2".to_string()],
                     previous_content: Some(TrackerDataValue::new(json!({ "key": "content" }))),
@@ -334,6 +334,7 @@ pub mod tests {
                         ),
                         body: Some(serde_json::to_vec(&json!({ "key": "body" }))?),
                         media_type: Some("text/plain; charset=UTF-8".parse()?),
+                        accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                     }],
                 },
                 config,
@@ -352,9 +353,10 @@ pub mod tests {
                 body: Some(serde_json::to_vec(&json!({
                     "tags": ["tag1", "tag2"],
                     "previousContent": { "original": { "key": "content" } },
-                    "requests": [{ "url": "https://retrack.dev/", "method": "PUT", "headers": { "content-type": "application/json" }, "mediaType": "text/plain; charset=UTF-8", "body": { "key": "body" } }]
+                    "requests": [{ "url": "https://retrack.dev/", "method": "PUT", "headers": { "content-type": "application/json" }, "mediaType": "text/plain; charset=UTF-8", "body": { "key": "body" }, "acceptStatuses": [200] }]
                 }))?),
                 media_type: Some("application/json".parse()?),
+                accept_statuses: Some([StatusCode::NOT_FOUND].into_iter().collect()),
             }])
         );
 
@@ -422,9 +424,18 @@ pub mod tests {
         // Supports extractor scripts.
         let ExtractorScriptResult { body, ..} = js_runtime
             .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
-                r#"(() => {{ return { body: Deno.core.encode(Deno.core.decode(new Uint8Array(context.responses[0]))) }; }})();"#,
+                r#"(() => {{ return { body: Deno.core.encode(JSON.stringify({ status: context.responses[0].status, headers: context.responses[0].headers, body: JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body))) })) }; }})();"#,
                 ExtractorScriptArgs {
-                    responses: Some(vec![serde_json::to_vec(&json!({ "key": "value" }))?]),
+                    responses: Some(vec![TargetResponse {
+                        status: StatusCode::OK,
+                        headers: (&[
+                            (CONTENT_TYPE, "application/json".to_string())
+                        ]
+                        .into_iter()
+                        .collect::<HashMap<_, _>>())
+                        .try_into()?,
+                        body: serde_json::to_vec(&json!({ "key": "value" }))?,
+                    }]),
                     ..Default::default()
                 },
                 config,
@@ -433,7 +444,11 @@ pub mod tests {
             .unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&body.unwrap())?,
-            json!({ "key": "value" })
+            json!({
+                "status": 200,
+                "headers": { "content-type": "application/json" },
+                "body": { "key": "value" }
+            })
         );
 
         // Supports configurator (overrides request) scripts.
@@ -456,6 +471,7 @@ pub mod tests {
                     headers: None,
                     media_type: None,
                     body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
+                    accept_statuses: None,
                 },
                 ConfiguratorScriptRequest {
                     url: "https://retrack.dev/two".parse()?,
@@ -463,14 +479,15 @@ pub mod tests {
                     headers: None,
                     media_type: None,
                     body: Some(serde_json::to_vec(&json!({ "key": "value_2" }))?),
+                    accept_statuses: None,
                 }
             ]
         );
 
         // Supports configurator (overrides response) scripts.
-        let ConfiguratorScriptResult::Response { body, ..} = js_runtime
+        let ConfiguratorScriptResult::Responses(responses) = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => {{ return { response: { body: Deno.core.encode(JSON.stringify({ key: "value" })) } }; }})();"#,
+                r#"(() => {{ return { responses: [{ status: 200, headers: {}, body: Deno.core.encode(JSON.stringify({ key: "value" })) }] }; }})();"#,
                 ConfiguratorScriptArgs::default(),
                 config,
             )
@@ -479,7 +496,7 @@ pub mod tests {
             panic!("Expected ConfiguratorScriptResult::Response");
         };
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&body)?,
+            serde_json::from_slice::<serde_json::Value>(&responses[0].body)?,
             json!({ "key": "value" })
         );
 
@@ -562,7 +579,7 @@ pub mod tests {
             max_execution_time: std::time::Duration::from_secs(5),
         };
 
-        let ConfiguratorScriptResult::Response { body, .. } = js_runtime
+        let ConfiguratorScriptResult::Responses(responses) = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
                 r#"(() => {{
                     function collectMembers(prefix = '', obj, depth = Infinity) {
@@ -590,7 +607,7 @@ pub mod tests {
                     ];
                     members.sort();
 
-                    return { response: { body: Deno.core.encode(JSON.stringify(members)) } };
+                    return { responses: [{ status: 200, headers: {}, body: Deno.core.encode(JSON.stringify(members)) }] };
                  }})();"#,
                 ConfiguratorScriptArgs::default(),
                 config,
@@ -601,7 +618,7 @@ pub mod tests {
             panic!("Expected ConfiguratorScriptResult::Response");
         };
 
-        assert_json_snapshot!(serde_json::from_slice::<serde_json::Value>(&body)?, @r###"
+        assert_json_snapshot!(serde_json::from_slice::<serde_json::Value>(&responses[0].body)?, @r###"
         [
           "AggregateError()",
           "Array()",
