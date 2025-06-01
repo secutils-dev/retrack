@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 use time::OffsetDateTime;
+use tracing::warn;
 use uuid::Uuid;
 
 /// The type used to serialize and deserialize tracker database representation. There are a number
@@ -115,23 +116,49 @@ impl TryFrom<RawTracker> for Tracker {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTracker) -> Result<Self, Self::Error> {
-        let raw_config = postcard::from_bytes::<RawTrackerConfig>(&raw.config)?;
+        let (config, target, actions) = match postcard::from_bytes::<RawTrackerConfig>(&raw.config)
+        {
+            Ok(raw_config) => (
+                TrackerConfig {
+                    revisions: raw_config.revisions,
+                    timeout: raw_config.timeout,
+                    job: parse_raw_scheduler_job_config(raw_config.job),
+                },
+                parse_raw_target(raw_config.target)?,
+                raw_config
+                    .actions
+                    .into_iter()
+                    .map(|action| action.try_into())
+                    .collect::<anyhow::Result<_>>()?,
+            ),
+            Err(err) => {
+                warn!("Failed to parse tracker config, parsing V1: {err}");
+                let raw_config =
+                    postcard::from_bytes::<v1::RawTrackerConfig>(&raw.config).map_err(|_| err)?;
+                (
+                    TrackerConfig {
+                        revisions: raw_config.revisions,
+                        timeout: raw_config.timeout,
+                        job: parse_raw_scheduler_job_config(raw_config.job),
+                    },
+                    v1::parse_raw_target(raw_config.target)?,
+                    raw_config
+                        .actions
+                        .into_iter()
+                        .map(|action| action.try_into())
+                        .collect::<anyhow::Result<_>>()?,
+                )
+            }
+        };
+
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
             enabled: raw.enabled,
-            target: parse_raw_target(raw_config.target)?,
-            actions: raw_config
-                .actions
-                .into_iter()
-                .map(|action| action.try_into())
-                .collect::<anyhow::Result<_>>()?,
+            target,
+            actions,
             job_id: raw.job_id,
-            config: TrackerConfig {
-                revisions: raw_config.revisions,
-                timeout: raw_config.timeout,
-                job: parse_raw_scheduler_job_config(raw_config.job),
-            },
+            config,
             tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
@@ -180,46 +207,54 @@ fn parse_raw_scheduler_job_config(
 
 fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<TrackerTarget> {
     Ok(match raw {
-        RawTrackerTarget::Page(target) => TrackerTarget::Page(PageTarget {
-            extractor: target.extractor.into_owned(),
-            params: target
-                .extractor_params
-                .map(|body| serde_json::from_slice(&body))
-                .transpose()?,
-            user_agent: target.user_agent.map(Cow::into_owned),
-            ignore_https_errors: target.ignore_https_errors.unwrap_or_default(),
-        }),
-        RawTrackerTarget::Api(target) => TrackerTarget::Api(ApiTarget {
-            requests: target
-                .requests
-                .into_iter()
-                .map(|request| {
-                    Ok(TargetRequest {
-                        url: request.url.into_owned().parse()?,
-                        method: request.method,
-                        headers: if let Some(headers) = request.headers {
-                            let mut header_map = HeaderMap::new();
-                            for (k, v) in headers {
-                                header_map
-                                    .insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
-                            }
-                            Some(header_map)
-                        } else {
-                            None
-                        },
-                        body: request
-                            .body
-                            .map(|body| serde_json::from_slice(&body))
-                            .transpose()?,
-                        media_type: request.media_type.map(|media_type| media_type.into()),
-                        accept_statuses: request.accept_statuses,
-                    })
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?,
-            configurator: target.configurator.map(Cow::into_owned),
-            extractor: target.extractor.map(Cow::into_owned),
-        }),
+        RawTrackerTarget::Page(target) => parse_raw_page_target(target)?,
+        RawTrackerTarget::Api(target) => parse_raw_api_target(target)?,
     })
+}
+
+fn parse_raw_page_target(raw: RawPageTarget) -> anyhow::Result<TrackerTarget> {
+    Ok(TrackerTarget::Page(PageTarget {
+        extractor: raw.extractor.into_owned(),
+        params: raw
+            .extractor_params
+            .map(|body| serde_json::from_slice(&body))
+            .transpose()?,
+        user_agent: raw.user_agent.map(Cow::into_owned),
+        ignore_https_errors: raw.ignore_https_errors.unwrap_or_default(),
+    }))
+}
+
+fn parse_raw_api_target(raw: RawApiTarget) -> anyhow::Result<TrackerTarget> {
+    Ok(TrackerTarget::Api(ApiTarget {
+        requests: raw
+            .requests
+            .into_iter()
+            .map(|request| {
+                Ok(TargetRequest {
+                    url: request.url.into_owned().parse()?,
+                    method: request.method,
+                    headers: if let Some(headers) = request.headers {
+                        let mut header_map = HeaderMap::new();
+                        for (k, v) in headers {
+                            header_map
+                                .insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
+                        }
+                        Some(header_map)
+                    } else {
+                        None
+                    },
+                    body: request
+                        .body
+                        .map(|body| serde_json::from_slice(&body))
+                        .transpose()?,
+                    media_type: request.media_type.map(|media_type| media_type.into()),
+                    accept_statuses: request.accept_statuses,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+        configurator: raw.configurator.map(Cow::into_owned),
+        extractor: raw.extractor.map(Cow::into_owned),
+    }))
 }
 
 impl TryFrom<&Tracker> for RawTracker {
@@ -418,6 +453,92 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
                 })
             }
         })
+    }
+}
+
+mod v1 {
+    use crate::trackers::database_ext::raw_tracker as v_latest;
+    use http::{HeaderMap, HeaderName, HeaderValue, Method};
+    use mediatype::MediaType;
+    use serde::{Deserialize, Serialize};
+    use serde_with::serde_as;
+    use std::{borrow::Cow, collections::HashMap, str::FromStr, time::Duration};
+
+    pub fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<v_latest::TrackerTarget> {
+        Ok(match raw {
+            RawTrackerTarget::Page(target) => v_latest::parse_raw_page_target(target)?,
+            RawTrackerTarget::Api(target) => parse_raw_api_target(target)?,
+        })
+    }
+
+    fn parse_raw_api_target(raw: RawApiTarget) -> anyhow::Result<v_latest::TrackerTarget> {
+        Ok(v_latest::TrackerTarget::Api(v_latest::ApiTarget {
+            requests: raw
+                .requests
+                .into_iter()
+                .map(|request| {
+                    Ok(v_latest::TargetRequest {
+                        url: request.url.into_owned().parse()?,
+                        method: request.method,
+                        headers: if let Some(headers) = request.headers {
+                            let mut header_map = HeaderMap::new();
+                            for (k, v) in headers {
+                                header_map
+                                    .insert(HeaderName::from_str(&k)?, HeaderValue::from_str(&v)?);
+                            }
+                            Some(header_map)
+                        } else {
+                            None
+                        },
+                        body: request
+                            .body
+                            .map(|body| serde_json::from_slice(&body))
+                            .transpose()?,
+                        media_type: request.media_type.map(|media_type| media_type.into()),
+                        accept_statuses: None,
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?,
+            configurator: raw.configurator.map(Cow::into_owned),
+            extractor: raw.extractor.map(Cow::into_owned),
+        }))
+    }
+
+    #[serde_as]
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawTrackerConfig<'s> {
+        pub revisions: usize,
+        pub timeout: Option<Duration>,
+        #[serde(borrow)]
+        pub target: RawTrackerTarget<'s>,
+        pub actions: Vec<v_latest::RawTrackerAction<'s>>,
+        pub job: Option<v_latest::RawSchedulerJobConfig<'s>>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub enum RawTrackerTarget<'s> {
+        Page(v_latest::RawPageTarget<'s>),
+        #[serde(borrow)]
+        Api(RawApiTarget<'s>),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawApiTarget<'s> {
+        #[serde(borrow)]
+        requests: Vec<RawApiTargetRequest<'s>>,
+        configurator: Option<Cow<'s, str>>,
+        extractor: Option<Cow<'s, str>>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawApiTargetRequest<'s> {
+        url: Cow<'s, str>,
+        #[serde(with = "http_serde::option::method", default)]
+        method: Option<Method>,
+        headers: Option<HashMap<Cow<'s, str>, Cow<'s, str>>>,
+        body: Option<Vec<u8>>,
+        #[serde(borrow)]
+        media_type: Option<MediaType<'s>>,
     }
 }
 
