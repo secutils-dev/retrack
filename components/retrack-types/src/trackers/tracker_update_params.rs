@@ -31,8 +31,8 @@ mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            PageTarget, TrackerAction, TrackerConfig, TrackerTarget, TrackerUpdateParams,
-            WebhookAction,
+            ExtractorEngine, PageTarget, TrackerAction, TrackerConfig, TrackerTarget,
+            TrackerUpdateParams, WebhookAction,
         },
     };
     use serde_json::json;
@@ -76,6 +76,7 @@ mod tests {
             target: Some(TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                 params: Some(json!({ "param": "value" })),
+                engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 ignore_https_errors: true,
             })),
@@ -90,6 +91,7 @@ mod tests {
                     "type": "page",
                     "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
                     "params": { "param": "value" },
+                    "engine": { "type": "chromium" },
                     "userAgent": "Retrack/1.0.0",
                     "ignoreHTTPSErrors": true
                 }
@@ -124,6 +126,7 @@ mod tests {
             target: Some(TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                 params: Some(json!({ "param": "value" })),
+                engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 ignore_https_errors: true,
             })),
@@ -152,6 +155,7 @@ mod tests {
                     "type": "page",
                     "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
                     "params": { "param": "value" },
+                    "engine": { "type": "chromium" },
                     "userAgent": "Retrack/1.0.0",
                     "ignoreHTTPSErrors": true
                 },
@@ -179,6 +183,7 @@ mod tests {
             target: Some(TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                 params: Some(json!({ "param": "value" })),
+                engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 ignore_https_errors: true,
             })),
@@ -212,6 +217,7 @@ mod tests {
                     "type": "page",
                     "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
                     "params": { "param": "value" },
+                    "engine": { "type": "chromium" },
                     "userAgent": "Retrack/1.0.0",
                     "ignoreHTTPSErrors": true
                 },
@@ -283,6 +289,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "params": { "param": "value" },
+            "engine": { "type": "chromium" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         }
@@ -295,6 +302,7 @@ mod tests {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     params: Some(json!({ "param": "value" })),
+                    engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 })),
@@ -338,6 +346,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "params": { "param": "value" },
+            "engine": { "type": "chromium" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         },
@@ -364,7 +373,8 @@ mod tests {
                 enabled: Some(false),
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
-                    params: Some(serde_json::json!({ "param": "value" })),
+                    params: Some(json!({ "param": "value" })),
+                    engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 })),
@@ -396,6 +406,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "params": { "param": "value" },
+            "engine": { "type": "chromium" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         },
@@ -424,6 +435,7 @@ mod tests {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     params: Some(json!({ "param": "value" })),
+                    engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 })),

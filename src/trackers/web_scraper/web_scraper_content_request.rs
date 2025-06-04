@@ -16,6 +16,9 @@ pub struct WebScraperContentRequest<'a> {
     /// Optional parameters to pass to the extractor scripts as part of the context.
     pub extractor_params: Option<&'a JsonValue>,
 
+    /// Optionally specifies the backend that Web Scraper should use.
+    pub extractor_backend: Option<WebScraperBackend>,
+
     /// Tags associated with the tracker.
     pub tags: &'a Vec<String>,
 
@@ -29,7 +32,7 @@ pub struct WebScraperContentRequest<'a> {
     )]
     pub ignore_https_errors: bool,
 
-    /// Number of milliseconds to wait until extractor script finishes processing.
+    /// Number of milliseconds to wait until an extractor script finishes processing.
     #[serde_as(as = "Option<DurationMilliSeconds<u64>>")]
     pub timeout: Option<Duration>,
 
@@ -37,12 +40,20 @@ pub struct WebScraperContentRequest<'a> {
     pub previous_content: Option<&'a TrackerDataValue>,
 }
 
+/// Represents engines supported by the Web Scraper component.
+#[derive(Serialize, Debug, Copy, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WebScraperBackend {
+    Chromium,
+    Firefox,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::WebScraperContentRequest;
+    use super::{WebScraperBackend, WebScraperContentRequest};
     use crate::tests::MockTrackerBuilder;
     use insta::assert_json_snapshot;
-    use retrack_types::trackers::{PageTarget, TrackerDataValue, TrackerTarget};
+    use retrack_types::trackers::{ExtractorEngine, PageTarget, TrackerDataValue, TrackerTarget};
     use serde_json::json;
     use std::time::Duration;
     use uuid::uuid;
@@ -52,6 +63,7 @@ mod tests {
         assert_json_snapshot!(WebScraperContentRequest {
             extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
             extractor_params: Some(&json!({ "param": "value" })),
+            extractor_backend: Some(WebScraperBackend::Chromium),
             tags: &vec!["tag1".to_string(), "tag2".to_string()],
             timeout: Some(Duration::from_millis(100)),
             previous_content: Some(&TrackerDataValue::new(json!("some content"))),
@@ -63,6 +75,7 @@ mod tests {
           "extractorParams": {
             "param": "value"
           },
+          "extractorBackend": "chromium",
           "tags": [
             "tag1",
             "tag2"
@@ -84,6 +97,7 @@ mod tests {
         let target = PageTarget {
             extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }".to_string(),
             params: Some(json!({ "param": "value" })),
+            engine: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         };
@@ -99,9 +113,10 @@ mod tests {
 
         let request = WebScraperContentRequest::try_from(&tracker)?;
 
-        // Target properties.
+        // Target properties (default engine/backend).
         assert_eq!(request.extractor, target.extractor.as_str());
         assert_eq!(request.extractor_params, target.params.as_ref());
+        assert_eq!(request.extractor_backend, Some(WebScraperBackend::Chromium));
         assert_eq!(request.user_agent, target.user_agent.as_deref());
         assert_eq!(request.ignore_https_errors, target.ignore_https_errors);
         assert_eq!(request.tags, &tracker.tags);
@@ -110,6 +125,31 @@ mod tests {
         assert_eq!(request.timeout, Some(Duration::from_millis(2500)));
 
         assert!(request.previous_content.is_none());
+
+        // Explicit engines.
+        for (engine, expected_backend) in [
+            (ExtractorEngine::Chromium, WebScraperBackend::Chromium),
+            (ExtractorEngine::Camoufox, WebScraperBackend::Firefox),
+        ] {
+            let tracker = MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                "some-name",
+                3,
+            )?
+            .with_target(TrackerTarget::Page(PageTarget {
+                extractor: "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }".to_string(),
+                params: None,
+                engine: Some(engine),
+                user_agent: None,
+                ignore_https_errors: false,
+            }))
+            .build();
+
+            assert_eq!(
+                WebScraperContentRequest::try_from(&tracker)?.extractor_backend,
+                Some(expected_backend)
+            );
+        }
 
         Ok(())
     }

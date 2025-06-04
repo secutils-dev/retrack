@@ -8,14 +8,23 @@ import { Diagnostics } from '../diagnostics.js';
 import type { WorkerData } from './constants.js';
 import { EXTRACTOR_MODULE_PREFIX, WorkerMessageType } from './constants.js';
 
-// We need parent port to communicate the errors and result of extractor script to the main thread.
+// We need a parent port to communicate the errors and result of an extractor
+// script to the main thread.
 if (!parentPort) {
   throw new Error('This worker parent port is not available.');
 }
 
 // Load the extractor script as an ES module.
-const { endpoint, extractor, extractorParams, tags, previousContent, userAgent, ignoreHTTPSErrors, screenshotsPath } =
-  workerData as WorkerData;
+const {
+  browserConfig,
+  extractor,
+  extractorParams,
+  tags,
+  previousContent,
+  userAgent,
+  ignoreHTTPSErrors,
+  screenshotsPath,
+} = workerData as WorkerData;
 
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
 // `--frozen-intrinsics`. It DOES NOT protect against all prototype pollution vectors.
@@ -57,21 +66,24 @@ const log = {
     parentPort?.postMessage({ type: WorkerMessageType.LOG, level: 'error', message, args }),
 };
 
-const { connectToBrowser } = await import('../../utilities/browser.js');
+const { connectToBrowserServer } = await import('../../utilities/browser.js');
 
 let browser: Browser | undefined;
 try {
-  log.info(`Connecting to a browser at ${endpoint.url} (protocol: ${endpoint.protocol})…`);
-  browser = await connectToBrowser(endpoint, {
-    isEnabled: () => true,
-    // Forward browser logs to the main log sink.
-    log: (context, level, message, args) =>
-      level === 'error' ? log.error(`${context}: ${message}`, args) : log.info(`${context}: ${message}`, args),
-  });
-  log.info(`Successfully connected to a browser at ${endpoint.url} (protocol: ${endpoint.protocol}).`);
+  log.info(`Connecting to a browser at ${browserConfig.wsEndpoint} (protocol: ${browserConfig.protocol})…`);
+  browser = await connectToBrowserServer(
+    {
+      isEnabled: () => true,
+      // Forward browser logs to the main log sink.
+      log: (context, level, message, args) =>
+        level === 'error' ? log.error(`${context}: ${message}`, args) : log.info(`${context}: ${message}`, args),
+    },
+    browserConfig,
+  );
+  log.info(`Successfully connected to a browser at ${browserConfig.wsEndpoint} (protocol: ${browserConfig.protocol}).`);
 } catch (err) {
   log.error(
-    `Failed to connect to a browser at ${endpoint.url} (protocol: ${endpoint.protocol}): ${Diagnostics.errorMessage(err)}.`,
+    `Failed to connect to a browser at ${browserConfig.wsEndpoint} (protocol: ${browserConfig.protocol}): ${Diagnostics.errorMessage(err)}.`,
   );
   throw new Error('Failed to connect to a browser.');
 }
@@ -83,7 +95,7 @@ const context = await browser.newContext({ ignoreHTTPSErrors, userAgent, viewpor
 // APIs (e.g., Locator -> Page -> Context -> Browser), making it infeasible to completely prevent this. Instead,
 // extractor scripts should be closely monitored for potentially malicious behavior (see `logger`), and responsible
 // actors should be penalized accordingly. Nevertheless, it's still valuable to remove methods that aren't meant to be
-// used from the API to make this intention clearer even though this obstacle can be bypassed by the motivated enough
+// used from the API to clarify this intention even though this obstacle can be bypassed by the motivated enough
 // adversary. If it becomes a problem, it'd be easier to fork Playwright and remove the methods from the
 // source code directly.
 const browserPrototype = Object.getPrototypeOf(browser);
@@ -118,7 +130,7 @@ try {
         log.error(`Captured page screenshot for ${page.url()}: ${screenshotPath}`);
       } catch (err) {
         log.error(
-          `Failed to capture browser screenshot for ${page.url()} (protocol: ${endpoint.protocol}): ${Diagnostics.errorMessage(err)}.`,
+          `Failed to capture browser screenshot for ${page.url()} (protocol: ${browserConfig.protocol}): ${Diagnostics.errorMessage(err)}.`,
         );
       }
     }

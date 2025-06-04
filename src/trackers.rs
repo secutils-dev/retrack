@@ -11,14 +11,14 @@ pub use api_ext::TrackersApiExt;
 pub mod tests {
     pub use crate::trackers::{
         tracker_data_revisions_diff::tracker_data_revisions_diff,
-        web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
+        web_scraper::{WebScraperBackend, WebScraperContentRequest, WebScraperErrorResponse},
     };
     use anyhow::bail;
     use retrack_types::{
         scheduler::SchedulerJobConfig,
         trackers::{
-            PageTarget, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
-            TrackerDataValue, TrackerTarget,
+            ExtractorEngine, PageTarget, Tracker, TrackerAction, TrackerConfig,
+            TrackerCreateParams, TrackerDataValue, TrackerTarget,
         },
     };
     use std::time::Duration;
@@ -37,6 +37,7 @@ pub mod tests {
                     target: TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                         params: None,
+                        engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         ignore_https_errors: true,
                     }),
@@ -111,6 +112,11 @@ pub mod tests {
                 // Target properties.
                 extractor: target.extractor.as_str(),
                 extractor_params: target.params.as_ref(),
+                extractor_backend: Some(match target.engine {
+                    // Use `chromium` backend by default.
+                    Some(ExtractorEngine::Chromium) | None => WebScraperBackend::Chromium,
+                    Some(ExtractorEngine::Camoufox) => WebScraperBackend::Firefox,
+                }),
                 tags: &tracker.tags,
                 user_agent: target.user_agent.as_deref(),
                 ignore_https_errors: target.ignore_https_errors,
@@ -141,6 +147,7 @@ pub mod tests {
                     target: TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                         params: None,
+                        engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         ignore_https_errors: false,
                     }),

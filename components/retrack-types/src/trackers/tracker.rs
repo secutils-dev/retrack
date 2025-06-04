@@ -38,7 +38,7 @@ mod tests {
     use crate::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         tests::MockTrackerBuilder,
-        trackers::{PageTarget, TrackerAction, TrackerTarget, WebhookAction},
+        trackers::{ExtractorEngine, PageTarget, TrackerAction, TrackerTarget, WebhookAction},
     };
     use http::{Method, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
@@ -56,6 +56,7 @@ mod tests {
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: Some(serde_json::json!({ "param": "value" })),
+            engine: Some(ExtractorEngine::Chromium),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -68,6 +69,9 @@ mod tests {
           "target": {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "engine": {
+              "type": "chromium"
+            },
             "params": {
               "param": "value"
             },
@@ -97,6 +101,7 @@ mod tests {
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: None,
+            engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -139,6 +144,7 @@ mod tests {
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: None,
+            engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -181,6 +187,7 @@ mod tests {
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: Some(serde_json::json!("Hello, World!")),
+            engine: Some(ExtractorEngine::Camoufox),
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))
@@ -194,6 +201,9 @@ mod tests {
           "target": {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "engine": {
+              "type": "camoufox"
+            },
             "params": "Hello, World!",
             "userAgent": "Retrack/2.0.0",
             "ignoreHTTPSErrors": true
@@ -224,6 +234,7 @@ mod tests {
         .with_target(TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: None,
+            engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             ignore_https_errors: true,
         }))

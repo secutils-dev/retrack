@@ -200,11 +200,7 @@ mod tests {
             ),
             body: Some(json!({ "key": "value" })),
             media_type: Some("text/plain; charset=UTF-8".parse()?),
-            accept_statuses: Some(
-                [StatusCode::OK, StatusCode::FORBIDDEN]
-                    .into_iter()
-                    .collect(),
-            ),
+            accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
         };
         let request_json = json!({
             "url": "https://retrack.dev/",
@@ -217,7 +213,7 @@ mod tests {
                 "key": "value"
             },
             "mediaType": "text/plain; charset=UTF-8",
-            "acceptStatuses": [200, 403],
+            "acceptStatuses": [403],
         });
         assert_eq!(serde_json::to_value(&request)?, request_json);
         assert_eq!(

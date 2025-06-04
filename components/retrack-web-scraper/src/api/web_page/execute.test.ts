@@ -28,9 +28,7 @@ await test('[/api/web_page/execute] can run extractor scripts', async (t) => {
     return { type: 'undefined' };
   });
 
-  const response = await registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  ).inject({
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
@@ -64,9 +62,7 @@ export async function execute(page) {
 await test('[/api/web_page/execute] accepts context overrides', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const response = await registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  ).inject({
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
@@ -96,9 +92,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
 await test('[/api/web_page/execute] can provide context', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const mockRoute = registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  );
+  const mockRoute = registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint }));
   let response = await mockRoute.inject({
     method: 'POST',
     url: '/api/web_page/execute',
@@ -149,9 +143,7 @@ export async function execute(page, context) {
 await test('[/api/web_page/execute] allows extractor scripts to import selected modules', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const response = await registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  ).inject({
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
@@ -173,9 +165,7 @@ export async function execute(page) {
 await test('[/api/web_page/execute] prevents extractor scripts from importing restricted built-in modules', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const response = await registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  ).inject({
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
@@ -202,9 +192,7 @@ export async function execute() {
 await test('[/api/web_page/execute] prevents extractor scripts from importing restricted custom modules', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const response = await registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  ).inject({
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {
@@ -231,9 +219,7 @@ export async function execute() {
 await test('[/api/web_page/execute] protects runtime from most common prototype pollution cases', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const mockRoute = registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  );
+  const mockRoute = registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint }));
   let response = await mockRoute.inject({
     method: 'POST',
     url: '/api/web_page/execute',
@@ -310,9 +296,7 @@ export async function execute(page) {
 await test('[/api/web_page/execute] terminates extractor scripts if it takes too long to execute', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
-  const response = await registerExecuteRoutes(
-    createMock({ browserEndpoint: { protocol: 'cdp', url: browserServerMock.endpoint } }),
-  ).inject({
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
     method: 'POST',
     url: '/api/web_page/execute',
     payload: {

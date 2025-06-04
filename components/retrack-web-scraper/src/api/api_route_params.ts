@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import type { BrowserServer } from 'playwright-core';
 
-import type { Config } from '../config.js';
-import type { BrowserEndpoint } from '../utilities/browser.js';
+import type { Config, LocalBrowserConfig } from '../config.js';
 
 export interface ApiRouteParams {
   server: FastifyInstance;
   config: Config;
-  getBrowserEndpoint: (options?: { launchServer?: boolean }) => Promise<BrowserEndpoint>;
+  isLocalBrowserServerRunning: () => boolean;
+  getLocalBrowserServer: (config: LocalBrowserConfig) => Promise<BrowserServer>;
 }

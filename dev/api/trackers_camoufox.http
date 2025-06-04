@@ -1,0 +1,51 @@
+@tracker = 0197498a-a8af-7ec1-b667-4a14d4e54c03
+
+### Get tracker by ID
+GET {{host}}/api/trackers/{{tracker}}
+Accept: application/json
+
+### Create tracker (main world)
+< {%
+  const extractor = `
+    export async function execute(page) {
+      await page.goto('https://github.com');
+      await page.evaluate('window.camoufox=true;');
+      return await page.evaluate('window.camoufox');
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+POST {{host}}/api/trackers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "[Camoufox] Main World",
+  "target": { "type": "page", "extractor": "{{extractor}}", "engine": { "type":  "camoufox" } },
+  "config": { "revisions": 10 },
+  "tags": ["app:camoufox"]
+}
+
+### Update tracker (main world)
+< {%
+  const extractor = `
+    export async function execute(page) {
+      await page.goto('https://github.com');
+      await page.evaluate('window.camoufox=true;');
+      return await page.evaluate('window.camoufox');
+    };
+  `;
+  request.variables.set("extractor", extractor.replaceAll('\n', '').trim())
+%}
+PUT {{host}}/api/trackers/{{tracker}}
+Content-Type: application/json
+Accept: application/json
+
+{ "target": { "type": "page", "extractor": "{{extractor}}", "engine": { "type":  "camoufox" } } }
+
+### Create tracker revision
+POST {{host}}/api/trackers/{{tracker}}/revisions
+Accept: application/json
+
+### Delete tracker
+DELETE {{host}}/api/trackers/{{tracker}}

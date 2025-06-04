@@ -1,6 +1,10 @@
+mod extractor_engine;
+
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use utoipa::ToSchema;
+
+pub use extractor_engine::ExtractorEngine;
 
 /// Tracker's target for a web page.
 #[skip_serializing_none]
@@ -9,6 +13,10 @@ use utoipa::ToSchema;
 pub struct PageTarget {
     /// A custom script (Playwright scenario) to extract data from the page.
     pub extractor: String,
+
+    /// Defines the engine (browser) to use to extract content. By default, the web scraper with
+    /// the Chromium browser backend is used.
+    pub engine: Option<ExtractorEngine>,
 
     /// Optional parameters to pass to the scripts as part of the context.
     #[serde(default)]
@@ -28,7 +36,7 @@ pub struct PageTarget {
 
 #[cfg(test)]
 mod tests {
-    use crate::trackers::PageTarget;
+    use crate::trackers::{ExtractorEngine, PageTarget};
     use serde_json::json;
 
     #[test]
@@ -40,12 +48,14 @@ mod tests {
 
         let target = PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            engine: Some(ExtractorEngine::Camoufox),
             params: Some(json!({ "param": "value" })),
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         };
         let target_json = json!({
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "engine": { "type": "camoufox" },
             "params": { "param": "value" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true

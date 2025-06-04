@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import * as process from 'node:process';
 import { Worker } from 'node:worker_threads';
+import type { BrowserConfig, RemoteBrowserConfig } from '../../config.js';
 import type { ApiRouteParams } from '../api_route_params.js';
 import { Diagnostics } from '../diagnostics.js';
 import type { WorkerData, WorkerLogMessage, WorkerResultMessage } from './constants.js';
@@ -18,6 +19,11 @@ interface RequestBodyType {
    * used as a new web page "content".
    */
   extractor: string;
+
+  /**
+   * Specifies the backend (browser) to be used for content extraction.
+   */
+  extractorBackend?: 'chromium' | 'firefox';
 
   /**
    * Optional parameters that are passed to the extractor script.
@@ -50,7 +56,7 @@ interface RequestBodyType {
   ignoreHTTPSErrors?: boolean;
 }
 
-export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: ApiRouteParams) {
+export function registerExecuteRoutes({ config, server, getLocalBrowserServer }: ApiRouteParams) {
   return server.post<{ Body: RequestBodyType }>(
     '/api/web_page/execute',
     {
@@ -60,6 +66,7 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
           properties: {
             extractor: { type: 'string' },
             extractorParams: {},
+            extractorBackend: { type: 'string' },
             tags: { type: 'array', items: { type: 'string' } },
             previousContent: {},
             timeout: { type: 'number' },
@@ -71,19 +78,47 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
       },
     },
     async (request, reply) => {
-      const log = server.log.child({ provider: 'web_page_execute' });
-      const workerLog = log.child({ provider: 'worker' });
-
-      log.debug('Executing extractor script with the following parameters', {
+      const logger = server.log.child({ provider: 'web_page_execute' });
+      const requestedBackend = request.body.extractorBackend;
+      logger.debug('Executing extractor script with the following parameters', {
         extractorParams: request.body.extractorParams,
+        backend: requestedBackend,
         tags: request.body.tags,
         timeout: request.body.timeout,
         userAgent: request.body.userAgent,
         ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
       });
 
+      // Check if requested backend that's supported and configured.
+      let browserConfig: BrowserConfig | undefined;
+      if (requestedBackend === 'firefox') {
+        browserConfig = config.browser.firefox;
+      } else if (requestedBackend === 'chromium') {
+        browserConfig = config.browser.chromium;
+      } else if (!requestedBackend) {
+        browserConfig = config.browser.chromium ?? config.browser.firefox;
+      }
+
+      if (!browserConfig) {
+        logger.error(`The backend "${requestedBackend}" is not supported.`);
+        return reply.code(400).send({ message: `The backend "${requestedBackend}" is not supported.` });
+      }
+
+      // If a local browser is requested, launch it before spawning a worker.
+      let remoteBrowserConfig: RemoteBrowserConfig;
+      if ('executablePath' in browserConfig) {
+        remoteBrowserConfig = {
+          backend: browserConfig.backend,
+          protocol: browserConfig.protocol,
+          wsEndpoint: (await getLocalBrowserServer(browserConfig)).wsEndpoint(),
+        };
+      } else {
+        remoteBrowserConfig = browserConfig;
+      }
+
+      const workerLog = logger.child({ provider: 'worker' });
       const workerData: WorkerData = {
-        endpoint: await getBrowserEndpoint(),
+        browserConfig: remoteBrowserConfig,
         extractor: request.body.extractor,
         extractorParams: request.body.extractorParams,
         tags: request.body.tags,
@@ -145,7 +180,7 @@ export function registerExecuteRoutes({ config, server, getBrowserEndpoint }: Ap
           });
         });
       } catch (err) {
-        log.error(`Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`);
+        logger.error(`Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`);
         return reply.code(500).send({
           message: `Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`,
         });

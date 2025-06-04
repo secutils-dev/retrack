@@ -6,7 +6,7 @@ pub use self::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
         ExtractorScriptArgs, ExtractorScriptResult, TargetRequest, TargetResponse,
     },
-    page_target::PageTarget,
+    page_target::{ExtractorEngine, PageTarget},
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -26,7 +26,7 @@ pub enum TrackerTarget {
 #[cfg(test)]
 mod tests {
     use super::TrackerTarget;
-    use crate::trackers::{ApiTarget, PageTarget, TargetRequest};
+    use crate::trackers::{ApiTarget, ExtractorEngine, PageTarget, TargetRequest};
     use http::{
         Method,
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -39,6 +39,7 @@ mod tests {
         let target = TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: None,
+            engine: None,
             user_agent: None,
             ignore_https_errors: false,
         });
@@ -55,6 +56,7 @@ mod tests {
         let target = TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: Some(json!({ "param": "value" })),
+            engine: Some(ExtractorEngine::Camoufox),
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         });
@@ -62,6 +64,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "params": { "param": "value" },
+            "engine": { "type": "camoufox" },
             "userAgent": "Retrack/1.0.0",
             "ignoreHTTPSErrors": true
         });

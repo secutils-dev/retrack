@@ -1,4 +1,4 @@
-import type { BrowserEndpoint } from '../../utilities/browser.js';
+import type { RemoteBrowserConfig } from '../../config.js';
 
 /**
  * Default timeout for the extractor script, in ms.
@@ -35,11 +35,11 @@ export interface WorkerResultMessage {
 }
 
 /**
- * Represents the data that is passed to the worker thread.
+ * Represents the data passed to the worker thread.
  */
 export interface WorkerData {
-  // The browser endpoint that the worker should connect Playwright to.
-  endpoint: BrowserEndpoint;
+  // The browser config that the worker should connect Playwright to.
+  browserConfig: RemoteBrowserConfig;
   // The extractor script that the worker should execute.
   extractor: string;
   // The parameters that should be passed to the extractor script.

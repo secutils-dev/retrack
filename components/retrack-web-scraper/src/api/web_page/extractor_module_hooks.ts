@@ -6,7 +6,7 @@ const EXTRACTOR_MODULE_ALLOWLIST = new Set(['node:util', 'stream', 'stream/promi
 
 // This hook is called whenever a module is resolved, allowing you to intercept the resolution process and prevent
 // extractor scripts from importing modules. This is useful for preventing extractor scripts from accessing sensitive
-// data, e.g.,`workerData` from `worker_threads` module or `fs`.
+// data, e.g., the `workerData` from `worker_threads` module or `fs`.
 // For more details, refer to https://nodejs.org/api/module.html#resolvespecifier-context-nextresolve
 export function resolve(
   specifier: string,

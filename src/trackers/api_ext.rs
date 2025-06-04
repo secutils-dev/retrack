@@ -11,7 +11,7 @@ use crate::{
         database_ext::TrackersDatabaseExt,
         parsers::{CsvParser, XlsParser},
         tracker_data_revisions_diff::tracker_data_revisions_diff,
-        web_scraper::{WebScraperContentRequest, WebScraperErrorResponse},
+        web_scraper::{WebScraperBackend, WebScraperContentRequest, WebScraperErrorResponse},
     },
 };
 use anyhow::{Context, anyhow, bail};
@@ -25,9 +25,9 @@ use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use retrack_types::{
     scheduler::SchedulerJobRetryStrategy,
     trackers::{
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorScriptArgs,
-        ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult, PageTarget,
-        ServerLogAction, TargetResponse, Tracker, TrackerAction, TrackerCreateParams,
+        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorEngine,
+        ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
+        PageTarget, ServerLogAction, TargetResponse, Tracker, TrackerAction, TrackerCreateParams,
         TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams, TrackerTarget,
         TrackerUpdateParams, TrackersListParams, WebhookAction, WebhookActionPayload,
         WebhookActionPayloadResult,
@@ -872,7 +872,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         Ok(())
     }
 
-    /// Creates data revision for a tracker with `Page` target
+    /// Creates data revision for a tracker with a `Page` target
     async fn create_tracker_page_data_revision(
         &self,
         tracker: &Tracker,
@@ -890,6 +890,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         let scraper_request = WebScraperContentRequest {
             extractor: extractor.as_ref(),
             extractor_params: target.params.as_ref(),
+            extractor_backend: Some(match target.engine {
+                // Use `chromium` backend if engine isn't specified.
+                Some(ExtractorEngine::Chromium) | None => WebScraperBackend::Chromium,
+                Some(ExtractorEngine::Camoufox) => WebScraperBackend::Firefox,
+            }),
             tags: &tracker.tags,
             user_agent: target.user_agent.as_deref(),
             ignore_https_errors: target.ignore_https_errors,
@@ -1269,9 +1274,10 @@ mod tests {
         scheduler::SchedulerJob,
         tasks::{EmailContent, EmailTaskType, EmailTemplate, HttpTaskType, TaskType},
         tests::{
-            TrackerCreateParamsBuilder, WebScraperContentRequest, WebScraperErrorResponse,
-            load_fixture, mock_api, mock_api_with_config, mock_api_with_network, mock_config,
-            mock_network_with_records, mock_scheduler_job, mock_upsert_scheduler_job,
+            TrackerCreateParamsBuilder, WebScraperBackend, WebScraperContentRequest,
+            WebScraperErrorResponse, load_fixture, mock_api, mock_api_with_config,
+            mock_api_with_network, mock_config, mock_network_with_records, mock_scheduler_job,
+            mock_upsert_scheduler_job,
         },
     };
     use actix_web::ResponseError;
@@ -1283,8 +1289,8 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker,
-            TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
+            ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
+            Tracker, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
             TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
             WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
         },
@@ -1374,6 +1380,7 @@ mod tests {
         let target = TrackerTarget::Page(PageTarget {
             extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
             params: None,
+            engine: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
             ignore_https_errors: true,
         });
@@ -2121,6 +2128,7 @@ mod tests {
                 target: TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     params: None,
+                    engine: None,
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     ignore_https_errors: true,
                 }),
@@ -2629,6 +2637,7 @@ mod tests {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "".to_string(),
                     params: None,
+                    engine: None,
                     user_agent: None,
                     ignore_https_errors: false
                 })),
@@ -2643,6 +2652,7 @@ mod tests {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1),
                     params: None,
+                    engine: None,
                     user_agent: None,
                     ignore_https_errors: false
                 })),
@@ -2657,6 +2667,7 @@ mod tests {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     params: None,
+                    engine: None,
                     user_agent: Some("".to_string()),
                     ignore_https_errors: false,
                 })),
@@ -2671,6 +2682,7 @@ mod tests {
                 target: Some(TrackerTarget::Page(PageTarget {
                     extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                     params: None,
+                    engine: None,
                     user_agent: Some("a".repeat(201)),
                     ignore_https_errors: false,
                 })),
@@ -3530,6 +3542,112 @@ mod tests {
         ]
         "###
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_specifies_backend_for_page_target_revision(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+
+        // Default engine.
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_target(TrackerTarget::Page(PageTarget {
+                        extractor: "some-script".to_string(),
+                        engine: None,
+                        ..Default::default()
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let web_scraper_request = WebScraperContentRequest::try_from(&tracker)?;
+        assert_eq!(
+            web_scraper_request.extractor_backend,
+            Some(WebScraperBackend::Chromium)
+        );
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(web_scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&json!("\"rev_1\""));
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        content_mock.assert();
+        content_mock.delete();
+
+        // Chromium engine.
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_two")
+                    .with_target(TrackerTarget::Page(PageTarget {
+                        extractor: "some-script".to_string(),
+                        engine: Some(ExtractorEngine::Chromium),
+                        ..Default::default()
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let web_scraper_request = WebScraperContentRequest::try_from(&tracker)?;
+        assert_eq!(
+            web_scraper_request.extractor_backend,
+            Some(WebScraperBackend::Chromium)
+        );
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(web_scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&json!("\"rev_2\""));
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        content_mock.assert();
+        content_mock.delete();
+
+        // Camoufox engine.
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_three")
+                    .with_target(TrackerTarget::Page(PageTarget {
+                        extractor: "some-script".to_string(),
+                        engine: Some(ExtractorEngine::Camoufox),
+                        ..Default::default()
+                    }))
+                    .build(),
+            )
+            .await?;
+        let web_scraper_request = WebScraperContentRequest::try_from(&tracker)?;
+        assert_eq!(
+            web_scraper_request.extractor_backend,
+            Some(WebScraperBackend::Firefox)
+        );
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(serde_json::to_value(web_scraper_request).unwrap());
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(&json!("\"rev_3\""));
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        content_mock.assert();
 
         Ok(())
     }
@@ -5915,6 +6033,7 @@ mod tests {
                     target: Some(TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/222'); return await p.content(); }".to_string(),
                         params: None,
+                        engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         ignore_https_errors: true,
                     })),
@@ -6000,6 +6119,7 @@ mod tests {
                     target: Some(TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/222'); return await p.content(); }".to_string(),
                         params: None,
+                        engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         ignore_https_errors: true,
                     })),
@@ -6080,6 +6200,7 @@ mod tests {
                     target: Some(TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/222'); return await p.content(); }".to_string(),
                         params: None,
+                        engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         ignore_https_errors: true,
                     })),

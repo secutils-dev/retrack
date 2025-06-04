@@ -17,13 +17,18 @@ use anyhow::anyhow;
 use clap::{Arg, Command, crate_authors, crate_description, crate_version, value_parser};
 use std::env;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     dotenvy::dotenv().ok();
 
     if env::var("RUST_LOG_FORMAT").is_ok_and(|format| format == "json") {
-        tracing_subscriber::fmt().json().flatten_event(true).init();
+        tracing_subscriber::fmt()
+            .json()
+            .flatten_event(true)
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
     } else {
         tracing_subscriber::fmt::init();
     }

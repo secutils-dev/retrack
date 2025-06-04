@@ -3,8 +3,8 @@ use mediatype::MediaType;
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
-        ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker, TrackerAction,
-        TrackerConfig, TrackerTarget, WebhookAction,
+        ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
+        Tracker, TrackerAction, TrackerConfig, TrackerTarget, WebhookAction,
     },
     utils::StatusCodeLocal,
 };
@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 use time::OffsetDateTime;
+use tracing::warn;
 use uuid::Uuid;
 
 /// The type used to serialize and deserialize tracker database representation. There are a number
@@ -67,8 +68,15 @@ enum RawTrackerTarget<'s> {
 struct RawPageTarget<'s> {
     extractor: Cow<'s, str>,
     extractor_params: Option<Vec<u8>>,
+    extractor_engine: Option<RawExtractorEngine>,
     user_agent: Option<Cow<'s, str>>,
     ignore_https_errors: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+enum RawExtractorEngine {
+    Chromium,
+    Camoufox,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
@@ -115,23 +123,49 @@ impl TryFrom<RawTracker> for Tracker {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTracker) -> Result<Self, Self::Error> {
-        let raw_config = postcard::from_bytes::<RawTrackerConfig>(&raw.config)?;
+        let (config, target, actions) = match postcard::from_bytes::<RawTrackerConfig>(&raw.config)
+        {
+            Ok(raw_config) => (
+                TrackerConfig {
+                    revisions: raw_config.revisions,
+                    timeout: raw_config.timeout,
+                    job: parse_raw_scheduler_job_config(raw_config.job),
+                },
+                parse_raw_target(raw_config.target)?,
+                raw_config
+                    .actions
+                    .into_iter()
+                    .map(|action| action.try_into())
+                    .collect::<anyhow::Result<_>>()?,
+            ),
+            Err(err) => {
+                warn!("Failed to parse tracker config, parsing V1: {err}");
+                let raw_config =
+                    postcard::from_bytes::<v1::RawTrackerConfig>(&raw.config).map_err(|_| err)?;
+                (
+                    TrackerConfig {
+                        revisions: raw_config.revisions,
+                        timeout: raw_config.timeout,
+                        job: parse_raw_scheduler_job_config(raw_config.job),
+                    },
+                    v1::parse_raw_target(raw_config.target)?,
+                    raw_config
+                        .actions
+                        .into_iter()
+                        .map(|action| action.try_into())
+                        .collect::<anyhow::Result<_>>()?,
+                )
+            }
+        };
+
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
             enabled: raw.enabled,
-            target: parse_raw_target(raw_config.target)?,
-            actions: raw_config
-                .actions
-                .into_iter()
-                .map(|action| action.try_into())
-                .collect::<anyhow::Result<_>>()?,
+            target,
+            actions,
             job_id: raw.job_id,
-            config: TrackerConfig {
-                revisions: raw_config.revisions,
-                timeout: raw_config.timeout,
-                job: parse_raw_scheduler_job_config(raw_config.job),
-            },
+            config,
             tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
@@ -192,6 +226,10 @@ fn parse_raw_page_target(raw: RawPageTarget) -> anyhow::Result<TrackerTarget> {
             .extractor_params
             .map(|body| serde_json::from_slice(&body))
             .transpose()?,
+        engine: raw.extractor_engine.map(|engine| match engine {
+            RawExtractorEngine::Chromium => ExtractorEngine::Chromium,
+            RawExtractorEngine::Camoufox => ExtractorEngine::Camoufox,
+        }),
         user_agent: raw.user_agent.map(Cow::into_owned),
         ignore_https_errors: raw.ignore_https_errors.unwrap_or_default(),
     }))
@@ -289,6 +327,10 @@ impl TryFrom<&Tracker> for RawTracker {
                             .as_ref()
                             .map(serde_json::to_vec)
                             .transpose()?,
+                        extractor_engine: target.engine.map(|engine| match engine {
+                            ExtractorEngine::Chromium => RawExtractorEngine::Chromium,
+                            ExtractorEngine::Camoufox => RawExtractorEngine::Camoufox,
+                        }),
                         user_agent: target
                             .user_agent
                             .as_ref()
@@ -429,6 +471,62 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
     }
 }
 
+mod v1 {
+    use crate::trackers::database_ext::raw_tracker as v_latest;
+    use retrack_types::trackers::{PageTarget, TrackerTarget};
+    use serde::{Deserialize, Serialize};
+    use serde_with::serde_as;
+    use std::{borrow::Cow, time::Duration};
+
+    pub fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<TrackerTarget> {
+        Ok(match raw {
+            RawTrackerTarget::Page(target) => parse_raw_page_target(target)?,
+            RawTrackerTarget::Api(target) => v_latest::parse_raw_api_target(target)?,
+        })
+    }
+
+    fn parse_raw_page_target(raw: RawPageTarget) -> anyhow::Result<TrackerTarget> {
+        Ok(TrackerTarget::Page(PageTarget {
+            extractor: raw.extractor.into_owned(),
+            params: raw
+                .extractor_params
+                .map(|body| serde_json::from_slice(&body))
+                .transpose()?,
+            // By default, the engine isn't specified, and extraction should rely on a default
+            // engine.
+            engine: None,
+            user_agent: raw.user_agent.map(Cow::into_owned),
+            ignore_https_errors: raw.ignore_https_errors.unwrap_or_default(),
+        }))
+    }
+
+    #[serde_as]
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawTrackerConfig<'s> {
+        pub revisions: usize,
+        pub timeout: Option<Duration>,
+        #[serde(borrow)]
+        pub target: RawTrackerTarget<'s>,
+        pub actions: Vec<v_latest::RawTrackerAction<'s>>,
+        pub job: Option<v_latest::RawSchedulerJobConfig<'s>>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub enum RawTrackerTarget<'s> {
+        Page(RawPageTarget<'s>),
+        #[serde(borrow)]
+        Api(v_latest::RawApiTarget<'s>),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawPageTarget<'s> {
+        extractor: Cow<'s, str>,
+        extractor_params: Option<Vec<u8>>,
+        user_agent: Option<Cow<'s, str>>,
+        ignore_https_errors: Option<bool>,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::RawTracker;
@@ -436,8 +534,8 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, PageTarget, ServerLogAction, TargetRequest, Tracker,
-            TrackerAction, TrackerConfig, TrackerTarget, WebhookAction,
+            ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
+            Tracker, TrackerAction, TrackerConfig, TrackerTarget, WebhookAction,
         },
     };
     use serde_json::json;
@@ -454,6 +552,7 @@ mod tests {
             target: TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                 params: None,
+                engine: None,
                 user_agent: None,
                 ignore_https_errors: false,
             }),
@@ -475,6 +574,7 @@ mod tests {
             target: TrackerTarget::Page(PageTarget {
                 extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                 params: Some(json!({ "param": "value" })),
+                engine: Some(ExtractorEngine::Camoufox),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 ignore_https_errors: true,
             }),

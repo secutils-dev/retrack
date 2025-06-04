@@ -22,8 +22,8 @@ pub use self::{
     tracker_list_revisions_params::TrackerListRevisionsParams,
     tracker_target::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
-        ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest, TargetResponse,
-        TrackerTarget,
+        ExtractorEngine, ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest,
+        TargetResponse, TrackerTarget,
     },
     tracker_update_params::TrackerUpdateParams,
     trackers_list_params::TrackersListParams,
@@ -58,6 +58,7 @@ pub mod tests {
                     target: TrackerTarget::Page(PageTarget {
                         extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
                         params: None,
+                        engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         ignore_https_errors: false,
                     }),
