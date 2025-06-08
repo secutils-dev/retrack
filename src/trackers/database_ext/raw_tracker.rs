@@ -17,7 +17,6 @@ use std::{
     time::Duration,
 };
 use time::OffsetDateTime;
-use tracing::warn;
 use uuid::Uuid;
 
 /// The type used to serialize and deserialize tracker database representation. There are a number
@@ -123,49 +122,23 @@ impl TryFrom<RawTracker> for Tracker {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTracker) -> Result<Self, Self::Error> {
-        let (config, target, actions) = match postcard::from_bytes::<RawTrackerConfig>(&raw.config)
-        {
-            Ok(raw_config) => (
-                TrackerConfig {
-                    revisions: raw_config.revisions,
-                    timeout: raw_config.timeout,
-                    job: parse_raw_scheduler_job_config(raw_config.job),
-                },
-                parse_raw_target(raw_config.target)?,
-                raw_config
-                    .actions
-                    .into_iter()
-                    .map(|action| action.try_into())
-                    .collect::<anyhow::Result<_>>()?,
-            ),
-            Err(err) => {
-                warn!("Failed to parse tracker config, parsing V1: {err}");
-                let raw_config =
-                    postcard::from_bytes::<v1::RawTrackerConfig>(&raw.config).map_err(|_| err)?;
-                (
-                    TrackerConfig {
-                        revisions: raw_config.revisions,
-                        timeout: raw_config.timeout,
-                        job: parse_raw_scheduler_job_config(raw_config.job),
-                    },
-                    v1::parse_raw_target(raw_config.target)?,
-                    raw_config
-                        .actions
-                        .into_iter()
-                        .map(|action| action.try_into())
-                        .collect::<anyhow::Result<_>>()?,
-                )
-            }
-        };
-
+        let raw_config = postcard::from_bytes::<RawTrackerConfig>(&raw.config)?;
         Ok(Tracker {
             id: raw.id,
             name: raw.name,
             enabled: raw.enabled,
-            target,
-            actions,
+            target: parse_raw_target(raw_config.target)?,
+            actions: raw_config
+                .actions
+                .into_iter()
+                .map(|action| action.try_into())
+                .collect::<anyhow::Result<_>>()?,
             job_id: raw.job_id,
-            config,
+            config: TrackerConfig {
+                revisions: raw_config.revisions,
+                timeout: raw_config.timeout,
+                job: parse_raw_scheduler_job_config(raw_config.job),
+            },
             tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
@@ -468,62 +441,6 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
                 })
             }
         })
-    }
-}
-
-mod v1 {
-    use crate::trackers::database_ext::raw_tracker as v_latest;
-    use retrack_types::trackers::{PageTarget, TrackerTarget};
-    use serde::{Deserialize, Serialize};
-    use serde_with::serde_as;
-    use std::{borrow::Cow, time::Duration};
-
-    pub fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<TrackerTarget> {
-        Ok(match raw {
-            RawTrackerTarget::Page(target) => parse_raw_page_target(target)?,
-            RawTrackerTarget::Api(target) => v_latest::parse_raw_api_target(target)?,
-        })
-    }
-
-    fn parse_raw_page_target(raw: RawPageTarget) -> anyhow::Result<TrackerTarget> {
-        Ok(TrackerTarget::Page(PageTarget {
-            extractor: raw.extractor.into_owned(),
-            params: raw
-                .extractor_params
-                .map(|body| serde_json::from_slice(&body))
-                .transpose()?,
-            // By default, the engine isn't specified, and extraction should rely on a default
-            // engine.
-            engine: None,
-            user_agent: raw.user_agent.map(Cow::into_owned),
-            ignore_https_errors: raw.ignore_https_errors.unwrap_or_default(),
-        }))
-    }
-
-    #[serde_as]
-    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-    pub struct RawTrackerConfig<'s> {
-        pub revisions: usize,
-        pub timeout: Option<Duration>,
-        #[serde(borrow)]
-        pub target: RawTrackerTarget<'s>,
-        pub actions: Vec<v_latest::RawTrackerAction<'s>>,
-        pub job: Option<v_latest::RawSchedulerJobConfig<'s>>,
-    }
-
-    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-    pub enum RawTrackerTarget<'s> {
-        Page(RawPageTarget<'s>),
-        #[serde(borrow)]
-        Api(v_latest::RawApiTarget<'s>),
-    }
-
-    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
-    pub struct RawPageTarget<'s> {
-        extractor: Cow<'s, str>,
-        extractor_params: Option<Vec<u8>>,
-        user_agent: Option<Cow<'s, str>>,
-        ignore_https_errors: Option<bool>,
     }
 }
 

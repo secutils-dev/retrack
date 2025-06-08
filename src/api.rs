@@ -37,20 +37,7 @@ impl<DR: DnsResolver> Api<DR> {
     /// as loading all trackers from the database using the latest or previous API interface
     /// versions and saving the tracker to the database using the latest API interface version.
     pub async fn migrate(&self) -> anyhow::Result<()> {
-        let trackers = self.db.trackers().get_trackers(Default::default()).await?;
-        info!(
-            "Found {} trackers that will be attempted to migrate to new API interface version.",
-            trackers.len()
-        );
-
-        for tracker in trackers.iter() {
-            self.db.trackers().update_tracker(tracker).await?;
-        }
-
-        info!(
-            "Migration completed successfully ({} trackers migrated).",
-            trackers.len()
-        );
+        info!("Migration is not needed.");
         Ok(())
     }
 }
