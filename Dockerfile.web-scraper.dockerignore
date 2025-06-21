@@ -1,8 +1,10 @@
 # Paths that should be ignored by all Docker images
 node_modules
 .idea
+.screenshots
 .DS_Store
 dev/api
+dev/fixtures
 .parcel-cache
 target
 dist
