@@ -55,7 +55,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         Ok(task)
     }
 
-    /// Executes pending tasks. The max number to send is limited by `limit`.
+    /// Executes pending tasks limited by the `limit` parameter.
     pub async fn execute_pending_tasks(&self, limit: usize) -> anyhow::Result<usize> {
         let pending_tasks_ids = self.api.db.get_tasks_ids(
             OffsetDateTime::now_utc(),
@@ -120,7 +120,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         Ok(executed_tasks)
     }
 
-    /// Executes task and removes it from the database if it was executed successfully.
+    /// Executes the task and removes it from the database if it was executed successfully.
     async fn execute_task(&self, task: &Task) -> anyhow::Result<()> {
         match &task.task_type {
             TaskType::Email(email_task) => {
@@ -146,7 +146,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         }
     }
 
-    /// Send email using configured SMTP server.
+    /// Send email using the configured SMTP server.
     async fn send_email(
         &self,
         task_id: Uuid,
@@ -227,7 +227,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         Ok(())
     }
 
-    /// Send HTTP request with the specified parameters.
+    /// Send an HTTP request with the specified parameters.
     async fn send_http_request(
         &self,
         task: &HttpTaskType,
@@ -475,7 +475,7 @@ mod tests {
         let mails = smtp_server.mails();
         assert_eq!(mails.len(), 2);
 
-        let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
+        let boundary_regex = Regex::new(r#"boundary="(.+)""#)?;
         let mails = mails
             .into_iter()
             .map(|mail| {
@@ -544,7 +544,7 @@ mod tests {
         assert!(api.db.get_task(tasks[0].id).await?.is_none());
 
         let mails = smtp_server.mails();
-        let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
+        let boundary_regex = Regex::new(r#"boundary="(.+)""#)?;
         let mails = mails
             .into_iter()
             .map(|mail| {
@@ -638,7 +638,7 @@ mod tests {
         let mut smtp_config = mock_smtp_config(smtp_server.host.to_string(), smtp_server.port);
         smtp_config.catch_all = Some(SmtpCatchAllConfig {
             recipient: "catch-all@retrack.dev".to_string(),
-            text_matcher: regex::Regex::new("(one text)|(two text)")?,
+            text_matcher: Regex::new("(one text)|(two text)")?,
         });
         let api =
             mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?;
@@ -690,7 +690,7 @@ mod tests {
         let mails = smtp_server.mails();
         assert_eq!(mails.len(), 3);
 
-        let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
+        let boundary_regex = Regex::new(r#"boundary="(.+)""#)?;
         let mails = mails
             .into_iter()
             .map(|mail| {
@@ -728,7 +728,7 @@ mod tests {
         let mut smtp_config = mock_smtp_config(smtp_server.host.to_string(), smtp_server.port);
         smtp_config.catch_all = Some(SmtpCatchAllConfig {
             recipient: "catch-all@retrack.dev".to_string(),
-            text_matcher: regex::Regex::new(".*")?,
+            text_matcher: Regex::new(".*")?,
         });
         let api =
             mock_api_with_network(pool, mock_network_with_smtp(mock_smtp(smtp_config))).await?;
@@ -779,7 +779,7 @@ mod tests {
         let mails = smtp_server.mails();
         assert_eq!(mails.len(), 3);
 
-        let boundary_regex = regex::Regex::new(r#"boundary="(.+)""#)?;
+        let boundary_regex = Regex::new(r#"boundary="(.+)""#)?;
         let mails = mails
             .into_iter()
             .map(|mail| {

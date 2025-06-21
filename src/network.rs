@@ -60,7 +60,7 @@ impl Network<TokioDnsResolver> {
 }
 
 impl<DR: DnsResolver> Network<DR> {
-    /// Checks if provided URL is a publicly accessible web URL.
+    /// Checks if the provided URL is a publicly accessible web URL.
     pub async fn is_public_web_url(&self, url: &Url) -> bool {
         if url.scheme() != "http" && url.scheme() != "https" {
             return false;
