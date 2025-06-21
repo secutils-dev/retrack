@@ -1,5 +1,4 @@
 import type { ResolveFnOutput, ResolveHookContext } from 'module';
-import { EXTRACTOR_MODULE_PREFIX } from './constants.js';
 
 // This set contains the modules that are allowed to be imported by extractor scripts.
 const EXTRACTOR_MODULE_ALLOWLIST = new Set(['node:util', 'stream', 'stream/promises']);
@@ -13,7 +12,11 @@ export function resolve(
   context: ResolveHookContext,
   nextResolve: (specifier: string, context?: ResolveHookContext) => ResolveFnOutput | Promise<ResolveFnOutput>,
 ): ResolveFnOutput | Promise<ResolveFnOutput> {
-  if (context.parentURL?.startsWith(EXTRACTOR_MODULE_PREFIX) && !EXTRACTOR_MODULE_ALLOWLIST.has(specifier)) {
+  if (
+    context.parentURL?.startsWith('data:') &&
+    !specifier.startsWith('data:') &&
+    !EXTRACTOR_MODULE_ALLOWLIST.has(specifier)
+  ) {
     throw new Error(`Extractor script is not allowed to import "${specifier}" module.`);
   }
   return nextResolve(specifier, context);

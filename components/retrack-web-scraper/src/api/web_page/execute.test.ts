@@ -162,6 +162,28 @@ export async function execute(page) {
   assert.strictEqual(response.statusCode, 200);
 });
 
+await test('[/api/web_page/execute] allows extractor scripts to import `data:` modules', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `
+export async function execute(page) {
+  return (await import('data:text/javascript,export function add(a, b) { return a + b; }')).add(1, 1);
+};
+  `
+        .replaceAll('\n', '')
+        .trim(),
+      tags: [],
+    },
+  });
+
+  assert.strictEqual(response.body, JSON.stringify(2));
+  assert.strictEqual(response.statusCode, 200);
+});
+
 await test('[/api/web_page/execute] prevents extractor scripts from importing restricted built-in modules', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
@@ -211,6 +233,33 @@ export async function execute() {
     response.body,
     JSON.stringify({
       message: `Failed to execute extractor script: Extractor script is not allowed to import "../../utilities/browser.js" module.`,
+    }),
+  );
+  assert.strictEqual(response.statusCode, 500);
+});
+
+await test('[/api/web_page/execute] prevents extractor scripts from importing restricted custom modules from `data:` modules', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `
+export async function execute() {
+  return (await import('data:text/javascript,import crypto from "node:crypto"; export function add(a, b) { return a + b; }')).add(1, 1);
+};
+  `
+        .replaceAll('\n', '')
+        .trim(),
+      tags: [],
+    },
+  });
+
+  assert.strictEqual(
+    response.body,
+    JSON.stringify({
+      message: `Failed to execute extractor script: Extractor script is not allowed to import "node:crypto" module.`,
     }),
   );
   assert.strictEqual(response.statusCode, 500);

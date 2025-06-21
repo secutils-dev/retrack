@@ -5,9 +5,6 @@ import type { RemoteBrowserConfig } from '../../config.js';
  */
 export const DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS = 120000;
 
-// Every extractor script is represented as an ES module that is prefixed with this string.
-export const EXTRACTOR_MODULE_PREFIX = 'data:text/javascript,void("retrack");';
-
 /**
  * Represents the type of message that can be sent from the worker to the main thread.
  */
