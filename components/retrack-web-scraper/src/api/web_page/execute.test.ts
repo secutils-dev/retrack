@@ -1,5 +1,6 @@
 import * as assert from 'node:assert/strict';
 import { test, beforeEach, afterEach } from 'node:test';
+import { configure } from '../../config.js';
 import { createBrowserServerMock } from '../../mocks.js';
 
 import { registerExecuteRoutes } from './execute.js';
@@ -159,6 +160,39 @@ export async function execute(page) {
   });
 
   assert.strictEqual(response.body, JSON.stringify("Map(2) { 'one' => 1, 'two' => 2 }"));
+  assert.strictEqual(response.statusCode, 200);
+});
+
+await test('[/api/web_page/execute] allows extractor scripts to import configured extra modules', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(
+    createMock({
+      wsEndpoint: browserServerMock.endpoint,
+      config: {
+        ...configure(),
+        extractorSandbox: { extraAllowedModules: ['node:fs'] },
+        browser: { chromium: { protocol: 'cdp', backend: 'chromium', wsEndpoint: browserServerMock.endpoint } },
+      },
+    }),
+  ).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `
+export async function execute() {
+  await import('timers');
+  await import('node:fs');
+  return 'OK';
+};
+  `
+        .replaceAll('\n', '')
+        .trim(),
+      tags: [],
+    },
+  });
+
+  assert.strictEqual(response.body, JSON.stringify('OK'));
   assert.strictEqual(response.statusCode, 200);
 });
 

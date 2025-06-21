@@ -3,6 +3,7 @@ import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
+import type { ExtractorSandboxConfig } from '../../config.js';
 
 import { Diagnostics } from '../diagnostics.js';
 import type { WorkerData } from './constants.js';
@@ -17,6 +18,7 @@ if (!parentPort) {
 // Load the extractor script as an ES module.
 const {
   browserConfig,
+  extractorSandboxConfig,
   extractor,
   extractorParams,
   tags,
@@ -50,7 +52,9 @@ for (const Class of [
 
 // SECURITY: We load custom hooks to prevent extractor scripts from importing sensitive native and playwright modules.
 // See https://github.com/nodejs/node/issues/47747 for more details.
-register(resolve(import.meta.dirname, './extractor_module_hooks.js'), pathToFileURL('./'));
+register<ExtractorSandboxConfig>(resolve(import.meta.dirname, './extractor_module_hooks.js'), pathToFileURL('./'), {
+  data: extractorSandboxConfig,
+});
 const extractorModule = (await import(`data:text/javascript,${encodeURIComponent(extractor)}`)) as {
   execute: (page: Page, context: { tags: string[]; params?: unknown; previousContent?: unknown }) => Promise<unknown>;
 };

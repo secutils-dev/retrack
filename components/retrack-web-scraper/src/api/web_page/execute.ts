@@ -119,6 +119,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
       const workerLog = logger.child({ provider: 'worker' });
       const workerData: WorkerData = {
         browserConfig: remoteBrowserConfig,
+        extractorSandboxConfig: config.extractorSandbox,
         extractor: request.body.extractor,
         extractorParams: request.body.extractorParams,
         tags: request.body.tags,

@@ -22,7 +22,7 @@ await test('[/api/status] returns version from the config', async () => {
       },
     },
     server: { bodyLimit: 5 * 1024 * 1024 },
-
+    extractorSandbox: { extraAllowedModules: [] },
     port: 3,
   };
   const response = await registerStatusGetRoutes(createMock({ config: configMock })).inject({

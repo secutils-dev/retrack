@@ -8,6 +8,7 @@ export interface Config {
   isDev: boolean;
   logLevel: string;
   browser: { screenshotsPath?: string; chromium?: BrowserConfig; firefox?: BrowserConfig };
+  extractorSandbox: ExtractorSandboxConfig;
   userAgent?: string;
   server: { bodyLimit: number };
 }
@@ -37,6 +38,13 @@ export interface LocalBrowserConfig {
   headless: boolean;
   // Chromium specific configuration.
   chromiumSandbox: boolean;
+}
+
+// Represents the configuration for the extractor sandbox.
+export interface ExtractorSandboxConfig {
+  // The list of Node.js modules that are allowed to be imported in the
+  // extractor scripts in addition to those that are allowed by default.
+  extraAllowedModules: string[];
 }
 
 export function configure(): Config {
@@ -76,5 +84,10 @@ export function configure(): Config {
       bodyLimit: +(process.env.RETRACK_WEB_SCRAPER_SERVER_BODY_LIMIT ?? 0) || 5 * 1024 * 1024,
     },
     userAgent: process.env.RETRACK_WEB_SCRAPER_USER_AGENT,
+    extractorSandbox: {
+      extraAllowedModules: process.env.RETRACK_WEB_SCRAPER_EXTRACTOR_SANDBOX_EXTRA_ALLOWED_MODULES
+        ? process.env.RETRACK_WEB_SCRAPER_EXTRACTOR_SANDBOX_EXTRA_ALLOWED_MODULES.split(',').map((m) => m.trim())
+        : [],
+    },
   };
 }

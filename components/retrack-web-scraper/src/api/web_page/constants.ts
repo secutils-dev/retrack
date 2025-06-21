@@ -1,4 +1,4 @@
-import type { RemoteBrowserConfig } from '../../config.js';
+import type { ExtractorSandboxConfig, RemoteBrowserConfig } from '../../config.js';
 
 /**
  * Default timeout for the extractor script, in ms.
@@ -37,6 +37,8 @@ export interface WorkerResultMessage {
 export interface WorkerData {
   // The browser config that the worker should connect Playwright to.
   browserConfig: RemoteBrowserConfig;
+  // The configuration for the extractor sandbox.
+  extractorSandboxConfig: ExtractorSandboxConfig;
   // The extractor script that the worker should execute.
   extractor: string;
   // The parameters that should be passed to the extractor script.
