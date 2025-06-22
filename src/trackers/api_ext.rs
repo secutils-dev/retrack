@@ -903,7 +903,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         };
 
         let scraper_response = self
-            .http_client()
+            .http_client(false)
             .post(format!(
                 "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()
@@ -994,11 +994,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         let responses = if let Some(responses_override) = responses_override {
             responses_override
         } else {
-            let client = self.http_client();
-
             let requests = requests_override.as_ref().unwrap_or(&target.requests);
             let mut responses = Vec::with_capacity(requests.len());
             for (request_index, request) in requests.iter().enumerate() {
+                let client = self.http_client(request.accept_invalid_certificates);
                 let request_builder = client.request(
                     request.method.as_ref().unwrap_or(&Method::GET).clone(),
                     request.url.clone(),
@@ -1230,7 +1229,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         }
 
         Ok(self
-            .http_client()
+            .http_client(false)
             .get(url)
             .send()
             .await?
@@ -1240,7 +1239,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
     }
 
     /// Constructs a new instance of the HTTP client with tracing and caching middleware.
-    fn http_client(&self) -> ClientWithMiddleware {
+    fn http_client(&self, accept_invalid_certificates: bool) -> ClientWithMiddleware {
         let manager = if let Some(ref path) = self.api.config.cache.http_cache_path {
             CACacheManager {
                 path: path.to_path_buf(),
@@ -1248,14 +1247,19 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         } else {
             CACacheManager::default()
         };
-        ClientBuilder::new(reqwest::Client::new())
-            .with(TracingMiddleware::<SpanBackendWithUrl>::new())
-            .with(Cache(HttpCache {
-                mode: CacheMode::Default,
-                manager,
-                options: HttpCacheOptions::default(),
-            }))
-            .build()
+        ClientBuilder::new(
+            reqwest::Client::builder()
+                .danger_accept_invalid_certs(accept_invalid_certificates)
+                .build()
+                .expect("Failed to build http client"),
+        )
+        .with(TracingMiddleware::<SpanBackendWithUrl>::new())
+        .with(Cache(HttpCache {
+            mode: CacheMode::Default,
+            manager,
+            options: HttpCacheOptions::default(),
+        }))
+        .build()
     }
 }
 
@@ -1352,6 +1356,7 @@ mod tests {
                         body: Some(json!({ "key": "value" })),
                         media_type: Some("application/json".parse()?),
                         accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                        accept_invalid_certificates: true,
                     }],
                     configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                     extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
@@ -1940,6 +1945,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None,
@@ -1964,6 +1970,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: None
@@ -2002,6 +2009,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: None
@@ -2026,6 +2034,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: Some("".to_string()),
                     extractor: None
@@ -2050,6 +2059,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2076,6 +2086,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: Some("".to_string())
@@ -2100,6 +2111,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: Some(
@@ -2839,6 +2851,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None
@@ -2859,6 +2872,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: None
@@ -2879,6 +2893,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: Some("".to_string()),
                     extractor: None
@@ -2899,6 +2914,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2921,6 +2937,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: Some("".to_string())
@@ -2941,6 +2958,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: Some(
@@ -2978,6 +2996,7 @@ mod tests {
                         body: None,
                         media_type: None,
                         accept_statuses: None,
+                        accept_invalid_certificates: false,
                     }],
                     configurator: None,
                     extractor: None
@@ -3675,6 +3694,7 @@ mod tests {
                             body: None,
                             media_type: Some("application/json".parse()?),
                             accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                            accept_invalid_certificates: true,
                         }],
                         configurator: None,
                         extractor: None,
@@ -3694,6 +3714,7 @@ mod tests {
                             body: Some(json!({ "key": "value" })),
                             media_type: Some("application/json".parse()?),
                             accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                            accept_invalid_certificates: true
                         }],
                         configurator: Some(format!("((context) => ({{ requests: [{{ url: '{}', method: 'POST', headers: {{ 'x-custom-header': 'x-custom-value' }}, body: Deno.core.encode(JSON.stringify({{ key: `overridden-${{JSON.parse(Deno.core.decode(context.requests[0].body)).key}}` }})) }}] }}))(context);", server.url("/api/post-call"))),
                         extractor: None
@@ -3866,6 +3887,7 @@ mod tests {
                             body: None,
                             media_type: Some("application/json".parse()?),
                             accept_statuses: None,
+                            accept_invalid_certificates: false
                         }],
                         configurator: None,
                         extractor: Some(
@@ -3977,6 +3999,7 @@ mod tests {
                                 body: None,
                                 media_type: Some("application/json".parse()?),
                                 accept_statuses: None,
+                                accept_invalid_certificates: false
                             },
                             TargetRequest {
                                 url: server.url("/api/get-call-fail").parse()?,
@@ -3987,6 +4010,7 @@ mod tests {
                                 accept_statuses: Some(
                                     [StatusCode::FORBIDDEN].into_iter().collect(),
                                 ),
+                                accept_invalid_certificates: true
                             },
                         ],
                         configurator: None,
@@ -4072,6 +4096,7 @@ mod tests {
                             body: Some(serde_json::Value::String("rev_1".to_string())),
                             media_type: Some("application/json".parse()?),
                             accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                            accept_invalid_certificates: true
                         }],
                         configurator: Some(
                             r#"
@@ -4169,6 +4194,7 @@ mod tests {
                                     .parse()?,
                             ),
                             accept_statuses: None,
+                            accept_invalid_certificates: false,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4283,6 +4309,7 @@ mod tests {
                             body: None,
                             media_type: Some("text/csv".parse()?),
                             accept_statuses: None,
+                            accept_invalid_certificates: false,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4368,6 +4395,7 @@ mod tests {
                                 body: None,
                                 media_type: Some("text/csv".parse()?),
                                 accept_statuses: None,
+                                accept_invalid_certificates: false,
                             },
                             TargetRequest {
                                 url: server.url("/api/json-call").parse()?,
@@ -4379,6 +4407,7 @@ mod tests {
                                 body: Some(json!({ "key": "value" })),
                                 media_type: Some("application/json".parse()?),
                                 accept_statuses: None,
+                                accept_invalid_certificates: false,
                             },
                         ],
                         configurator: None,
@@ -4472,6 +4501,7 @@ mod tests {
                             body: Some(json!({ "key": "value" })),
                             media_type: Some("application/json".parse()?),
                             accept_statuses: None,
+                            accept_invalid_certificates: false,
                         }],
                         configurator: Some(server.url("/configurator.js")),
                         extractor: Some(server.url("/extractor.js")),

@@ -148,6 +148,7 @@ mod tests {
                 body: Some(json!({ "key": "value" })),
                 media_type: Some("text/plain; charset=UTF-8".parse()?),
                 accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
+                accept_invalid_certificates: true,
             }],
             configurator: None,
             extractor: None,
@@ -164,7 +165,8 @@ mod tests {
                     "key": "value"
                 },
                 "mediaType": "text/plain; charset=UTF-8",
-                "acceptStatuses": [403]
+                "acceptStatuses": [403],
+                "acceptInvalidCertificates": true
             }]
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -186,6 +188,7 @@ mod tests {
                 body: Some(json!({ "key": "value" })),
                 media_type: Some("text/plain; charset=UTF-8".parse()?),
                 accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
+                accept_invalid_certificates: false,
             }],
             configurator: Some(
                 "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
@@ -228,6 +231,7 @@ mod tests {
                 body: Some(json!({ "key": "value" })),
                 media_type: Some("text/plain; charset=UTF-8".parse()?),
                 accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
+                accept_invalid_certificates: true,
             }],
             configurator: Some(
                 "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
@@ -250,7 +254,8 @@ mod tests {
                     "key": "value"
                 },
                 "mediaType": "text/plain; charset=UTF-8",
-                "acceptStatuses": [403]
+                "acceptStatuses": [403],
+                "acceptInvalidCertificates": true
             }],
             "configurator": "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();",
             "extractor": "((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"

@@ -46,6 +46,38 @@ mod tests {
                 media_type: None,
                 body: Some(vec![1, 2, 3]),
                 accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                accept_invalid_certificates: None,
+            }])
+        );
+
+        assert_eq!(
+            serde_json::from_str::<ConfiguratorScriptResult>(
+                r#"
+{
+    "requests": [{
+        "url": "https://retrack.dev",
+        "body": [1, 2 ,3],
+        "headers": {
+            "Content-Type": "text/plain"
+        },
+        "acceptStatuses": [200],
+        "acceptInvalidCertificates": true
+    }]
+}
+          "#
+            )?,
+            ConfiguratorScriptResult::Requests(vec![ConfiguratorScriptRequest {
+                url: "https://retrack.dev".parse()?,
+                method: None,
+                headers: Some(
+                    vec![(CONTENT_TYPE, HeaderValue::from_static("text/plain"))]
+                        .into_iter()
+                        .collect()
+                ),
+                media_type: None,
+                body: Some(vec![1, 2, 3]),
+                accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                accept_invalid_certificates: Some(true),
             }])
         );
 

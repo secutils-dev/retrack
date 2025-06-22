@@ -317,7 +317,7 @@ pub mod tests {
         // Supports known scripts.
         let result = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => {{ return { requests: [{ url: "https://retrack.dev/x-url", method: "POST", mediaType: "application/json", headers: { "x-key": "x-value" }, acceptStatuses: [404], body: Deno.core.encode(JSON.stringify({ ...context, requests: [{...context.requests[0], body: JSON.parse(Deno.core.decode(context.requests[0].body))}] })) }] }; } })();"#,
+                r#"(() => {{ return { requests: [{ url: "https://retrack.dev/x-url", method: "POST", mediaType: "application/json", headers: { "x-key": "x-value" }, acceptStatuses: [404], acceptInvalidCertificates: true, body: Deno.core.encode(JSON.stringify({ ...context, requests: [{...context.requests[0], body: JSON.parse(Deno.core.decode(context.requests[0].body))}] })) }] }; } })();"#,
                 ConfiguratorScriptArgs {
                     tags: vec!["tag1".to_string(), "tag2".to_string()],
                     previous_content: Some(TrackerDataValue::new(json!({ "key": "content" }))),
@@ -335,6 +335,7 @@ pub mod tests {
                         body: Some(serde_json::to_vec(&json!({ "key": "body" }))?),
                         media_type: Some("text/plain; charset=UTF-8".parse()?),
                         accept_statuses: Some([StatusCode::OK].into_iter().collect()),
+                        accept_invalid_certificates: None
                     }],
                 },
                 config,
@@ -357,6 +358,7 @@ pub mod tests {
                 }))?),
                 media_type: Some("application/json".parse()?),
                 accept_statuses: Some([StatusCode::NOT_FOUND].into_iter().collect()),
+                accept_invalid_certificates: Some(true)
             }])
         );
 
@@ -472,6 +474,7 @@ pub mod tests {
                     media_type: None,
                     body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
                     accept_statuses: None,
+                    accept_invalid_certificates: None,
                 },
                 ConfiguratorScriptRequest {
                     url: "https://retrack.dev/two".parse()?,
@@ -480,6 +483,7 @@ pub mod tests {
                     media_type: None,
                     body: Some(serde_json::to_vec(&json!({ "key": "value_2" }))?),
                     accept_statuses: None,
+                    accept_invalid_certificates: None,
                 }
             ]
         );

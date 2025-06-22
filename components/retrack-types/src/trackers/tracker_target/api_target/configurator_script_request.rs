@@ -34,6 +34,10 @@ pub struct ConfiguratorScriptRequest {
     /// specified, only 200 codes are accepted.
     #[serde_as(as = "Option<HashSet<StatusCodeLocal>>")]
     pub accept_statuses: Option<HashSet<StatusCode>>,
+
+    /// Whether to ignore invalid server certificates when sending network requests.
+    #[serde(default)]
+    pub accept_invalid_certificates: Option<bool>,
 }
 
 impl TryFrom<ConfiguratorScriptRequest> for TargetRequest {
@@ -50,6 +54,7 @@ impl TryFrom<ConfiguratorScriptRequest> for TargetRequest {
                 .map(|body| serde_json::from_slice(&body))
                 .transpose()?,
             accept_statuses: request.accept_statuses,
+            accept_invalid_certificates: request.accept_invalid_certificates.unwrap_or_default(),
         })
     }
 }
@@ -65,6 +70,11 @@ impl TryFrom<TargetRequest> for ConfiguratorScriptRequest {
             media_type: request.media_type,
             body: request.body.as_ref().map(serde_json::to_vec).transpose()?,
             accept_statuses: request.accept_statuses,
+            accept_invalid_certificates: if request.accept_invalid_certificates {
+                Some(request.accept_invalid_certificates)
+            } else {
+                None
+            },
         })
     }
 }
@@ -89,6 +99,7 @@ mod tests {
             body: None,
             media_type: None,
             accept_statuses: None,
+            accept_invalid_certificates: None,
         };
         let request_json = json!({ "url": "https://retrack.dev/" });
         assert_eq!(serde_json::to_value(&request)?, request_json);
@@ -104,6 +115,7 @@ mod tests {
             body: None,
             media_type: None,
             accept_statuses: None,
+            accept_invalid_certificates: None,
         };
         let request_json = json!({ "url": "https://retrack.dev/", "method": "PUT" });
         assert_eq!(serde_json::to_value(&request)?, request_json);
@@ -124,6 +136,7 @@ mod tests {
             body: None,
             media_type: None,
             accept_statuses: None,
+            accept_invalid_certificates: None,
         };
         let request_json = json!({
             "url": "https://retrack.dev/",
@@ -150,6 +163,7 @@ mod tests {
             body: None,
             media_type: None,
             accept_statuses: None,
+            accept_invalid_certificates: None,
         };
         let request_json = json!({
             "url": "https://retrack.dev/",
@@ -177,6 +191,7 @@ mod tests {
             body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
             media_type: None,
             accept_statuses: None,
+            accept_invalid_certificates: None,
         };
         let request_json = json!({
             "url": "https://retrack.dev/",
@@ -204,6 +219,7 @@ mod tests {
             body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
             media_type: Some("text/plain; charset=UTF-8".parse()?),
             accept_statuses: None,
+            accept_invalid_certificates: None,
         };
         let request_json = json!({
             "url": "https://retrack.dev/",
@@ -232,6 +248,7 @@ mod tests {
             body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
             media_type: Some("text/plain; charset=UTF-8".parse()?),
             accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
+            accept_invalid_certificates: None,
         };
         let request_json = json!({
             "url": "https://retrack.dev/",
@@ -242,6 +259,37 @@ mod tests {
             "body": serde_json::to_vec(&json!({ "key": "value" }))?,
             "mediaType": "text/plain; charset=UTF-8",
             "acceptStatuses": [403],
+        });
+        assert_eq!(serde_json::to_value(&request)?, request_json);
+        assert_eq!(
+            serde_json::from_value::<ConfiguratorScriptRequest>(request_json)?,
+            request
+        );
+
+        let request = ConfiguratorScriptRequest {
+            url: Url::parse("https://retrack.dev")?,
+            method: Some(Method::PUT),
+            headers: Some(
+                (&[(CONTENT_TYPE, "application/json".to_string())]
+                    .into_iter()
+                    .collect::<HashMap<_, _>>())
+                    .try_into()?,
+            ),
+            body: Some(serde_json::to_vec(&json!({ "key": "value" }))?),
+            media_type: Some("text/plain; charset=UTF-8".parse()?),
+            accept_statuses: Some([StatusCode::FORBIDDEN].into_iter().collect()),
+            accept_invalid_certificates: Some(true),
+        };
+        let request_json = json!({
+            "url": "https://retrack.dev/",
+            "method": "PUT",
+            "headers": {
+                "content-type": "application/json"
+            },
+            "body": serde_json::to_vec(&json!({ "key": "value" }))?,
+            "mediaType": "text/plain; charset=UTF-8",
+            "acceptStatuses": [403],
+            "acceptInvalidCertificates": true,
         });
         assert_eq!(serde_json::to_value(&request)?, request_json);
         assert_eq!(
@@ -270,6 +318,7 @@ mod tests {
                     .into_iter()
                     .collect(),
             ),
+            accept_invalid_certificates: Some(true),
         };
 
         assert_eq!(
@@ -290,6 +339,7 @@ mod tests {
                         .into_iter()
                         .collect()
                 ),
+                accept_invalid_certificates: true,
             }
         );
 
@@ -314,6 +364,7 @@ mod tests {
                     .into_iter()
                     .collect(),
             ),
+            accept_invalid_certificates: true,
         };
 
         assert_eq!(
@@ -334,6 +385,7 @@ mod tests {
                         .into_iter()
                         .collect()
                 ),
+                accept_invalid_certificates: Some(true),
             }
         );
 
