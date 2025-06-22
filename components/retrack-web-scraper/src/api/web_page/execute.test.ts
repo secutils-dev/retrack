@@ -70,7 +70,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
       extractor: `export async function execute(page) { return 'success'; };`,
       tags: [],
       userAgent: 'Retrack/1.0.0',
-      ignoreHTTPSErrors: true,
+      acceptInvalidCertificates: true,
     },
   });
 

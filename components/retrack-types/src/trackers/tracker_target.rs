@@ -41,7 +41,7 @@ mod tests {
             params: None,
             engine: None,
             user_agent: None,
-            ignore_https_errors: false,
+            accept_invalid_certificates: false,
         });
         let target_json = json!({
             "type": "page",
@@ -58,7 +58,7 @@ mod tests {
             params: Some(json!({ "param": "value" })),
             engine: Some(ExtractorEngine::Camoufox),
             user_agent: Some("Retrack/1.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         });
         let target_json = json!({
             "type": "page",
@@ -66,7 +66,7 @@ mod tests {
             "params": { "param": "value" },
             "engine": { "type": "camoufox" },
             "userAgent": "Retrack/1.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(

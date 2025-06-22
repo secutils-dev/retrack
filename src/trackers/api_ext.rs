@@ -897,7 +897,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             }),
             tags: &tracker.tags,
             user_agent: target.user_agent.as_deref(),
-            ignore_https_errors: target.ignore_https_errors,
+            accept_invalid_certificates: target.accept_invalid_certificates,
             timeout: tracker.config.timeout,
             previous_content: previous_revision.as_ref().map(|rev| &rev.data),
         };
@@ -1382,7 +1382,7 @@ mod tests {
             params: None,
             engine: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         });
         let config = TrackerConfig {
             revisions: 3,
@@ -2130,7 +2130,7 @@ mod tests {
                     params: None,
                     engine: None,
                     user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
+                    accept_invalid_certificates: true,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2639,7 +2639,7 @@ mod tests {
                     params: None,
                     engine: None,
                     user_agent: None,
-                    ignore_https_errors: false
+                    accept_invalid_certificates: false
                 })),
                 ..Default::default()
             }).await),
@@ -2654,7 +2654,7 @@ mod tests {
                     params: None,
                     engine: None,
                     user_agent: None,
-                    ignore_https_errors: false
+                    accept_invalid_certificates: false
                 })),
                 ..Default::default()
             }).await),
@@ -2669,7 +2669,7 @@ mod tests {
                     params: None,
                     engine: None,
                     user_agent: Some("".to_string()),
-                    ignore_https_errors: false,
+                    accept_invalid_certificates: false,
                 })),
                 ..Default::default()
             }).await),
@@ -2684,7 +2684,7 @@ mod tests {
                     params: None,
                     engine: None,
                     user_agent: Some("a".repeat(201)),
-                    ignore_https_errors: false,
+                    accept_invalid_certificates: false,
                 })),
                 ..Default::default()
             }).await),
@@ -6035,7 +6035,7 @@ mod tests {
                         params: None,
                         engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
-                        ignore_https_errors: true,
+                        accept_invalid_certificates: true,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
@@ -6121,7 +6121,7 @@ mod tests {
                         params: None,
                         engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
-                        ignore_https_errors: true,
+                        accept_invalid_certificates: true,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
@@ -6202,7 +6202,7 @@ mod tests {
                         params: None,
                         engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
-                        ignore_https_errors: true,
+                        accept_invalid_certificates: true,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,

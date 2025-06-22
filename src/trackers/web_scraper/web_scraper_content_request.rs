@@ -25,12 +25,9 @@ pub struct WebScraperContentRequest<'a> {
     /// Optional user agent string to use for every request at the web page.
     pub user_agent: Option<&'a str>,
 
-    /// Indicates whether to ignore HTTPS errors when sending network requests.
-    #[serde(
-        rename = "ignoreHTTPSErrors",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    pub ignore_https_errors: bool,
+    /// Indicates whether to accept invalid server certificates when sending network requests.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub accept_invalid_certificates: bool,
 
     /// Number of milliseconds to wait until an extractor script finishes processing.
     #[serde_as(as = "Option<DurationMilliSeconds<u64>>")]
@@ -68,7 +65,7 @@ mod tests {
             timeout: Some(Duration::from_millis(100)),
             previous_content: Some(&TrackerDataValue::new(json!("some content"))),
             user_agent: Some("Retrack/1.0.0"),
-            ignore_https_errors: true
+            accept_invalid_certificates: true
         }, @r###"
         {
           "extractor": "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
@@ -81,7 +78,7 @@ mod tests {
             "tag2"
           ],
           "userAgent": "Retrack/1.0.0",
-          "ignoreHTTPSErrors": true,
+          "acceptInvalidCertificates": true,
           "timeout": 100,
           "previousContent": {
             "original": "some content"
@@ -99,7 +96,7 @@ mod tests {
             params: Some(json!({ "param": "value" })),
             engine: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         };
         let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
@@ -118,7 +115,10 @@ mod tests {
         assert_eq!(request.extractor_params, target.params.as_ref());
         assert_eq!(request.extractor_backend, Some(WebScraperBackend::Chromium));
         assert_eq!(request.user_agent, target.user_agent.as_deref());
-        assert_eq!(request.ignore_https_errors, target.ignore_https_errors);
+        assert_eq!(
+            request.accept_invalid_certificates,
+            target.accept_invalid_certificates
+        );
         assert_eq!(request.tags, &tracker.tags);
 
         // Config properties.
@@ -141,7 +141,7 @@ mod tests {
                 params: None,
                 engine: Some(engine),
                 user_agent: None,
-                ignore_https_errors: false,
+                accept_invalid_certificates: false,
             }))
             .build();
 

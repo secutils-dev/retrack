@@ -51,9 +51,10 @@ interface RequestBodyType {
   userAgent?: string;
 
   /**
-   * Whether to ignore HTTPS errors when sending network requests. Defaults to false.
+   * Whether to accept invalid server certificates when sending network requests.
+   * Defaults to false.
    */
-  ignoreHTTPSErrors?: boolean;
+  acceptInvalidCertificates?: boolean;
 }
 
 export function registerExecuteRoutes({ config, server, getLocalBrowserServer }: ApiRouteParams) {
@@ -71,7 +72,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
             previousContent: {},
             timeout: { type: 'number' },
             userAgent: { type: 'string' },
-            ignoreHTTPSErrors: { type: 'boolean' },
+            acceptInvalidCertificates: { type: 'boolean' },
           },
           required: ['extractor', 'tags'],
         },
@@ -86,7 +87,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         tags: request.body.tags,
         timeout: request.body.timeout,
         userAgent: request.body.userAgent,
-        ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
+        acceptInvalidCertificates: request.body.acceptInvalidCertificates,
       });
 
       // Check if requested backend that's supported and configured.
@@ -125,7 +126,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         tags: request.body.tags,
         previousContent: request.body.previousContent,
         userAgent: request.body.userAgent,
-        ignoreHTTPSErrors: request.body.ignoreHTTPSErrors,
+        acceptInvalidCertificates: request.body.acceptInvalidCertificates,
         screenshotsPath: config.browser.screenshotsPath,
       };
 

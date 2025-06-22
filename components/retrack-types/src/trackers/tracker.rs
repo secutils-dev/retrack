@@ -58,7 +58,7 @@ mod tests {
             params: Some(serde_json::json!({ "param": "value" })),
             engine: Some(ExtractorEngine::Chromium),
             user_agent: Some("Retrack/2.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         }))
         .build();
         assert_json_snapshot!(tracker, @r###"
@@ -76,7 +76,7 @@ mod tests {
               "param": "value"
             },
             "userAgent": "Retrack/2.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
           },
           "config": {
             "revisions": 3,
@@ -103,7 +103,7 @@ mod tests {
             params: None,
             engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -116,7 +116,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
           },
           "config": {
             "revisions": 3,
@@ -146,7 +146,7 @@ mod tests {
             params: None,
             engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -159,7 +159,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
           },
           "config": {
             "revisions": 3,
@@ -189,7 +189,7 @@ mod tests {
             params: Some(serde_json::json!("Hello, World!")),
             engine: Some(ExtractorEngine::Camoufox),
             user_agent: Some("Retrack/2.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -206,7 +206,7 @@ mod tests {
             },
             "params": "Hello, World!",
             "userAgent": "Retrack/2.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
           },
           "config": {
             "revisions": 3,
@@ -236,7 +236,7 @@ mod tests {
             params: None,
             engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         }))
         .with_schedule("0 0 * * *")
         .with_job_config(SchedulerJobConfig {
@@ -268,7 +268,7 @@ mod tests {
             "type": "page",
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "userAgent": "Retrack/2.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
           },
           "config": {
             "revisions": 3,

@@ -24,7 +24,7 @@ const {
   tags,
   previousContent,
   userAgent,
-  ignoreHTTPSErrors,
+  acceptInvalidCertificates,
   screenshotsPath,
 } = workerData as WorkerData;
 
@@ -92,7 +92,7 @@ try {
   throw new Error('Failed to connect to a browser.');
 }
 
-const context = await browser.newContext({ ignoreHTTPSErrors, userAgent, viewport: null });
+const context = await browser.newContext({ ignoreHTTPSErrors: acceptInvalidCertificates, userAgent, viewport: null });
 
 // SECURITY: Ideally, the extractor script shouldn't have access to the browser instance, as it could close the browser
 // and access other contexts. Unfortunately, the browser instance and context are accessible through various Playwright

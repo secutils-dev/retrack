@@ -25,13 +25,9 @@ pub struct PageTarget {
     /// Specific user agent to use for the browser context.
     pub user_agent: Option<String>,
 
-    /// Whether to ignore HTTPS errors when sending network requests.
-    #[serde(
-        rename = "ignoreHTTPSErrors",
-        default,
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    pub ignore_https_errors: bool,
+    /// Whether to ignore invalid server certificates when sending network requests.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub accept_invalid_certificates: bool,
 }
 
 #[cfg(test)]
@@ -51,14 +47,14 @@ mod tests {
             engine: Some(ExtractorEngine::Camoufox),
             params: Some(json!({ "param": "value" })),
             user_agent: Some("Retrack/1.0.0".to_string()),
-            ignore_https_errors: true,
+            accept_invalid_certificates: true,
         };
         let target_json = json!({
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
             "engine": { "type": "camoufox" },
             "params": { "param": "value" },
             "userAgent": "Retrack/1.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(serde_json::from_value::<PageTarget>(target_json)?, target);

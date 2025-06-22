@@ -89,7 +89,7 @@ Content-Type: application/json
 {
   "extractor": "{{extractor}}",
   "userAgent": "Retrack/1.0.0",
-  "ignoreHTTPSErrors": true,
+  "acceptInvalidCertificates": true,
   "tags": ["retrack"]
 }
 

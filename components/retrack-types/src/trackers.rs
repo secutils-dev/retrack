@@ -60,7 +60,7 @@ pub mod tests {
                         params: None,
                         engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
-                        ignore_https_errors: false,
+                        accept_invalid_certificates: false,
                     }),
                     config: TrackerConfig {
                         revisions,

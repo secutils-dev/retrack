@@ -95,7 +95,7 @@ mod tests {
                 params: None,
                 engine: None,
                 user_agent: None,
-                ignore_https_errors: false,
+                accept_invalid_certificates: false,
             })
         );
 
@@ -130,7 +130,7 @@ mod tests {
                         "params": { "param": "value" },
                         "engine": { "type": "chromium" },
                         "userAgent": "Retrack/1.0.0",
-                        "ignoreHTTPSErrors": true
+                        "acceptInvalidCertificates": true
                     },
                     "config": {
                         "revisions": 5,
@@ -177,7 +177,7 @@ mod tests {
                 params: Some(json!({ "param": "value" })),
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
-                ignore_https_errors: true,
+                accept_invalid_certificates: true,
             })
         );
         assert_eq!(

@@ -69,7 +69,7 @@ struct RawPageTarget<'s> {
     extractor_params: Option<Vec<u8>>,
     extractor_engine: Option<RawExtractorEngine>,
     user_agent: Option<Cow<'s, str>>,
-    ignore_https_errors: Option<bool>,
+    accept_invalid_certificates: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -204,7 +204,7 @@ fn parse_raw_page_target(raw: RawPageTarget) -> anyhow::Result<TrackerTarget> {
             RawExtractorEngine::Camoufox => ExtractorEngine::Camoufox,
         }),
         user_agent: raw.user_agent.map(Cow::into_owned),
-        ignore_https_errors: raw.ignore_https_errors.unwrap_or_default(),
+        accept_invalid_certificates: raw.accept_invalid_certificates.unwrap_or_default(),
     }))
 }
 
@@ -308,7 +308,7 @@ impl TryFrom<&Tracker> for RawTracker {
                             .user_agent
                             .as_ref()
                             .map(|ua| Cow::Borrowed(ua.as_ref())),
-                        ignore_https_errors: if target.ignore_https_errors {
+                        accept_invalid_certificates: if target.accept_invalid_certificates {
                             Some(true)
                         } else {
                             None
@@ -471,7 +471,7 @@ mod tests {
                 params: None,
                 engine: None,
                 user_agent: None,
-                ignore_https_errors: false,
+                accept_invalid_certificates: false,
             }),
             config: TrackerConfig {
                 revisions: 1,
@@ -493,7 +493,7 @@ mod tests {
                 params: Some(json!({ "param": "value" })),
                 engine: Some(ExtractorEngine::Camoufox),
                 user_agent: Some("Retrack/1.0.0".to_string()),
-                ignore_https_errors: true,
+                accept_invalid_certificates: true,
             }),
             config: TrackerConfig {
                 revisions: 1,

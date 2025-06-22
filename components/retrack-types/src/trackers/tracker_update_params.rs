@@ -78,7 +78,7 @@ mod tests {
                 params: Some(json!({ "param": "value" })),
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
-                ignore_https_errors: true,
+                accept_invalid_certificates: true,
             })),
             config: None,
             tags: None,
@@ -93,7 +93,7 @@ mod tests {
                     "params": { "param": "value" },
                     "engine": { "type": "chromium" },
                     "userAgent": "Retrack/1.0.0",
-                    "ignoreHTTPSErrors": true
+                    "acceptInvalidCertificates": true
                 }
             })
         );
@@ -128,7 +128,7 @@ mod tests {
                 params: Some(json!({ "param": "value" })),
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
-                ignore_https_errors: true,
+                accept_invalid_certificates: true,
             })),
             config: Some(TrackerConfig {
                 revisions: 3,
@@ -157,7 +157,7 @@ mod tests {
                     "params": { "param": "value" },
                     "engine": { "type": "chromium" },
                     "userAgent": "Retrack/1.0.0",
-                    "ignoreHTTPSErrors": true
+                    "acceptInvalidCertificates": true
                 },
                 "config": {
                     "revisions": 3,
@@ -185,7 +185,7 @@ mod tests {
                 params: Some(json!({ "param": "value" })),
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
-                ignore_https_errors: true,
+                accept_invalid_certificates: true,
             })),
             config: Some(TrackerConfig {
                 revisions: 3,
@@ -219,7 +219,7 @@ mod tests {
                     "params": { "param": "value" },
                     "engine": { "type": "chromium" },
                     "userAgent": "Retrack/1.0.0",
-                    "ignoreHTTPSErrors": true
+                    "acceptInvalidCertificates": true
                 },
                 "config": {
                     "revisions": 3,
@@ -291,7 +291,7 @@ mod tests {
             "params": { "param": "value" },
             "engine": { "type": "chromium" },
             "userAgent": "Retrack/1.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
         }
     }
               "#
@@ -304,7 +304,7 @@ mod tests {
                     params: Some(json!({ "param": "value" })),
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
+                    accept_invalid_certificates: true,
                 })),
                 config: None,
                 tags: None,
@@ -348,7 +348,7 @@ mod tests {
             "params": { "param": "value" },
             "engine": { "type": "chromium" },
             "userAgent": "Retrack/1.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
         },
         "config": {
             "revisions": 3,
@@ -376,7 +376,7 @@ mod tests {
                     params: Some(json!({ "param": "value" })),
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
+                    accept_invalid_certificates: true,
                 })),
                 config: Some(TrackerConfig {
                     revisions: 3,
@@ -408,7 +408,7 @@ mod tests {
             "params": { "param": "value" },
             "engine": { "type": "chromium" },
             "userAgent": "Retrack/1.0.0",
-            "ignoreHTTPSErrors": true
+            "acceptInvalidCertificates": true
         },
         "config": {
             "revisions": 3,
@@ -437,7 +437,7 @@ mod tests {
                     params: Some(json!({ "param": "value" })),
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
-                    ignore_https_errors: true,
+                    accept_invalid_certificates: true,
                 })),
                 config: Some(TrackerConfig {
                     revisions: 3,

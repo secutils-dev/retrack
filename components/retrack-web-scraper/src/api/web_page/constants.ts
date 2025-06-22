@@ -49,8 +49,8 @@ export interface WorkerData {
   previousContent?: unknown;
   // The user agent that should be used for all requests.
   userAgent?: string;
-  // Whether to ignore HTTPS errors when sending network requests.
-  ignoreHTTPSErrors?: boolean;
+  // Whether to accept invalid server certificates when sending network requests.
+  acceptInvalidCertificates?: boolean;
   // Path to a folder where to save screenshots.
   screenshotsPath?: string;
 }

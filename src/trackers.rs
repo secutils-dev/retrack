@@ -39,7 +39,7 @@ pub mod tests {
                         params: None,
                         engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
-                        ignore_https_errors: true,
+                        accept_invalid_certificates: true,
                     }),
                     config: Default::default(),
                     tags: vec!["tag".to_string()],
@@ -119,7 +119,7 @@ pub mod tests {
                 }),
                 tags: &tracker.tags,
                 user_agent: target.user_agent.as_deref(),
-                ignore_https_errors: target.ignore_https_errors,
+                accept_invalid_certificates: target.accept_invalid_certificates,
                 // Config properties.
                 timeout: tracker.config.timeout,
                 // Non-tracker properties.
@@ -149,7 +149,7 @@ pub mod tests {
                         params: None,
                         engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
-                        ignore_https_errors: false,
+                        accept_invalid_certificates: false,
                     }),
                     config: TrackerConfig {
                         revisions,
