@@ -40,7 +40,7 @@ pub struct SmtpCatchAllConfig {
 
 /// Default throttle delay between two consecutive emails to avoid hitting SMTP server rate limits.
 fn default_throttle_delay() -> Duration {
-    Duration::from_secs(5)
+    Duration::from_secs(15)
 }
 
 #[cfg(test)]
@@ -112,7 +112,7 @@ mod tests {
             host: "smtp.retrack.dev",
             port: None,
             no_tls: false,
-            throttle_delay: 5s,
+            throttle_delay: 15s,
             catch_all: None,
         }
         "###);
