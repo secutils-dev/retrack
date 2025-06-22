@@ -11,8 +11,10 @@ pub struct EmailTaskConfig {
 impl Default for EmailTaskConfig {
     fn default() -> Self {
         Self {
-            retry_strategy: TaskRetryStrategy::Constant {
-                interval: std::time::Duration::from_secs(30),
+            retry_strategy: TaskRetryStrategy::Exponential {
+                initial_interval: std::time::Duration::from_secs(60),
+                max_interval: std::time::Duration::from_secs(600),
+                multiplier: 2,
                 max_attempts: 3,
             },
         }
@@ -22,14 +24,17 @@ impl Default for EmailTaskConfig {
 #[cfg(test)]
 mod tests {
     use super::EmailTaskConfig;
+    use crate::config::TaskRetryStrategy;
     use insta::assert_toml_snapshot;
 
     #[test]
     fn serialization_and_default() {
         assert_toml_snapshot!(EmailTaskConfig::default(), @r###"
         [retry_strategy]
-        type = 'constant'
-        interval = 30000
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
         max_attempts = 3
         "###);
     }
@@ -39,12 +44,33 @@ mod tests {
         let config: EmailTaskConfig = toml::from_str(
             r#"
         [retry_strategy]
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
+        max_attempts = 3
+    "#,
+        )
+        .unwrap();
+        assert_eq!(config, EmailTaskConfig::default());
+
+        let config: EmailTaskConfig = toml::from_str(
+            r#"
+        [retry_strategy]
         type = 'constant'
         interval = 30000
         max_attempts = 3
     "#,
         )
         .unwrap();
-        assert_eq!(config, EmailTaskConfig::default());
+        assert_eq!(
+            config,
+            EmailTaskConfig {
+                retry_strategy: TaskRetryStrategy::Constant {
+                    interval: std::time::Duration::from_secs(30),
+                    max_attempts: 3,
+                },
+            }
+        );
     }
 }

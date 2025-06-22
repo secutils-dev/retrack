@@ -169,14 +169,18 @@ pub mod tests {
             },
             tasks: TasksConfig {
                 http: HttpTaskConfig {
-                    retry_strategy: Constant {
-                        interval: 30s,
+                    retry_strategy: Exponential {
+                        initial_interval: 60s,
+                        multiplier: 2,
+                        max_interval: 600s,
                         max_attempts: 3,
                     },
                 },
                 email: EmailTaskConfig {
-                    retry_strategy: Constant {
-                        interval: 30s,
+                    retry_strategy: Exponential {
+                        initial_interval: 60s,
+                        multiplier: 2,
+                        max_interval: 600s,
                         max_attempts: 3,
                     },
                 },

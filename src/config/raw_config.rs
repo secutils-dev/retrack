@@ -92,12 +92,16 @@ mod tests {
         tasks_run = '0/30 * * * * *'
         trackers_schedule = '0/10 * * * * *'
         [tasks.http.retry_strategy]
-        type = 'constant'
-        interval = 30000
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
         max_attempts = 3
         [tasks.email.retry_strategy]
-        type = 'constant'
-        interval = 30000
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
         max_attempts = 3
 
         [trackers]
@@ -149,13 +153,17 @@ mod tests {
         tasks_run = '0/30 * * * * * *'
 
         [tasks.http.retry_strategy]
-        type = 'constant'
-        interval = 30000
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
         max_attempts = 3
 
         [tasks.email.retry_strategy]
-        type = 'constant'
-        interval = 30000
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
         max_attempts = 3
 
         [trackers]
@@ -234,14 +242,18 @@ mod tests {
             },
             tasks: TasksConfig {
                 http: HttpTaskConfig {
-                    retry_strategy: Constant {
-                        interval: 30s,
+                    retry_strategy: Exponential {
+                        initial_interval: 60s,
+                        multiplier: 2,
+                        max_interval: 600s,
                         max_attempts: 3,
                     },
                 },
                 email: EmailTaskConfig {
-                    retry_strategy: Constant {
-                        interval: 30s,
+                    retry_strategy: Exponential {
+                        initial_interval: 60s,
+                        multiplier: 2,
+                        max_interval: 600s,
                         max_attempts: 3,
                     },
                 },
