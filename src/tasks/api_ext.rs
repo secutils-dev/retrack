@@ -292,6 +292,25 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
             return;
         };
 
+        // Don't report errors if the task is an error reporting task itself.
+        if let TaskType::Email(EmailTaskType {
+            content:
+                EmailContent::Template(EmailTemplate::TaskFailed {
+                    task_id,
+                    task_type,
+                    task_tags,
+                    error_message,
+                }),
+            ..
+        }) = &task.task_type
+        {
+            error!(
+                task.id = %task_id, task.task_type = task_type, task.tags = ?task_tags,
+                "Failed to report failed task ({error_message}): {error}."
+            );
+            return;
+        }
+
         let email_task = TaskType::Email(EmailTaskType {
             to: vec![catch_all_recipient.recipient.clone()],
             content: EmailContent::Template(EmailTemplate::TaskFailed {
