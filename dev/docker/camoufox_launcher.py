@@ -17,5 +17,6 @@ launch_server(
     main_world_eval=str_to_bool(os.environ.get("CAMOUFOX_USE_MAIN_WORLD", "True")),
     port=port,
     host="0.0.0.0",
-    ws_path=os.environ.get("CAMOUFOX_WS_PATH", "camoufox")
+    ws_path=os.environ.get("CAMOUFOX_WS_PATH", "camoufox"),
+    debug=str_to_bool(os.environ.get("CAMOUFOX_DEBUG", "False")),
 )
