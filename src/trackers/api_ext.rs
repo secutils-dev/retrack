@@ -756,8 +756,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     for recipient in &action.to {
                         if Mailbox::from_str(recipient).is_err() {
                             bail!(RetrackError::client(format!(
-                                "Tracker email action recipient ('{}') is not a valid email address.",
-                                recipient
+                                "Tracker email action recipient ('{recipient}') is not a valid email address.",
                             )));
                         }
                     }
@@ -1240,26 +1239,24 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
     /// Constructs a new instance of the HTTP client with tracing and caching middleware.
     fn http_client(&self, accept_invalid_certificates: bool) -> ClientWithMiddleware {
-        let manager = if let Some(ref path) = self.api.config.cache.http_cache_path {
-            CACacheManager {
-                path: path.to_path_buf(),
-            }
-        } else {
-            CACacheManager::default()
-        };
-        ClientBuilder::new(
+        let client_builder = ClientBuilder::new(
             reqwest::Client::builder()
                 .danger_accept_invalid_certs(accept_invalid_certificates)
                 .build()
                 .expect("Failed to build http client"),
         )
-        .with(TracingMiddleware::<SpanBackendWithUrl>::new())
-        .with(Cache(HttpCache {
-            mode: CacheMode::Default,
-            manager,
-            options: HttpCacheOptions::default(),
-        }))
-        .build()
+        .with(TracingMiddleware::<SpanBackendWithUrl>::new());
+        if let Some(ref path) = self.api.config.cache.http_cache_path {
+            client_builder
+                .with(Cache(HttpCache {
+                    mode: CacheMode::Default,
+                    manager: CACacheManager::new(path.to_path_buf(), true),
+                    options: HttpCacheOptions::default(),
+                }))
+                .build()
+        } else {
+            client_builder.build()
+        }
     }
 }
 

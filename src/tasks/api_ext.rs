@@ -177,7 +177,7 @@ impl<'a, DR: DnsResolver> TasksApi<'a, DR> {
         if let Some(catch_all_recipient) = catch_all_recipient {
             message_builder =
                 message_builder.to(catch_all_recipient.parse().with_context(|| {
-                    format!("Cannot parse catch-all TO address: {}", catch_all_recipient)
+                    format!("Cannot parse catch-all TO address: {catch_all_recipient}")
                 })?)
         } else {
             for to in task.to.iter() {

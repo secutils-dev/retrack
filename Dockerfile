@@ -1,8 +1,8 @@
-FROM rust:1.87-slim-bookworm AS builder
+FROM rust:1.88-slim-bookworm AS builder
 WORKDIR /app
 
 ARG TARGETARCH
-ARG UPX_VERSION=5.0.1
+ARG UPX_VERSION=5.0.2
 
 # Install dependencies.
 RUN set -x && apt-get update && apt-get install -y protobuf-compiler curl xz-utils

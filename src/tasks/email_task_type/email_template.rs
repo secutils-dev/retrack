@@ -52,8 +52,8 @@ impl EmailTemplate {
     ) -> anyhow::Result<Email> {
         let (subject, text, html) = match content {
             Ok(content) => (
-                format!("[Retrack] Change detected: \"{}\"", tracker_name),
-                format!("\"{}\" tracker detected content changes.", tracker_name),
+                format!("[Retrack] Change detected: \"{tracker_name}\""),
+                format!("\"{tracker_name}\" tracker detected content changes."),
                 api.templates.render(
                     "tracker_check_result_success_email",
                     &json!({
@@ -65,10 +65,9 @@ impl EmailTemplate {
                 )?,
             ),
             Err(error_message) => (
-                format!("[Retrack] Check failed: \"{}\"", tracker_name),
+                format!("[Retrack] Check failed: \"{tracker_name}\""),
                 format!(
-                    "\"{}\" tracker failed to check for content changes due to the following error: {error_message}.",
-                    tracker_name,
+                    "\"{tracker_name}\" tracker failed to check for content changes due to the following error: {error_message}.",
                 ),
                 api.templates.render(
                     "tracker_check_result_failure_email",
@@ -106,8 +105,7 @@ impl EmailTemplate {
         Ok(Email::html_with_attachments(
             format!("[Retrack] {task_type} task failed"),
             format!(
-                "{} task failed to execute due to the following error: {error_message}.",
-                task_type,
+                "{task_type} task failed to execute due to the following error: {error_message}.",
             ),
             api.templates.render(
                 "task_failure_email",

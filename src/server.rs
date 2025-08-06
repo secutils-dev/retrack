@@ -73,7 +73,7 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             .wrap(Cors::permissive())
     });
 
-    let http_server_url = format!("0.0.0.0:{}", http_port);
+    let http_server_url = format!("0.0.0.0:{http_port}");
     let http_server = http_server
         .bind(&http_server_url)
         .with_context(|| format!("Failed to bind to {http_server_url}."))?;

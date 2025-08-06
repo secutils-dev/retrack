@@ -248,7 +248,7 @@ pub mod tests {
 
         for n in 0..=9 {
             let job = RawSchedulerJobStoredData {
-                id: Uuid::parse_str(&format!("67e55044-10b1-426f-9247-bb680e5fe0c{}", n))?,
+                id: Uuid::parse_str(&format!("67e55044-10b1-426f-9247-bb680e5fe0c{n}"))?,
                 last_updated: Some(946720800 + n),
                 last_tick: Some(946720700),
                 next_tick: Some(946720900),

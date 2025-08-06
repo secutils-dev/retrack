@@ -195,25 +195,21 @@ impl JsRuntime {
             }
         });
 
-        let handle_error = |err: deno_core::error::CoreError| match ScriptExecutionStatus::from(
+        let handle_error = |err: anyhow::Error| match ScriptExecutionStatus::from(
             script_status.load(Ordering::Relaxed),
         ) {
             ScriptExecutionStatus::ReachedMemoryLimit => {
-                anyhow!(err).context("Script exceeded memory limit.")
+                err.context("Script exceeded memory limit.")
             }
-            ScriptExecutionStatus::ReachedTimeLimit => {
-                anyhow!(err).context("Script exceeded time limit.")
-            }
+            ScriptExecutionStatus::ReachedTimeLimit => err.context("Script exceeded time limit."),
             ScriptExecutionStatus::Running => {
                 script_status.store(
                     ScriptExecutionStatus::ExecutionCompleted as usize,
                     Ordering::Relaxed,
                 );
-                anyhow!(err)
+                err
             }
-            ScriptExecutionStatus::ExecutionCompleted => {
-                anyhow!(err)
-            }
+            ScriptExecutionStatus::ExecutionCompleted => err,
         };
 
         // Retrieve the result `Promise`.
@@ -221,13 +217,13 @@ impl JsRuntime {
         let script_result_promise = runtime
             .execute_script("<anon>", script_src.to_string())
             .map(|script_result| runtime.resolve(script_result))
-            .map_err(handle_error)?;
+            .map_err(|err| handle_error(anyhow!(err)))?;
 
         // Wait for the promise to resolve.
         let script_result = runtime
             .with_event_loop_promise(script_result_promise, Default::default())
             .await
-            .map_err(handle_error)?;
+            .map_err(|err| handle_error(anyhow!(err)))?;
 
         // Abort termination thread, if script managed to complete.
         script_status.store(
@@ -265,7 +261,7 @@ impl JsRuntime {
 pub mod tests {
     use super::{JsRuntime, ScriptConfig};
     use crate::config::JsRuntimeConfig;
-    use deno_core::error::CoreError;
+    use deno_core::error::JsError;
     use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use retrack_types::trackers::{
@@ -380,22 +376,21 @@ pub mod tests {
         assert_eq!(Some(serde_json::from_slice::<usize>(&result)?), Some(230));
 
         // Returns error from scripts
-        let result = js_runtime
+        let binding = js_runtime
             .execute_script::<ByteBuf, ByteBuf>(
                 r#"(() => {{ throw new Error("Uh oh."); }})();"#,
                 None,
                 config,
             )
             .await
-            .unwrap_err()
-            .downcast::<CoreError>()?;
-        if let CoreError::Js(js_err) = result {
+            .unwrap_err();
+        if let Some(js_err) = binding.downcast_ref::<JsError>() {
             assert_eq!(
                 js_err.exception_message,
                 "Uncaught Error: Uh oh.".to_string()
             );
         } else {
-            panic!("Expected CoreError::Js, got: {:?}", result);
+            panic!("Expected JsError, got: {result:?}");
         }
 
         // Can access script context (async).
@@ -806,6 +801,7 @@ pub mod tests {
           "Deno.core.ops.op_set_wasm_streaming_callback()",
           "Deno.core.ops.op_shutdown()",
           "Deno.core.ops.op_str_byte_length()",
+          "Deno.core.ops.op_structured_clone()",
           "Deno.core.ops.op_timer_cancel()",
           "Deno.core.ops.op_timer_queue()",
           "Deno.core.ops.op_timer_queue_immediate()",
@@ -860,6 +856,7 @@ pub mod tests {
           "Deno.core.setUpAsyncStub()",
           "Deno.core.setWasmStreamingCallback()",
           "Deno.core.shutdown()",
+          "Deno.core.structuredClone()",
           "Deno.core.tryClose()",
           "Deno.core.unrefOpPromise()",
           "Deno.core.unrefTimer()",

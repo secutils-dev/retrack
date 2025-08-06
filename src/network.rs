@@ -113,7 +113,7 @@ pub mod tests {
             ("http", true),
             ("https", true),
         ] {
-            let url = Url::parse(&format!("{}://retrack.dev/my-page", protocol))?;
+            let url = Url::parse(&format!("{protocol}://retrack.dev/my-page"))?;
             assert_eq!(public_network.is_public_web_url(&url).await, is_supported);
         }
 
@@ -159,7 +159,7 @@ pub mod tests {
             ("217.88.39.143", true),
             ("[2001:1234:abcd:5678:0221:2fff:feb5:6e10]", true),
         ] {
-            let url = Url::parse(&format!("http://{}/my-page", ip))?;
+            let url = Url::parse(&format!("http://{ip}/my-page"))?;
             assert_eq!(network.is_public_web_url(&url).await, is_supported);
         }
 
