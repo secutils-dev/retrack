@@ -408,7 +408,7 @@ ORDER BY t.updated_at
 
 impl Database {
     /// Returns a database extension for the tracker operations.
-    pub fn trackers(&self) -> TrackersDatabaseExt {
+    pub fn trackers(&self) -> TrackersDatabaseExt<'_> {
         TrackersDatabaseExt::new(&self.pool)
     }
 }

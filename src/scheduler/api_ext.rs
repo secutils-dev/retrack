@@ -28,7 +28,7 @@ impl<'a, DR: DnsResolver> SchedulerApiExt<'a, DR> {
 
 impl<DR: DnsResolver> Api<DR> {
     /// Returns an API to work with scheduler jobs.
-    pub fn scheduler(&self) -> SchedulerApiExt<DR> {
+    pub fn scheduler(&self) -> SchedulerApiExt<'_, DR> {
         SchedulerApiExt::new(self)
     }
 }

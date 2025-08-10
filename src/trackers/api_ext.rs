@@ -646,13 +646,13 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             }
         }
 
-        if let Some(ref timeout) = tracker.config.timeout {
-            if timeout > &config.max_timeout {
-                bail!(RetrackError::client(format!(
-                    "Tracker timeout cannot be greater than {}ms.",
-                    config.max_timeout.as_millis()
-                )));
-            }
+        if let Some(ref timeout) = tracker.config.timeout
+            && timeout > &config.max_timeout
+        {
+            bail!(RetrackError::client(format!(
+                "Tracker timeout cannot be greater than {}ms.",
+                config.max_timeout.as_millis()
+            )));
         }
 
         if let Some(job_config) = &tracker.config.job {
@@ -772,21 +772,22 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     formatter,
                     ..
                 }) => {
-                    if let Some(method) = method {
-                        if method != Method::GET && method != Method::POST && method != Method::PUT
-                        {
-                            bail!(RetrackError::client(
-                                "Tracker webhook action method must be either `GET`, `POST`, or `PUT`."
-                            ));
-                        }
+                    if let Some(method) = method
+                        && method != Method::GET
+                        && method != Method::POST
+                        && method != Method::PUT
+                    {
+                        bail!(RetrackError::client(
+                            "Tracker webhook action method must be either `GET`, `POST`, or `PUT`."
+                        ));
                     }
 
-                    if let Some(headers) = headers {
-                        if headers.len() > MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT {
-                            bail!(RetrackError::client(format!(
-                                "Tracker webhook action cannot have more than {MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT} headers."
-                            )));
-                        }
+                    if let Some(headers) = headers
+                        && headers.len() > MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT
+                    {
+                        bail!(RetrackError::client(format!(
+                            "Tracker webhook action cannot have more than {MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT} headers."
+                        )));
                     }
 
                     if let Some(script) = &formatter {
