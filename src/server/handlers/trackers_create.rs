@@ -19,7 +19,7 @@ pub async fn trackers_create(
 ) -> Result<HttpResponse, RetrackError> {
     let trackers = state.api.trackers();
     match trackers.create_tracker(params.into_inner()).await {
-        Ok(tracker) => Ok(HttpResponse::Ok().json(tracker)),
+        Ok(tracker) => Ok(HttpResponse::Created().json(tracker)),
         Err(err) => {
             error!("Failed to create tracker: {err:?}");
             Err(err.into())
@@ -76,7 +76,7 @@ mod tests {
                 .to_request(),
         )
         .await;
-        assert_eq!(response.status(), 200);
+        assert_eq!(response.status(), 201);
 
         let trackers = server_state
             .api
@@ -155,7 +155,7 @@ mod tests {
         let status = response.status();
         let body = response.into_body().try_into_bytes().unwrap();
 
-        assert_eq!(status, 200);
+        assert_eq!(status, 201);
 
         let trackers = server_state
             .api

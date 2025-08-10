@@ -22,7 +22,7 @@ pub async fn trackers_create_revision(
 ) -> Result<HttpResponse, RetrackError> {
     let trackers = state.api.trackers();
     match trackers.create_tracker_data_revision(*tracker_id).await {
-        Ok(revision) => Ok(HttpResponse::Ok().json(revision)),
+        Ok(revision) => Ok(HttpResponse::Created().json(revision)),
         Err(err) => {
             error!(tracker.id = %tracker_id, "Failed to create tracker data revision: {err:?}");
             Err(err.into())
@@ -102,7 +102,7 @@ mod tests {
             .to_request(),
         )
         .await;
-        assert_eq!(response.status(), 200);
+        assert_eq!(response.status(), 201);
 
         let revision = serde_json::from_slice::<TrackerDataRevision>(
             &response.into_body().try_into_bytes().unwrap(),
