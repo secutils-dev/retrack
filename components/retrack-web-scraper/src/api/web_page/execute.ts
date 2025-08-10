@@ -81,14 +81,16 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
     async (request, reply) => {
       const logger = server.log.child({ provider: 'web_page_execute' });
       const requestedBackend = request.body.extractorBackend;
-      logger.debug('Executing extractor script with the following parameters', {
-        extractorParams: request.body.extractorParams,
-        backend: requestedBackend,
-        tags: request.body.tags,
-        timeout: request.body.timeout,
-        userAgent: request.body.userAgent,
-        acceptInvalidCertificates: request.body.acceptInvalidCertificates,
-      });
+      logger.debug(
+        `Executing extractor script with the following parameters: ${JSON.stringify({
+          extractorParams: request.body.extractorParams,
+          backend: requestedBackend,
+          tags: request.body.tags,
+          timeout: request.body.timeout,
+          userAgent: request.body.userAgent,
+          acceptInvalidCertificates: request.body.acceptInvalidCertificates,
+        })}`,
+      );
 
       // Check if requested backend that's supported and configured.
       let browserConfig: BrowserConfig | undefined;
@@ -154,9 +156,9 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
           worker.on('message', (message: WorkerLogMessage | WorkerResultMessage) => {
             if (message.type === WorkerMessageType.LOG) {
               if (message.level === 'error') {
-                workerLog.error(message.message, message.args);
+                workerLog.error(`${message.message}: ${JSON.stringify(message.args)}`);
               } else {
-                workerLog.info(message.message, message.args);
+                workerLog.info(`${message.message}: ${JSON.stringify(message.args)}`);
               }
             } else {
               workerLog.debug(`Successfully executed extractor script.`);
