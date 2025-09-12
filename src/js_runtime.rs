@@ -261,7 +261,7 @@ impl JsRuntime {
 pub mod tests {
     use super::{JsRuntime, ScriptConfig};
     use crate::config::JsRuntimeConfig;
-    use deno_core::error::JsError;
+    use deno_core::error::{CoreError, CoreErrorKind};
     use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE};
     use insta::assert_json_snapshot;
     use retrack_types::trackers::{
@@ -378,16 +378,17 @@ pub mod tests {
         // Returns error from scripts
         let binding = js_runtime
             .execute_script::<ByteBuf, ByteBuf>(
-                r#"(() => {{ throw new Error("Uh oh."); }})();"#,
+                r#"(async () => {{ throw new Error("Uh oh."); }})();"#,
                 None,
                 config,
             )
             .await
-            .unwrap_err();
-        if let Some(js_err) = binding.downcast_ref::<JsError>() {
+            .unwrap_err()
+            .downcast::<CoreError>()?;
+        if let CoreErrorKind::Js(ref js_err) = *binding.0 {
             assert_eq!(
                 js_err.exception_message,
-                "Uncaught Error: Uh oh.".to_string()
+                "Uncaught (in promise) Error: Uh oh.".to_string()
             );
         } else {
             panic!("Expected JsError, got: {result:?}");
