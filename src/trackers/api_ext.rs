@@ -305,6 +305,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 debug!(
                     tracker.id = %tracker.id,
                     tracker.name = tracker.name,
+                    tracker.tags = ?tracker.tags,
                     "Skipping actions for a new data revision since content hasn't changed."
                 );
                 return Ok(last_revision);
@@ -328,6 +329,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         tracker.id = %tracker.id,
                         tracker.name = tracker.name,
                         tracker.action = action.type_tag(),
+                        tracker.tags = ?tracker.tags,
                         "Skipping action for a new data revision as requested by action formatter ({action_index})."
                     );
                 }
@@ -336,6 +338,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         tracker.id = %tracker.id,
                         tracker.name = tracker.name,
                         tracker.action = action.type_tag(),
+                        tracker.tags = ?tracker.tags,
                         "Failed to retrieve payload for action ({action_index}): {err}"
                     );
                     bail!(RetrackError::client_with_root_cause(err));
