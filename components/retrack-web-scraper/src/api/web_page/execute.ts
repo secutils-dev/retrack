@@ -130,6 +130,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         userAgent: request.body.userAgent,
         acceptInvalidCertificates: request.body.acceptInvalidCertificates,
         screenshotsPath: config.browser.screenshotsPath,
+        proxy: request.body.proxy,
       };
 
       try {

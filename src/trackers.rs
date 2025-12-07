@@ -40,6 +40,7 @@ pub mod tests {
                         engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         accept_invalid_certificates: true,
+            proxy: None,
                     }),
                     config: Default::default(),
                     tags: vec!["tag".to_string()],
@@ -124,6 +125,7 @@ pub mod tests {
                 timeout: tracker.config.timeout,
                 // Non-tracker properties.
                 previous_content: None,
+                proxy: target.proxy.as_ref(),
             })
         }
     }
@@ -150,6 +152,7 @@ pub mod tests {
                         engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         accept_invalid_certificates: false,
+            proxy: None,
                     }),
                     config: TrackerConfig {
                         revisions,

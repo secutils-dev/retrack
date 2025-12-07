@@ -1,5 +1,6 @@
 mod extractor_engine;
 
+use super::ProxyConfig;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use utoipa::ToSchema;
@@ -28,6 +29,9 @@ pub struct PageTarget {
     /// Whether to ignore invalid server certificates when sending network requests.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub accept_invalid_certificates: bool,
+
+    /// Optional proxy configuration.
+    pub proxy: Option<ProxyConfig>,
 }
 
 #[cfg(test)]
@@ -48,6 +52,7 @@ mod tests {
             params: Some(json!({ "param": "value" })),
             user_agent: Some("Retrack/1.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         };
         let target_json = json!({
             "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
