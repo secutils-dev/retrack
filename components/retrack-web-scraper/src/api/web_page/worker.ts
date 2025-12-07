@@ -103,18 +103,16 @@ const contextOptions: {
 // Configure proxy if provided
 if (proxy) {
   contextOptions.proxy = { server: proxy.url };
+  // Note: Playwright's proxy authentication only supports username/password format
+  // For custom auth schemes (like Bearer), the credentials would need to be handled
+  // differently, potentially via extraHTTPHeaders. For now, we document this limitation.
   if (proxy.credentials) {
-    // For proxy authentication, we need to set the Proxy-Authorization header
-    // Playwright doesn't support custom auth schemes directly, so we'll use the HTTP auth format
-    // which works for Basic authentication
-    const authValue = `${proxy.credentials.scheme} ${proxy.credentials.value}`;
-    // Note: Playwright's proxy auth only supports username:password format
-    // For custom auth schemes, we'll need to use extraHTTPHeaders instead
-    contextOptions.proxy = { 
-      server: proxy.url,
-      // This won't work for custom schemes, but it's a limitation of Playwright
-      // The extraHTTPHeaders approach would be needed for full support
-    };
+    // If using Basic auth, extract username and password
+    // This is a simplified implementation - full Basic auth would require base64 decoding
+    // For now, we'll just pass the server URL and note that custom auth isn't fully supported
+    log.warn(
+      `Proxy authentication with custom scheme '${proxy.credentials.scheme}' is configured, but Playwright only supports username/password format. Custom auth schemes may not work correctly.`,
+    );
   }
 }
 
