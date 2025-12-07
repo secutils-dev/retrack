@@ -649,6 +649,7 @@ mod tests {
                 engine: None,
                 user_agent: None,
                 accept_invalid_certificates: false,
+                proxy: None,
             }),
             config: TrackerConfig {
                 revisions: 1,
@@ -671,6 +672,7 @@ mod tests {
                 engine: Some(ExtractorEngine::Camoufox),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 accept_invalid_certificates: true,
+                proxy: None,
             }),
             config: TrackerConfig {
                 revisions: 1,
@@ -717,6 +719,7 @@ mod tests {
                 requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
                 configurator: None,
                 extractor: None,
+                proxy: None,
             }),
             config: TrackerConfig::default(),
             actions: vec![TrackerAction::ServerLog(Default::default())],

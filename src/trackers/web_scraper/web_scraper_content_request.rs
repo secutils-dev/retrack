@@ -101,6 +101,7 @@ mod tests {
             engine: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         };
         let tracker = MockTrackerBuilder::create(
             uuid!("00000000-0000-0000-0000-000000000001"),
@@ -146,7 +147,7 @@ mod tests {
                 engine: Some(engine),
                 user_agent: None,
                 accept_invalid_certificates: false,
-                proxy: None,
+            proxy: None,
             }))
             .build();
 

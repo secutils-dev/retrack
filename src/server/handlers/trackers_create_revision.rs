@@ -291,6 +291,7 @@ mod tests {
                         }],
                         configurator: Some(format!("{}/configurator.js", server.base_url())),
                         extractor: None,
+                proxy: None,
                     }))
                     .build(),
             )

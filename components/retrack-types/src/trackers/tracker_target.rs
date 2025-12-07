@@ -28,7 +28,7 @@ pub enum TrackerTarget {
 #[cfg(test)]
 mod tests {
     use super::TrackerTarget;
-    use crate::trackers::{ApiTarget, ExtractorEngine, PageTarget, TargetRequest};
+    use crate::trackers::{ApiTarget, ExtractorEngine, PageTarget, ProxyConfig, ProxyCredentials, TargetRequest};
     use http::{
         Method,
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -132,6 +132,61 @@ mod tests {
                 "method": "PUT",
                 "headers": { "content-type": "application/json", "authorization": "Bearer token" }
             }]
+        });
+        assert_eq!(serde_json::to_value(&target)?, target_json);
+        assert_eq!(
+            serde_json::from_value::<TrackerTarget>(target_json)?,
+            target
+        );
+
+        // Test PageTarget with proxy
+        let target = TrackerTarget::Page(PageTarget {
+            extractor: "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }".to_string(),
+            params: None,
+            engine: None,
+            user_agent: None,
+            accept_invalid_certificates: false,
+            proxy: Some(ProxyConfig {
+                url: "http://proxy.example.com:8080".parse()?,
+                credentials: Some(ProxyCredentials {
+                    scheme: "Basic".to_string(),
+                    value: "dXNlcjpwYXNz".to_string(),
+                }),
+            }),
+        });
+        let target_json = json!({
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "proxy": {
+                "url": "http://proxy.example.com:8080/",
+                "credentials": {
+                    "scheme": "Basic",
+                    "value": "dXNlcjpwYXNz"
+                }
+            }
+        });
+        assert_eq!(serde_json::to_value(&target)?, target_json);
+        assert_eq!(
+            serde_json::from_value::<TrackerTarget>(target_json)?,
+            target
+        );
+
+        // Test ApiTarget with proxy
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
+            configurator: None,
+            extractor: None,
+            proxy: Some(ProxyConfig {
+                url: "http://proxy.example.com:8080".parse()?,
+                credentials: None,
+            }),
+        });
+        let target_json = json!({
+            "type": "api",
+            "requests": [{ "url": "https://retrack.dev/" }],
+            "proxy": {
+                "url": "http://proxy.example.com:8080/"
+            }
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(
