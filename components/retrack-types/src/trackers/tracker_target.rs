@@ -1,5 +1,6 @@
 mod api_target;
 mod page_target;
+mod proxy_config;
 
 pub use self::{
     api_target::{
@@ -7,6 +8,7 @@ pub use self::{
         ExtractorScriptArgs, ExtractorScriptResult, TargetRequest, TargetResponse,
     },
     page_target::{ExtractorEngine, PageTarget},
+    proxy_config::{ProxyConfig, ProxyCredentials},
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -42,6 +44,7 @@ mod tests {
             engine: None,
             user_agent: None,
             accept_invalid_certificates: false,
+            proxy: None,
         });
         let target_json = json!({
             "type": "page",
@@ -59,6 +62,7 @@ mod tests {
             engine: Some(ExtractorEngine::Camoufox),
             user_agent: Some("Retrack/1.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         });
         let target_json = json!({
             "type": "page",
@@ -78,6 +82,7 @@ mod tests {
             requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
             configurator: None,
             extractor: None,
+            proxy: None,
         });
         let target_json = json!({ "type": "api", "requests": [{ "url": "https://retrack.dev/" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -93,6 +98,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            proxy: None,
         });
         let target_json = json!({ "type": "api", "requests": [{ "url": "https://retrack.dev/", "method": "PUT" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -117,6 +123,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            proxy: None,
         });
         let target_json = json!({
             "type": "api",

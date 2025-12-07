@@ -54,6 +54,7 @@ mod tests {
                 engine: None,
                 user_agent: None,
                 accept_invalid_certificates: false,
+                proxy: None,
             }),
             config: Default::default(),
             tags: vec![],
@@ -85,6 +86,7 @@ mod tests {
                 params: None,
                 user_agent: None,
                 accept_invalid_certificates: false,
+                proxy: None,
             }),
             config: TrackerConfig {
                 revisions: 10,
@@ -119,6 +121,7 @@ mod tests {
                 engine: None,
                 user_agent: None,
                 accept_invalid_certificates: false,
+                proxy: None,
             }),
             config: TrackerConfig {
                 revisions: 3,
@@ -155,6 +158,7 @@ mod tests {
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 accept_invalid_certificates: true,
+                proxy: None,
             }),
             config: TrackerConfig {
                 revisions: 3,
@@ -225,6 +229,7 @@ mod tests {
                     engine: None,
                     user_agent: None,
                     accept_invalid_certificates: false,
+                proxy: None,
                 }),
                 config: Default::default(),
                 tags: vec![],
@@ -257,6 +262,7 @@ mod tests {
                     engine: None,
                     user_agent: None,
                     accept_invalid_certificates: false,
+                proxy: None,
                 }),
                 config: TrackerConfig {
                     revisions: 10,
@@ -293,6 +299,7 @@ mod tests {
                     engine: None,
                     user_agent: None,
                     accept_invalid_certificates: false,
+                proxy: None,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -345,6 +352,7 @@ mod tests {
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     accept_invalid_certificates: true,
+                proxy: None,
                 }),
                 config: TrackerConfig {
                     revisions: 3,

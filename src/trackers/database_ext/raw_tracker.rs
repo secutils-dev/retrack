@@ -71,6 +71,7 @@ struct RawPageTarget<'s> {
     extractor_engine: Option<RawExtractorEngine>,
     user_agent: Option<Cow<'s, str>>,
     accept_invalid_certificates: Option<bool>,
+    proxy: Option<RawProxyConfig<'s>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -80,11 +81,24 @@ enum RawExtractorEngine {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+struct RawProxyConfig<'s> {
+    url: Cow<'s, str>,
+    credentials: Option<RawProxyCredentials<'s>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+struct RawProxyCredentials<'s> {
+    scheme: Cow<'s, str>,
+    value: Cow<'s, str>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 struct RawApiTarget<'s> {
     #[serde(borrow)]
     requests: Vec<RawApiTargetRequest<'s>>,
     configurator: Option<Cow<'s, str>>,
     extractor: Option<Cow<'s, str>>,
+    proxy: Option<RawProxyConfig<'s>>,
 }
 
 #[serde_as]
@@ -233,7 +247,20 @@ fn parse_raw_page_target(raw: RawPageTarget) -> anyhow::Result<TrackerTarget> {
         }),
         user_agent: raw.user_agent.map(Cow::into_owned),
         accept_invalid_certificates: raw.accept_invalid_certificates.unwrap_or_default(),
+        proxy: raw.proxy.map(parse_raw_proxy_config).transpose()?,
     }))
+}
+
+fn parse_raw_proxy_config(raw: RawProxyConfig) -> anyhow::Result<retrack_types::trackers::ProxyConfig> {
+    use retrack_types::trackers::{ProxyConfig, ProxyCredentials};
+    
+    Ok(ProxyConfig {
+        url: raw.url.into_owned().parse()?,
+        credentials: raw.credentials.map(|creds| ProxyCredentials {
+            scheme: creds.scheme.into_owned(),
+            value: creds.value.into_owned(),
+        }),
+    })
 }
 
 fn parse_raw_api_target(raw: RawApiTarget) -> anyhow::Result<TrackerTarget> {
@@ -269,6 +296,7 @@ fn parse_raw_api_target(raw: RawApiTarget) -> anyhow::Result<TrackerTarget> {
             .collect::<anyhow::Result<Vec<_>>>()?,
         configurator: raw.configurator.map(Cow::into_owned),
         extractor: raw.extractor.map(Cow::into_owned),
+        proxy: raw.proxy.map(parse_raw_proxy_config).transpose()?,
     }))
 }
 
@@ -344,6 +372,13 @@ impl TryFrom<&Tracker> for RawTracker {
                         } else {
                             None
                         },
+                        proxy: target.proxy.as_ref().map(|proxy| RawProxyConfig {
+                            url: Cow::Borrowed(proxy.url.as_str()),
+                            credentials: proxy.credentials.as_ref().map(|creds| RawProxyCredentials {
+                                scheme: Cow::Borrowed(&creds.scheme),
+                                value: Cow::Borrowed(&creds.value),
+                            }),
+                        }),
                     }),
                     TrackerTarget::Api(target) => RawTrackerTarget::Api(RawApiTarget {
                         requests: target
@@ -392,6 +427,13 @@ impl TryFrom<&Tracker> for RawTracker {
                             .extractor
                             .as_ref()
                             .map(|extractor| Cow::Borrowed(extractor.as_ref())),
+                        proxy: target.proxy.as_ref().map(|proxy| RawProxyConfig {
+                            url: Cow::Borrowed(proxy.url.as_str()),
+                            credentials: proxy.credentials.as_ref().map(|creds| RawProxyCredentials {
+                                scheme: Cow::Borrowed(&creds.scheme),
+                                value: Cow::Borrowed(&creds.value),
+                            }),
+                        }),
                     }),
                 },
                 actions: item.actions.iter().map(|action| action.into()).collect(),
@@ -534,6 +576,7 @@ mod v1 {
                 .collect::<anyhow::Result<Vec<_>>>()?,
             configurator: raw.configurator.map(Cow::into_owned),
             extractor: raw.extractor.map(Cow::into_owned),
+            proxy: None, // No proxy in v1
         }))
     }
 

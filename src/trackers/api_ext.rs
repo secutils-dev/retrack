@@ -1358,6 +1358,7 @@ mod tests {
                         media_type: Some("application/json".parse()?),
                         accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                         accept_invalid_certificates: true,
+                proxy: None,
                     }],
                     configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                     extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
@@ -1389,6 +1390,7 @@ mod tests {
             engine: None,
             user_agent: Some("Retrack/1.0.0".to_string()),
             accept_invalid_certificates: true,
+                proxy: None,
         });
         let config = TrackerConfig {
             revisions: 3,
@@ -1947,6 +1949,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None,
@@ -1972,6 +1975,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -2011,6 +2015,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -2036,6 +2041,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: Some("".to_string()),
                     extractor: None
@@ -2061,6 +2067,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2088,6 +2095,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: Some("".to_string())
@@ -2113,6 +2121,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: Some(
@@ -2144,6 +2153,7 @@ mod tests {
                     engine: None,
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     accept_invalid_certificates: true,
+                proxy: None,
                 }),
                 config: TrackerConfig {
                     revisions: 3,
@@ -2683,6 +2693,7 @@ mod tests {
                     engine: None,
                     user_agent: Some("".to_string()),
                     accept_invalid_certificates: false,
+                proxy: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2698,6 +2709,7 @@ mod tests {
                     engine: None,
                     user_agent: Some("a".repeat(201)),
                     accept_invalid_certificates: false,
+                proxy: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2853,6 +2865,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None
@@ -2874,6 +2887,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -2895,6 +2909,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: Some("".to_string()),
                     extractor: None
@@ -2916,6 +2931,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
@@ -2939,6 +2955,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: Some("".to_string())
@@ -2960,6 +2977,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: Some(
@@ -2998,6 +3016,7 @@ mod tests {
                         media_type: None,
                         accept_statuses: None,
                         accept_invalid_certificates: false,
+                proxy: None,
                     }],
                     configurator: None,
                     extractor: None
@@ -3696,6 +3715,7 @@ mod tests {
                             media_type: Some("application/json".parse()?),
                             accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                             accept_invalid_certificates: true,
+                proxy: None,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4196,6 +4216,7 @@ mod tests {
                             ),
                             accept_statuses: None,
                             accept_invalid_certificates: false,
+                proxy: None,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4311,6 +4332,7 @@ mod tests {
                             media_type: Some("text/csv".parse()?),
                             accept_statuses: None,
                             accept_invalid_certificates: false,
+                proxy: None,
                         }],
                         configurator: None,
                         extractor: None,
@@ -4397,6 +4419,7 @@ mod tests {
                                 media_type: Some("text/csv".parse()?),
                                 accept_statuses: None,
                                 accept_invalid_certificates: false,
+                proxy: None,
                             },
                             TargetRequest {
                                 url: server.url("/api/json-call").parse()?,
@@ -4409,6 +4432,7 @@ mod tests {
                                 media_type: Some("application/json".parse()?),
                                 accept_statuses: None,
                                 accept_invalid_certificates: false,
+                proxy: None,
                             },
                         ],
                         configurator: None,
@@ -4503,6 +4527,7 @@ mod tests {
                             media_type: Some("application/json".parse()?),
                             accept_statuses: None,
                             accept_invalid_certificates: false,
+                proxy: None,
                         }],
                         configurator: Some(server.url("/configurator.js")),
                         extractor: Some(server.url("/extractor.js")),
@@ -6067,6 +6092,7 @@ mod tests {
                         engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         accept_invalid_certificates: true,
+                proxy: None,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
@@ -6153,6 +6179,7 @@ mod tests {
                         engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         accept_invalid_certificates: true,
+                proxy: None,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,
@@ -6234,6 +6261,7 @@ mod tests {
                         engine: None,
                         user_agent: Some("Unknown/1.0.0".to_string()),
                         accept_invalid_certificates: true,
+                proxy: None,
                     })),
                     config: Some(TrackerConfig {
                         revisions: 4,

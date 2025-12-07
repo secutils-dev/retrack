@@ -22,8 +22,8 @@ pub use self::{
     tracker_list_revisions_params::TrackerListRevisionsParams,
     tracker_target::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
-        ExtractorEngine, ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest,
-        TargetResponse, TrackerTarget,
+        ExtractorEngine, ExtractorScriptArgs, ExtractorScriptResult, PageTarget, ProxyConfig,
+        ProxyCredentials, TargetRequest, TargetResponse, TrackerTarget,
     },
     tracker_update_params::TrackerUpdateParams,
     trackers_list_params::TrackersListParams,
@@ -61,6 +61,7 @@ pub mod tests {
                         engine: None,
                         user_agent: Some("Retrack/1.0.0".to_string()),
                         accept_invalid_certificates: false,
+                proxy: None,
                     }),
                     config: TrackerConfig {
                         revisions,
