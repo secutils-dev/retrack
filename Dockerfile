@@ -1,4 +1,4 @@
-FROM rust:1.89-slim-trixie AS builder
+FROM rust:1.91-slim-trixie AS builder
 WORKDIR /app
 
 ARG TARGETARCH
@@ -19,8 +19,8 @@ RUN --mount=type=cache,target=/app/target cargo build --release && \
     cp ./target/release/retrack ./ && \
     upx --best --lzma ./retrack
 
-# Check out https://gcr.io/distroless/cc-debian12:nonroot
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Check out https://gcr.io/distroless/cc-debian13:nonroot
+FROM gcr.io/distroless/cc-debian13:nonroot
 EXPOSE 7676
 
 WORKDIR /app
