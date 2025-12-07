@@ -903,10 +903,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             accept_invalid_certificates: target.accept_invalid_certificates,
             timeout: tracker.config.timeout,
             previous_content: previous_revision.as_ref().map(|rev| &rev.data),
+            proxy: target.proxy.as_ref(),
         };
 
         let scraper_response = self
-            .http_client(false)
+            .http_client(false, None)
             .post(format!(
                 "{}api/web_page/execute",
                 self.api.config.as_ref().components.web_scraper_url.as_str()
@@ -1000,7 +1001,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             let requests = requests_override.as_ref().unwrap_or(&target.requests);
             let mut responses = Vec::with_capacity(requests.len());
             for (request_index, request) in requests.iter().enumerate() {
-                let client = self.http_client(request.accept_invalid_certificates);
+                let client = self.http_client(request.accept_invalid_certificates, target.proxy.as_ref());
                 let request_builder = client.request(
                     request.method.as_ref().unwrap_or(&Method::GET).clone(),
                     request.url.clone(),
@@ -1232,7 +1233,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         }
 
         Ok(self
-            .http_client(false)
+            .http_client(false, None)
             .get(url)
             .send()
             .await?
@@ -1242,12 +1243,31 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
     }
 
     /// Constructs a new instance of the HTTP client with tracing and caching middleware.
-    fn http_client(&self, accept_invalid_certificates: bool) -> ClientWithMiddleware {
+    fn http_client(
+        &self,
+        accept_invalid_certificates: bool,
+        proxy: Option<&retrack_types::trackers::ProxyConfig>,
+    ) -> ClientWithMiddleware {
+        let mut reqwest_builder = reqwest::Client::builder()
+            .danger_accept_invalid_certs(accept_invalid_certificates);
+        
+        // Configure proxy if provided
+        if let Some(proxy_config) = proxy {
+            let mut reqwest_proxy = reqwest::Proxy::all(proxy_config.url.clone())
+                .expect("Failed to configure proxy");
+            
+            // Add proxy authentication if credentials are provided
+            if let Some(ref creds) = proxy_config.credentials {
+                // Build the Proxy-Authorization header value
+                let auth_value = format!("{} {}", creds.scheme, creds.value);
+                reqwest_proxy = reqwest_proxy.custom_http_auth(auth_value.parse().expect("Failed to parse proxy auth header"));
+            }
+            
+            reqwest_builder = reqwest_builder.proxy(reqwest_proxy);
+        }
+        
         let client_builder = ClientBuilder::new(
-            reqwest::Client::builder()
-                .danger_accept_invalid_certs(accept_invalid_certificates)
-                .build()
-                .expect("Failed to build http client"),
+            reqwest_builder.build().expect("Failed to build http client")
         )
         .with(TracingMiddleware::<SpanBackendWithUrl>::new());
         if let Some(ref path) = self.api.config.cache.http_cache_path {

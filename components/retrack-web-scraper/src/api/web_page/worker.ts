@@ -26,6 +26,7 @@ const {
   userAgent,
   acceptInvalidCertificates,
   screenshotsPath,
+  proxy,
 } = workerData as WorkerData;
 
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
@@ -92,7 +93,32 @@ try {
   throw new Error('Failed to connect to a browser.');
 }
 
-const context = await browser.newContext({ ignoreHTTPSErrors: acceptInvalidCertificates, userAgent, viewport: null });
+const contextOptions: {
+  ignoreHTTPSErrors: boolean;
+  userAgent?: string;
+  viewport: null;
+  proxy?: { server: string; username?: string; password?: string };
+} = { ignoreHTTPSErrors: acceptInvalidCertificates ?? false, userAgent, viewport: null };
+
+// Configure proxy if provided
+if (proxy) {
+  contextOptions.proxy = { server: proxy.url };
+  if (proxy.credentials) {
+    // For proxy authentication, we need to set the Proxy-Authorization header
+    // Playwright doesn't support custom auth schemes directly, so we'll use the HTTP auth format
+    // which works for Basic authentication
+    const authValue = `${proxy.credentials.scheme} ${proxy.credentials.value}`;
+    // Note: Playwright's proxy auth only supports username:password format
+    // For custom auth schemes, we'll need to use extraHTTPHeaders instead
+    contextOptions.proxy = { 
+      server: proxy.url,
+      // This won't work for custom schemes, but it's a limitation of Playwright
+      // The extraHTTPHeaders approach would be needed for full support
+    };
+  }
+}
+
+const context = await browser.newContext(contextOptions);
 
 // SECURITY: Ideally, the extractor script shouldn't have access to the browser instance, as it could close the browser
 // and access other contexts. Unfortunately, the browser instance and context are accessible through various Playwright

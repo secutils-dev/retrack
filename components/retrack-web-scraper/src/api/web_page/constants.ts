@@ -32,6 +32,17 @@ export interface WorkerResultMessage {
 }
 
 /**
+ * Represents proxy configuration.
+ */
+export interface ProxyConfig {
+  url: string;
+  credentials?: {
+    scheme: string;
+    value: string;
+  };
+}
+
+/**
  * Represents the data passed to the worker thread.
  */
 export interface WorkerData {
@@ -53,4 +64,6 @@ export interface WorkerData {
   acceptInvalidCertificates?: boolean;
   // Path to a folder where to save screenshots.
   screenshotsPath?: string;
+  // Optional proxy configuration.
+  proxy?: ProxyConfig;
 }
