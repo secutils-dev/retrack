@@ -378,7 +378,7 @@ mod tests {
                 .is_none()
         );
 
-        let mut tasks = vec![
+        let mut tasks = [
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 task_type: TaskType::Email(EmailTaskType {
@@ -445,7 +445,7 @@ mod tests {
         )
         .await?;
 
-        let mut tasks = vec![
+        let mut tasks = [
             Task {
                 id: uuid!("00000000-0000-0000-0000-000000000001"),
                 task_type: TaskType::Email(EmailTaskType {
@@ -978,7 +978,7 @@ mod tests {
             (OffsetDateTime::now_utc().add(Duration::seconds(30)) - rescheduled_task.scheduled_at)
                 < Duration::seconds(5)
         );
-        server_handler_mock.assert_hits(2);
+        server_handler_mock.assert_calls(2);
 
         Ok(())
     }

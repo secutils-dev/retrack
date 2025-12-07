@@ -11,7 +11,7 @@ pub use self::{
 };
 use crate::{config::JsRuntimeConfig, js_runtime::script::ScriptDefinition};
 use anyhow::{Context, anyhow};
-use deno_core::{Extension, RuntimeOptions, serde_v8, v8};
+use deno_core::{Extension, RuntimeOptions, scope, serde_v8, v8};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     sync::{
@@ -231,7 +231,8 @@ impl JsRuntime {
             Ordering::Relaxed,
         );
 
-        let scope = &mut runtime.handle_scope();
+        scope!(scope, runtime);
+
         let local = v8::Local::new(scope, script_result);
         serde_v8::from_v8(scope, local).context("Error deserializing script result")
     }
@@ -240,7 +241,8 @@ impl JsRuntime {
         runtime: &mut deno_core::JsRuntime,
         args: ScriptArgs,
     ) -> anyhow::Result<()> {
-        let scope = &mut runtime.handle_scope();
+        scope!(scope, runtime);
+
         let context = scope.get_current_context();
         let context_scope = &mut v8::ContextScope::new(scope, context);
 
@@ -686,6 +688,7 @@ pub mod tests {
           "Deno.core.getPromiseDetails()",
           "Deno.core.getProxyDetails()",
           "Deno.core.getTimerDepth()",
+          "Deno.core.getTransferableResource()",
           "Deno.core.hasPromise()",
           "Deno.core.hasTickScheduled()",
           "Deno.core.hostObjectBrand=symbol",
@@ -740,7 +743,6 @@ pub mod tests {
           "Deno.core.ops.op_error_async_deferred()",
           "Deno.core.ops.op_eval_context()",
           "Deno.core.ops.op_event_loop_has_more_work()",
-          "Deno.core.ops.op_format_file_name()",
           "Deno.core.ops.op_get_constructor_name()",
           "Deno.core.ops.op_get_ext_import_meta_proto()",
           "Deno.core.ops.op_get_extras_binding_object()",
@@ -748,6 +750,10 @@ pub mod tests {
           "Deno.core.ops.op_get_promise_details()",
           "Deno.core.ops.op_get_proxy_details()",
           "Deno.core.ops.op_has_tick_scheduled()",
+          "Deno.core.ops.op_immediate_count()",
+          "Deno.core.ops.op_immediate_has_ref_count()",
+          "Deno.core.ops.op_immediate_ref_count()",
+          "Deno.core.ops.op_immediate_set_has_outstanding()",
           "Deno.core.ops.op_import_sync()",
           "Deno.core.ops.op_is_any_array_buffer()",
           "Deno.core.ops.op_is_arguments_object()",
@@ -805,7 +811,6 @@ pub mod tests {
           "Deno.core.ops.op_structured_clone()",
           "Deno.core.ops.op_timer_cancel()",
           "Deno.core.ops.op_timer_queue()",
-          "Deno.core.ops.op_timer_queue_immediate()",
           "Deno.core.ops.op_timer_queue_system()",
           "Deno.core.ops.op_timer_ref()",
           "Deno.core.ops.op_timer_unref()",
@@ -816,6 +821,7 @@ pub mod tests {
           "Deno.core.ops.op_void_sync()",
           "Deno.core.ops.op_wasm_streaming_feed()",
           "Deno.core.ops.op_wasm_streaming_set_url()",
+          "Deno.core.ops.op_wasm_streaming_stream_feed()",
           "Deno.core.ops.op_write()",
           "Deno.core.ops.op_write_all()",
           "Deno.core.ops.op_write_sync()",
@@ -828,7 +834,6 @@ pub mod tests {
           "Deno.core.propReadOnly()",
           "Deno.core.propWritable()",
           "Deno.core.propWritableLazyLoaded()",
-          "Deno.core.queueImmediate()",
           "Deno.core.queueSystemTimer()",
           "Deno.core.queueUserTimer()",
           "Deno.core.read()",
@@ -838,9 +843,11 @@ pub mod tests {
           "Deno.core.refTimer()",
           "Deno.core.registerErrorBuilder()",
           "Deno.core.registerErrorClass()",
+          "Deno.core.registerTransferableResource()",
           "Deno.core.reportUnhandledException()",
           "Deno.core.reportUnhandledPromiseRejection()",
           "Deno.core.resources()",
+          "Deno.core.runImmediateCallbacks()",
           "Deno.core.runMicrotasks()",
           "Deno.core.scopeAsyncContext()",
           "Deno.core.serialize()",
@@ -848,6 +855,7 @@ pub mod tests {
           "Deno.core.setBuildInfo()",
           "Deno.core.setHandledPromiseRejectionHandler()",
           "Deno.core.setHasTickScheduled()",
+          "Deno.core.setImmediateCallback()",
           "Deno.core.setLeakTracingEnabled()",
           "Deno.core.setMacrotaskCallback()",
           "Deno.core.setNextTickCallback()",

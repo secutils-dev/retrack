@@ -749,7 +749,7 @@ mod tests {
     async fn can_bulk_remove_all_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000003"),
                 "some-name",
@@ -904,7 +904,7 @@ mod tests {
     async fn can_add_and_retrieve_tracker_data(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
@@ -934,7 +934,7 @@ mod tests {
             );
         }
 
-        let revisions = vec![
+        let revisions = [
             create_data_revision(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 trackers_list[0].id,
@@ -1000,7 +1000,7 @@ mod tests {
     async fn can_retrieve_all_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
@@ -1094,7 +1094,7 @@ mod tests {
     async fn can_remove_tracker_data_revision(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
@@ -1114,7 +1114,7 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        let revisions = vec![
+        let revisions = [
             create_data_revision(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 trackers_list[0].id,
@@ -1207,7 +1207,7 @@ mod tests {
     async fn can_clear_all_data_revisions_at_once(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
@@ -1227,7 +1227,7 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        let revisions = vec![
+        let revisions = [
             create_data_revision(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 trackers_list[0].id,
@@ -1289,7 +1289,7 @@ mod tests {
     async fn can_enforce_tracker_data_revisions_limit(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
@@ -1309,7 +1309,7 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        let revisions = vec![
+        let revisions = [
             create_data_revision(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 trackers_list[0].id,
@@ -1542,7 +1542,7 @@ mod tests {
     async fn can_retrieve_tracker_by_job_id(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
-        let trackers_list = vec![
+        let trackers_list = [
             MockTrackerBuilder::create(
                 uuid!("00000000-0000-0000-0000-000000000001"),
                 "some-name",
