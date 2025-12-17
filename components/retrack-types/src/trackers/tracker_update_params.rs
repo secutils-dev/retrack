@@ -79,6 +79,7 @@ mod tests {
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 accept_invalid_certificates: true,
+                proxy: None,
             })),
             config: None,
             tags: None,
@@ -129,6 +130,7 @@ mod tests {
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 accept_invalid_certificates: true,
+                proxy: None,
             })),
             config: Some(TrackerConfig {
                 revisions: 3,
@@ -186,6 +188,7 @@ mod tests {
                 engine: Some(ExtractorEngine::Chromium),
                 user_agent: Some("Retrack/1.0.0".to_string()),
                 accept_invalid_certificates: true,
+                proxy: None,
             })),
             config: Some(TrackerConfig {
                 revisions: 3,
@@ -305,6 +308,7 @@ mod tests {
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     accept_invalid_certificates: true,
+                proxy: None,
                 })),
                 config: None,
                 tags: None,
@@ -377,6 +381,7 @@ mod tests {
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     accept_invalid_certificates: true,
+                proxy: None,
                 })),
                 config: Some(TrackerConfig {
                     revisions: 3,
@@ -438,6 +443,7 @@ mod tests {
                     engine: Some(ExtractorEngine::Chromium),
                     user_agent: Some("Retrack/1.0.0".to_string()),
                     accept_invalid_certificates: true,
+                proxy: None,
                 })),
                 config: Some(TrackerConfig {
                     revisions: 3,

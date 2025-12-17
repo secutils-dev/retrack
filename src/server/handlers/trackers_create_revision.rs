@@ -287,9 +287,11 @@ mod tests {
                             body: None,
                             accept_statuses: None,
                             accept_invalid_certificates: false,
+                proxy: None,
                         }],
                         configurator: Some(format!("{}/configurator.js", server.base_url())),
                         extractor: None,
+                proxy: None,
                     }))
                     .build(),
             )
@@ -355,6 +357,7 @@ mod tests {
                             body: None,
                             accept_statuses: None,
                             accept_invalid_certificates: false,
+                proxy: None,
                         }],
                         configurator: None,
                         extractor: Some(format!("{}/extractor.js", server.base_url())),

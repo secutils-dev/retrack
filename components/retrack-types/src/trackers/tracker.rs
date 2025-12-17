@@ -59,6 +59,7 @@ mod tests {
             engine: Some(ExtractorEngine::Chromium),
             user_agent: Some("Retrack/2.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         }))
         .build();
         assert_json_snapshot!(tracker, @r###"
@@ -104,6 +105,7 @@ mod tests {
             engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -147,6 +149,7 @@ mod tests {
             engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -190,6 +193,7 @@ mod tests {
             engine: Some(ExtractorEngine::Camoufox),
             user_agent: Some("Retrack/2.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         }))
         .with_schedule("0 0 * * *")
         .build();
@@ -237,6 +241,7 @@ mod tests {
             engine: None,
             user_agent: Some("Retrack/2.0.0".to_string()),
             accept_invalid_certificates: true,
+            proxy: None,
         }))
         .with_schedule("0 0 * * *")
         .with_job_config(SchedulerJobConfig {
