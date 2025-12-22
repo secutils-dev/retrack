@@ -1,4 +1,4 @@
-FROM python:3.13-slim-trixie
+FROM python:3.14-slim-trixie
 EXPOSE 7777
 
 ENV CAMOUFOX_PORT=7777
@@ -9,18 +9,18 @@ ENV CAMOUFOX_HEADLESS=virtual
 WORKDIR /app
 
 # Install dependencies required by the firefox and clean up cache.
-RUN set -x && apt-get update && apt-get install -y libgtk-3-0 libx11-xcb1 libasound2 dumb-init xvfb && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install `camoufox` python package.
-RUN set -x && pip install -U camoufox
-
-# Fetch `camoufox` binary.
-RUN set -x && python -m camoufox fetch
+RUN set -x \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgtk-3-0 libx11-xcb1 libasound2 dumb-init xvfb \
+    && apt-get install -y --no-install-recommends git curl \
+    && pip install --no-cache-dir git+https://github.com/coryking/camoufox.git@v142.0.1-fork.27#subdirectory=pythonlib \
+    && python -m camoufox fetch \
+    && apt-get purge -y --auto-remove git curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy the custom runner that allows specifying different options.
 COPY ./dev/docker/camoufox_launcher.py /app/
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["python", "/app/camoufox_launcher.py"]
-
