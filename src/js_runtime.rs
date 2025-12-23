@@ -225,7 +225,7 @@ impl JsRuntime {
             .await
             .map_err(|err| handle_error(anyhow!(err)))?;
 
-        // Abort termination thread, if script managed to complete.
+        // Abort termination thread, if the script managed to complete.
         script_status.store(
             ScriptExecutionStatus::ExecutionCompleted as usize,
             Ordering::Relaxed,

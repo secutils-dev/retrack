@@ -88,10 +88,7 @@ mod tests {
         port = 465
         no_tls = true
         throttle_delay = 30000
-
-        [catch_all]
-        recipient = 'test@retrack.dev'
-        text_matcher = 'test'
+        catch_all = { recipient = 'test@retrack.dev', text_matcher = 'test' }
         "###);
     }
 

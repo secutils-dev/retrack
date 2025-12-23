@@ -74,48 +74,13 @@ mod tests {
         assert_toml_snapshot!(default_config, @r###"
         port = 7676
         public_url = 'http://localhost:7676/'
-
-        [db]
-        name = 'retrack'
-        host = 'localhost'
-        port = 5432
-        username = 'postgres'
-        max_connections = 100
-
-        [cache]
-
-        [components]
-        web_scraper_url = 'http://localhost:7272/'
-
-        [scheduler]
-        enabled = true
-        tasks_run = '0/30 * * * * *'
-        trackers_schedule = '0/10 * * * * *'
-        [tasks.http.retry_strategy]
-        type = 'exponential'
-        initial_interval = 60000
-        multiplier = 2
-        max_interval = 600000
-        max_attempts = 3
-        [tasks.email.retry_strategy]
-        type = 'exponential'
-        initial_interval = 60000
-        multiplier = 2
-        max_interval = 600000
-        max_attempts = 3
-
-        [trackers]
-        max_revisions = 30
-        max_timeout = 300000
-        min_schedule_interval = 10000
-        min_retry_interval = 60000
-        restrict_to_public_urls = true
-        max_script_size = '4 KiB'
-
-        [js_runtime]
-        max_heap_size = 10485760
-        max_script_execution_time = 10000
-        channel_buffer_size = 10
+        db = { name = 'retrack', host = 'localhost', port = 5432, username = 'postgres', max_connections = 100 }
+        cache = {}
+        components = { web_scraper_url = 'http://localhost:7272/' }
+        scheduler = { enabled = true, tasks_run = '0/30 * * * * *', trackers_schedule = '0/10 * * * * *' }
+        tasks = { http = { retry_strategy = { type = 'exponential', initial_interval = 60000, multiplier = 2, max_interval = 600000, max_attempts = 3 } }, email = { retry_strategy = { type = 'exponential', initial_interval = 60000, multiplier = 2, max_interval = 600000, max_attempts = 3 } } }
+        trackers = { max_revisions = 30, max_timeout = 300000, min_schedule_interval = 10000, min_retry_interval = 60000, restrict_to_public_urls = true, max_script_size = '4 KiB' }
+        js_runtime = { max_heap_size = 10485760, max_script_execution_time = 10000, channel_buffer_size = 10 }
         "###);
     }
 

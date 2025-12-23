@@ -26,18 +26,8 @@ mod tests {
     #[test]
     fn serialization_and_default() {
         assert_toml_snapshot!(TasksConfig::default(), @r###"
-        [http.retry_strategy]
-        type = 'exponential'
-        initial_interval = 60000
-        multiplier = 2
-        max_interval = 600000
-        max_attempts = 3
-        [email.retry_strategy]
-        type = 'exponential'
-        initial_interval = 60000
-        multiplier = 2
-        max_interval = 600000
-        max_attempts = 3
+        http = { retry_strategy = { type = 'exponential', initial_interval = 60000, multiplier = 2, max_interval = 600000, max_attempts = 3 } }
+        email = { retry_strategy = { type = 'exponential', initial_interval = 60000, multiplier = 2, max_interval = 600000, max_attempts = 3 } }
         "###);
     }
 
