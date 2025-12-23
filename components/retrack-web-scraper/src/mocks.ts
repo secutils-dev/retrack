@@ -1,5 +1,4 @@
 import { mock } from 'node:test';
-import type { Protocol } from 'playwright-core/types/protocol';
 import { WebSocketServer } from 'ws';
 
 export interface BrowserServerMockParams {
@@ -12,6 +11,12 @@ export interface IncomingMessage {
   params: unknown;
   sessionId?: string;
 }
+
+interface CallFunctionParams {
+  objectId?: string;
+  arguments?: Array<{ value?: unknown }>;
+}
+
 export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
   const port = 8080;
 
@@ -31,9 +36,10 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
   };
 
   const messages: Array<IncomingMessage> = [];
-  const runtimeCallFunctionOn = mock.fn<
-    (params: Protocol.CommandParameters['Runtime.callFunctionOn']) => Protocol.Runtime.RemoteObject
-  >(() => ({ type: 'string', value: 'Hello from Retrack.dev!' }));
+  const runtimeCallFunctionOn = mock.fn<(params: CallFunctionParams) => { value?: unknown }>(() => ({
+    type: 'string',
+    value: 'Hello from Retrack.dev!',
+  }));
   const wss = new WebSocketServer({ port });
   let scriptIdentifier = 0;
   wss.on('connection', function connection(ws) {
@@ -307,7 +313,7 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
           JSON.stringify({
             id: message.id,
             result: {
-              result: runtimeCallFunctionOn(message.params as Protocol.CommandParameters['Runtime.callFunctionOn']),
+              result: runtimeCallFunctionOn(message.params as CallFunctionParams),
             },
             sessionId: message.sessionId,
           }),
@@ -345,7 +351,7 @@ export function createBrowserServerMock(params: BrowserServerMockParams = {}) {
     endpoint: `ws://localhost:${port}`,
     messages,
     runtimeCallFunctionOn,
-    isBuiltInPageContent: (params: Protocol.CommandParameters['Runtime.callFunctionOn']) =>
+    isBuiltInPageContent: (params: CallFunctionParams) =>
       params.objectId === utilityScriptObjectId &&
       params.arguments?.some((arg) => typeof arg.value === 'string' && arg.value.includes('serializeToString')),
     cleanup: () => new Promise((resolve, reject) => wss.close((err) => (err ? reject(err) : resolve(undefined)))),
