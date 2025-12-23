@@ -10,10 +10,7 @@ except ValueError:
 def str_to_bool(val):
     return str(val).lower() in ("true", "1", "yes")
 
-headless_env = os.environ.get("CAMOUFOX_HEADLESS", "virtual").lower()
-
 launch_server(
-    headless="virtual" if headless_env == "virtual" else str_to_bool(headless_env),
     main_world_eval=str_to_bool(os.environ.get("CAMOUFOX_USE_MAIN_WORLD", "True")),
     port=port,
     host="0.0.0.0",
