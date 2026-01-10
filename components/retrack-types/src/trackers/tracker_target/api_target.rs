@@ -1,3 +1,4 @@
+use super::ProxyConfig;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use utoipa::ToSchema;
@@ -31,6 +32,9 @@ pub struct ApiTarget {
 
     /// Optional custom script (Deno) to extract only necessary data from the API response.
     pub extractor: Option<String>,
+
+    /// Optional proxy configuration.
+    pub proxy: Option<ProxyConfig>,
 }
 
 #[cfg(test)]
@@ -50,6 +54,7 @@ mod tests {
             requests: vec![TargetRequest::new(Url::parse("https://retrack.dev")?)],
             configurator: None,
             extractor: None,
+            proxy: None,
         };
         let target_json = json!({ "requests": [{ "url": "https://retrack.dev/" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -62,6 +67,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            proxy: None,
         };
         let target_json =
             json!({ "requests": [{"url": "https://retrack.dev/", "method": "PUT" }] });
@@ -84,6 +90,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            proxy: None,
         };
         let target_json = json!({
             "requests": [{
@@ -115,6 +122,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            proxy: None,
         };
         let target_json = json!({
             "requests": [{
@@ -152,6 +160,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            proxy: None,
         };
         let target_json = json!({
             "requests": [{
@@ -195,6 +204,7 @@ mod tests {
                     .to_string(),
             ),
             extractor: None,
+            proxy: None,
         };
         let target_json = json!({
             "requests": [{
@@ -241,6 +251,7 @@ mod tests {
                 "((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
                     .to_string(),
             ),
+            proxy: None,
         };
         let target_json = json!({
             "requests": [{
