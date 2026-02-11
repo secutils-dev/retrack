@@ -29,7 +29,14 @@ mod tests {
 
     #[test]
     fn serialization_and_default() {
-        assert_toml_snapshot!(EmailTaskConfig::default(), @"retry_strategy = { type = 'exponential', initial_interval = 60000, multiplier = 2, max_interval = 600000, max_attempts = 3 }");
+        assert_toml_snapshot!(EmailTaskConfig::default(), @r###"
+        [retry_strategy]
+        type = 'exponential'
+        initial_interval = 60000
+        multiplier = 2
+        max_interval = 600000
+        max_attempts = 3
+        "###);
     }
 
     #[test]

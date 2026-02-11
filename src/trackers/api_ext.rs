@@ -1245,7 +1245,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
     fn http_client(&self, accept_invalid_certificates: bool) -> ClientWithMiddleware {
         let client_builder = ClientBuilder::new(
             reqwest::Client::builder()
-                .danger_accept_invalid_certs(accept_invalid_certificates)
+                .tls_danger_accept_invalid_certs(accept_invalid_certificates)
                 .build()
                 .expect("Failed to build http client"),
         )

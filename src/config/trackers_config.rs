@@ -97,7 +97,14 @@ mod tests {
         min_retry_interval = 3000
         restrict_to_public_urls = false
         max_script_size = '8 KiB'
-        default_actions = [{ type = 'log' }, { type = 'email', to = ['dev@retrack.dev'], formatter = "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();" }]
+
+        [[default_actions]]
+        type = 'log'
+
+        [[default_actions]]
+        type = 'email'
+        to = ['dev@retrack.dev']
+        formatter = '''(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();'''
         "###);
     }
 

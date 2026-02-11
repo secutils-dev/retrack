@@ -52,7 +52,7 @@ pub struct JsRuntime {
 impl JsRuntime {
     /// Initializes the JS runtime platform, should be called only once and in the main thread.
     pub fn init_platform(config: &JsRuntimeConfig) -> anyhow::Result<Self> {
-        deno_core::JsRuntime::init_platform(None, false);
+        deno_core::JsRuntime::init_platform(None);
 
         // JsRuntime will be initialized in the dedicated thread.
         let (tx, mut rx) = mpsc::channel::<ScriptTask>(config.channel_buffer_size);
@@ -920,7 +920,10 @@ pub mod tests {
           "SafeMap()",
           "SafeMapIterator()",
           "SafePromiseAll()",
+          "SafePromiseAllSettled()",
+          "SafePromiseAny()",
           "SafePromisePrototypeFinally()",
+          "SafePromiseRace()",
           "SafeRegExp()",
           "SafeSet()",
           "SafeSetIterator()",
