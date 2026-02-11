@@ -1,8 +1,8 @@
-FROM rust:1.92-slim-trixie AS builder
+FROM rust:1.93-slim-trixie AS builder
 WORKDIR /app
 
 ARG TARGETARCH
-ARG UPX_VERSION=5.0.2
+ARG UPX_VERSION=5.1.0
 
 # Install dependencies.
 RUN set -x && apt-get update && apt-get install -y protobuf-compiler curl xz-utils
