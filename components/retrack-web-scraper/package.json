@@ -16,7 +16,7 @@
     "build": "tsc --project ./",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "watch": "NODE_OPTIONS=--import=./register.js node --env-file-if-exist=../../.env --watch src/index.ts",
+    "watch": "NODE_OPTIONS=--import=./register.js node --env-file-if-exists=../../.env --watch src/index.ts",
     "test": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test ./src/tests.ts",
     "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test --watch ./src/tests.ts"
   },
