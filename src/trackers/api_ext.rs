@@ -387,7 +387,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .get_tracker_data_revisions(tracker_id, min(max_revisions, tracker.config.revisions))
             .await?;
         if params.calculate_diff {
-            tracker_data_revisions_diff(revisions)
+            tracker_data_revisions_diff(revisions, params.effective_context_radius())
         } else {
             Ok(revisions)
         }

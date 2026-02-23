@@ -51,7 +51,9 @@ mod tests {
         web,
     };
     use insta::assert_debug_snapshot;
-    use retrack_types::trackers::{TrackerDataRevision, TrackerDataValue};
+    use retrack_types::trackers::{
+        DEFAULT_DIFF_CONTEXT_RADIUS, TrackerDataRevision, TrackerDataValue,
+    };
     use serde_json::json;
     use sqlx::PgPool;
     use std::str::from_utf8;
@@ -199,10 +201,13 @@ mod tests {
         )?;
         assert_eq!(
             revisions,
-            tracker_data_revisions_diff(vec![data_revision_two.clone(), data_revision_one])?
+            tracker_data_revisions_diff(
+                vec![data_revision_two.clone(), data_revision_one],
+                DEFAULT_DIFF_CONTEXT_RADIUS,
+            )?
         );
 
-        // Does not calculate the difference, if there is only one revision.
+        // Does not calculate the difference if there is only one revision.
         let response = call_service(
             &app,
             TestRequest::with_uri(&format!(

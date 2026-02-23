@@ -19,7 +19,9 @@ pub use self::{
     tracker_create_params::TrackerCreateParams,
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
-    tracker_list_revisions_params::TrackerListRevisionsParams,
+    tracker_list_revisions_params::{
+        DEFAULT_DIFF_CONTEXT_RADIUS, MAX_DIFF_CONTEXT_RADIUS, TrackerListRevisionsParams,
+    },
     tracker_target::{
         ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptRequest, ConfiguratorScriptResult,
         ExtractorEngine, ExtractorScriptArgs, ExtractorScriptResult, PageTarget, TargetRequest,
