@@ -85,6 +85,7 @@ struct RawApiTarget<'s> {
     requests: Vec<RawApiTargetRequest<'s>>,
     configurator: Option<Cow<'s, str>>,
     extractor: Option<Cow<'s, str>>,
+    params: Option<Vec<u8>>,
 }
 
 #[serde_as]
@@ -140,22 +141,39 @@ impl TryFrom<RawTracker> for Tracker {
                     .collect::<anyhow::Result<_>>()?,
             ),
             Err(err) => {
-                warn!("Failed to parse tracker config, parsing V1: {err}");
-                let raw_config =
-                    postcard::from_bytes::<v1::RawTrackerConfig>(&raw.config).map_err(|_| err)?;
-                (
-                    TrackerConfig {
-                        revisions: raw_config.revisions,
-                        timeout: raw_config.timeout,
-                        job: parse_raw_scheduler_job_config(raw_config.job),
-                    },
-                    v1::parse_raw_target(raw_config.target)?,
-                    raw_config
-                        .actions
-                        .into_iter()
-                        .map(|action| action.try_into())
-                        .collect::<anyhow::Result<_>>()?,
-                )
+                if let Ok(raw_config) = postcard::from_bytes::<v2::RawTrackerConfig>(&raw.config) {
+                    warn!("Failed to parse tracker config, parsing V2: {err}");
+                    (
+                        TrackerConfig {
+                            revisions: raw_config.revisions,
+                            timeout: raw_config.timeout,
+                            job: parse_raw_scheduler_job_config(raw_config.job),
+                        },
+                        v2::parse_raw_target(raw_config.target)?,
+                        raw_config
+                            .actions
+                            .into_iter()
+                            .map(|action| action.try_into())
+                            .collect::<anyhow::Result<_>>()?,
+                    )
+                } else {
+                    warn!("Failed to parse tracker config, parsing V1: {err}");
+                    let raw_config = postcard::from_bytes::<v1::RawTrackerConfig>(&raw.config)
+                        .map_err(|_| err)?;
+                    (
+                        TrackerConfig {
+                            revisions: raw_config.revisions,
+                            timeout: raw_config.timeout,
+                            job: parse_raw_scheduler_job_config(raw_config.job),
+                        },
+                        v1::parse_raw_target(raw_config.target)?,
+                        raw_config
+                            .actions
+                            .into_iter()
+                            .map(|action| action.try_into())
+                            .collect::<anyhow::Result<_>>()?,
+                    )
+                }
             }
         };
 
@@ -269,6 +287,7 @@ fn parse_raw_api_target(raw: RawApiTarget) -> anyhow::Result<TrackerTarget> {
             .collect::<anyhow::Result<Vec<_>>>()?,
         configurator: raw.configurator.map(Cow::into_owned),
         extractor: raw.extractor.map(Cow::into_owned),
+        params: raw.params.map(|p| serde_json::from_slice(&p)).transpose()?,
     }))
 }
 
@@ -392,6 +411,7 @@ impl TryFrom<&Tracker> for RawTracker {
                             .extractor
                             .as_ref()
                             .map(|extractor| Cow::Borrowed(extractor.as_ref())),
+                        params: target.params.as_ref().map(serde_json::to_vec).transpose()?,
                     }),
                 },
                 actions: item.actions.iter().map(|action| action.into()).collect(),
@@ -482,6 +502,54 @@ impl TryFrom<RawTrackerAction<'_>> for TrackerAction {
     }
 }
 
+mod v2 {
+    use crate::trackers::database_ext::raw_tracker as v_latest;
+    use serde::{Deserialize, Serialize};
+    use std::{borrow::Cow, time::Duration};
+
+    pub fn parse_raw_target(raw: RawTrackerTarget) -> anyhow::Result<v_latest::TrackerTarget> {
+        Ok(match raw {
+            RawTrackerTarget::Page(target) => v_latest::parse_raw_page_target(target)?,
+            RawTrackerTarget::Api(target) => parse_raw_api_target(target)?,
+        })
+    }
+
+    fn parse_raw_api_target(raw: RawApiTarget) -> anyhow::Result<v_latest::TrackerTarget> {
+        v_latest::parse_raw_api_target(v_latest::RawApiTarget {
+            requests: raw.requests,
+            configurator: raw.configurator,
+            extractor: raw.extractor,
+            params: None,
+        })
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawTrackerConfig<'s> {
+        pub revisions: usize,
+        pub timeout: Option<Duration>,
+        #[serde(borrow)]
+        pub target: RawTrackerTarget<'s>,
+        pub actions: Vec<v_latest::RawTrackerAction<'s>>,
+        pub job: Option<v_latest::RawSchedulerJobConfig<'s>>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub enum RawTrackerTarget<'s> {
+        Page(v_latest::RawPageTarget<'s>),
+        #[serde(borrow)]
+        Api(RawApiTarget<'s>),
+    }
+
+    /// Pre-params version of RawApiTarget (without `params` field).
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+    pub struct RawApiTarget<'s> {
+        #[serde(borrow)]
+        pub requests: Vec<v_latest::RawApiTargetRequest<'s>>,
+        pub configurator: Option<Cow<'s, str>>,
+        pub extractor: Option<Cow<'s, str>>,
+    }
+}
+
 mod v1 {
     use crate::trackers::database_ext::raw_tracker as v_latest;
     use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
@@ -534,6 +602,7 @@ mod v1 {
                 .collect::<anyhow::Result<Vec<_>>>()?,
             configurator: raw.configurator.map(Cow::into_owned),
             extractor: raw.extractor.map(Cow::into_owned),
+            params: None,
         }))
     }
 
@@ -674,6 +743,7 @@ mod tests {
                 requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
                 configurator: None,
                 extractor: None,
+                params: None,
             }),
             config: TrackerConfig::default(),
             actions: vec![TrackerAction::ServerLog(Default::default())],
@@ -701,7 +771,8 @@ mod tests {
                     accept_invalid_certificates: true
                 }],
                 configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
-                extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context)) })();".to_string())
+                extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context)) })();".to_string()),
+                params: None,
             }),
             config: TrackerConfig::default(),
             actions: vec![TrackerAction::ServerLog(ServerLogAction {
@@ -713,6 +784,86 @@ mod tests {
             ..tracker.clone()
         };
         assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
+
+        let tracker = Tracker {
+            target: TrackerTarget::Api(ApiTarget {
+                requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
+                configurator: None,
+                extractor: None,
+                params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
+            }),
+            config: TrackerConfig::default(),
+            actions: vec![],
+            job_id: None,
+            ..tracker.clone()
+        };
+        assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_deserialize_v2_api_tracker_without_params() -> anyhow::Result<()> {
+        use super::v2;
+
+        let base_tracker = Tracker {
+            id: uuid!("00000000-0000-0000-0000-000000000001"),
+            name: "tk".to_string(),
+            enabled: true,
+            target: TrackerTarget::Api(ApiTarget {
+                requests: vec![TargetRequest::new("https://retrack.dev/api".parse()?)],
+                configurator: Some("script()".to_string()),
+                extractor: Some("extract()".to_string()),
+                params: None,
+            }),
+            config: TrackerConfig {
+                revisions: 3,
+                timeout: None,
+                job: None,
+            },
+            tags: vec![],
+            actions: vec![],
+            created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+            updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
+            job_id: None,
+        };
+
+        let raw = RawTracker::try_from(&base_tracker)?;
+
+        let v2_config_bytes = postcard::to_stdvec(&v2::RawTrackerConfig {
+            revisions: 3,
+            timeout: None,
+            target: v2::RawTrackerTarget::Api(v2::RawApiTarget {
+                requests: vec![super::RawApiTargetRequest {
+                    url: "https://retrack.dev/api".into(),
+                    method: None,
+                    headers: None,
+                    body: None,
+                    media_type: None,
+                    accept_statuses: None,
+                    accept_invalid_certificates: None,
+                }],
+                configurator: Some("script()".into()),
+                extractor: Some("extract()".into()),
+            }),
+            actions: vec![],
+            job: None,
+        })?;
+
+        let raw_v2 = RawTracker {
+            config: v2_config_bytes,
+            ..raw
+        };
+
+        let deserialized = Tracker::try_from(raw_v2)?;
+        assert_eq!(deserialized.target, base_tracker.target);
+        if let TrackerTarget::Api(api) = &deserialized.target {
+            assert!(api.params.is_none());
+            assert_eq!(api.configurator.as_deref(), Some("script()"));
+            assert_eq!(api.extractor.as_deref(), Some("extract()"));
+        } else {
+            panic!("Expected Api target");
+        }
 
         Ok(())
     }

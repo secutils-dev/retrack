@@ -290,6 +290,7 @@ mod tests {
                         }],
                         configurator: Some(format!("{}/configurator.js", server.base_url())),
                         extractor: None,
+                        params: None,
                     }))
                     .build(),
             )
@@ -358,6 +359,7 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: Some(format!("{}/extractor.js", server.base_url())),
+                        params: None,
                     }))
                     .build(),
             )

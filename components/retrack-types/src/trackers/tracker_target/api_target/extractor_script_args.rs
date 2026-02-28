@@ -16,6 +16,9 @@ pub struct ExtractorScriptArgs {
     /// Optional HTTP body returned from the API.
     #[serde(default)]
     pub responses: Option<Vec<TargetResponse>>,
+
+    /// Optional parameters passed from the target configuration (e.g., secrets).
+    pub params: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -36,6 +39,7 @@ mod tests {
             tags: vec![],
             previous_content: Some(previous_content.clone()),
             responses: None,
+            params: None,
         };
         let context_json =
             json!({ "tags": [], "previousContent": { "original": { "key": "value" } } });
@@ -45,6 +49,7 @@ mod tests {
         let context = ExtractorScriptArgs {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             previous_content: Some(previous_content),
+            params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
             responses: Some(vec![TargetResponse {
                 status: StatusCode::OK,
                 headers: (&[(CONTENT_TYPE, "application/json".to_string())]
@@ -57,6 +62,7 @@ mod tests {
         let context_json = json!({
             "tags": ["tag1", "tag2"],
             "previousContent": { "original": { "key": "value" } },
+            "params": { "secrets": { "api_key": "s3cr3t" } },
             "responses": [{
                 "status": 200,
                 "headers": { "content-type": "application/json" },

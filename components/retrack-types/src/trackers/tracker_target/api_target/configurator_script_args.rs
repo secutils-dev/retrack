@@ -15,6 +15,9 @@ pub struct ConfiguratorScriptArgs {
 
     /// A list of HTTP requests configured for the target.
     pub requests: Vec<ConfiguratorScriptRequest>,
+
+    /// Optional parameters passed from the target configuration (e.g., secrets).
+    pub params: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -33,6 +36,7 @@ mod tests {
             tags: vec![],
             previous_content: Some(previous_content.clone()),
             requests: vec![],
+            params: None,
         };
         let context_json = json!({ "tags": [], "previousContent": { "original": { "key": "value" } }, "requests": [] });
         assert_eq!(serde_json::to_value(&context)?, context_json);
@@ -40,6 +44,7 @@ mod tests {
         let context = ConfiguratorScriptArgs {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             previous_content: Some(previous_content),
+            params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
             requests: vec![ConfiguratorScriptRequest {
                 url: "https://retrack.dev".parse()?,
                 method: None,
@@ -53,6 +58,7 @@ mod tests {
         let context_json = json!({
             "tags": ["tag1", "tag2"],
             "previousContent": { "original": { "key": "value" } },
+            "params": { "secrets": { "api_key": "s3cr3t" } },
             "requests": [{ "url": "https://retrack.dev/", "body": [123, 34, 98, 111, 100, 121, 34, 58, 34, 118, 97, 108, 117, 101, 34, 125] }],
         });
         assert_eq!(serde_json::to_value(&context)?, context_json);

@@ -31,6 +31,10 @@ pub struct ApiTarget {
 
     /// Optional custom script (Deno) to extract only necessary data from the API response.
     pub extractor: Option<String>,
+
+    /// Optional parameters to pass to the scripts as part of the context.
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -50,6 +54,7 @@ mod tests {
             requests: vec![TargetRequest::new(Url::parse("https://retrack.dev")?)],
             configurator: None,
             extractor: None,
+            params: None,
         };
         let target_json = json!({ "requests": [{ "url": "https://retrack.dev/" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -62,6 +67,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            params: None,
         };
         let target_json =
             json!({ "requests": [{"url": "https://retrack.dev/", "method": "PUT" }] });
@@ -84,6 +90,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            params: None,
         };
         let target_json = json!({
             "requests": [{
@@ -115,6 +122,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            params: None,
         };
         let target_json = json!({
             "requests": [{
@@ -152,6 +160,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            params: None,
         };
         let target_json = json!({
             "requests": [{
@@ -195,6 +204,7 @@ mod tests {
                     .to_string(),
             ),
             extractor: None,
+            params: None,
         };
         let target_json = json!({
             "requests": [{
@@ -241,6 +251,7 @@ mod tests {
                 "((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
                     .to_string(),
             ),
+            params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
         };
         let target_json = json!({
             "requests": [{
@@ -258,7 +269,8 @@ mod tests {
                 "acceptInvalidCertificates": true
             }],
             "configurator": "(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();",
-            "extractor": "((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();"
+            "extractor": "((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();",
+            "params": { "secrets": { "api_key": "s3cr3t" } }
         });
         assert_eq!(serde_json::to_value(&target)?, target_json);
         assert_eq!(serde_json::from_value::<ApiTarget>(target_json)?, target);

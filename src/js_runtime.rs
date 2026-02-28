@@ -335,6 +335,7 @@ pub mod tests {
                         accept_statuses: Some([StatusCode::OK].into_iter().collect()),
                         accept_invalid_certificates: None
                     }],
+                    params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
                 },
                 config,
             )
@@ -352,7 +353,8 @@ pub mod tests {
                 body: Some(serde_json::to_vec(&json!({
                     "tags": ["tag1", "tag2"],
                     "previousContent": { "original": { "key": "content" } },
-                    "requests": [{ "url": "https://retrack.dev/", "method": "PUT", "headers": { "content-type": "application/json" }, "mediaType": "text/plain; charset=UTF-8", "body": { "key": "body" }, "acceptStatuses": [200] }]
+                    "requests": [{ "url": "https://retrack.dev/", "method": "PUT", "headers": { "content-type": "application/json" }, "mediaType": "text/plain; charset=UTF-8", "body": { "key": "body" }, "acceptStatuses": [200] }],
+                    "params": { "secrets": { "api_key": "s3cr3t" } }
                 }))?),
                 media_type: Some("application/json".parse()?),
                 accept_statuses: Some([StatusCode::NOT_FOUND].into_iter().collect()),
@@ -424,7 +426,7 @@ pub mod tests {
         // Supports extractor scripts.
         let ExtractorScriptResult { body, ..} = js_runtime
             .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
-                r#"(() => {{ return { body: Deno.core.encode(JSON.stringify({ status: context.responses[0].status, headers: context.responses[0].headers, body: JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body))) })) }; }})();"#,
+                r#"(() => {{ return { body: Deno.core.encode(JSON.stringify({ status: context.responses[0].status, headers: context.responses[0].headers, body: JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body))), secret: context.params?.secrets?.api_key })) }; }})();"#,
                 ExtractorScriptArgs {
                     responses: Some(vec![TargetResponse {
                         status: StatusCode::OK,
@@ -436,6 +438,7 @@ pub mod tests {
                         .try_into()?,
                         body: serde_json::to_vec(&json!({ "key": "value" }))?,
                     }]),
+                    params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
                     ..Default::default()
                 },
                 config,
@@ -447,7 +450,8 @@ pub mod tests {
             json!({
                 "status": 200,
                 "headers": { "content-type": "application/json" },
-                "body": { "key": "value" }
+                "body": { "key": "value" },
+                "secret": "s3cr3t"
             })
         );
 

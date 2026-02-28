@@ -78,6 +78,7 @@ mod tests {
             requests: vec![TargetRequest::new("https://retrack.dev/".parse()?)],
             configurator: None,
             extractor: None,
+            params: None,
         });
         let target_json = json!({ "type": "api", "requests": [{ "url": "https://retrack.dev/" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -93,6 +94,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            params: None,
         });
         let target_json = json!({ "type": "api", "requests": [{ "url": "https://retrack.dev/", "method": "PUT" }] });
         assert_eq!(serde_json::to_value(&target)?, target_json);
@@ -117,6 +119,7 @@ mod tests {
             }],
             configurator: None,
             extractor: None,
+            params: None,
         });
         let target_json = json!({
             "type": "api",

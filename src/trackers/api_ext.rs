@@ -968,6 +968,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                             tags: tracker.tags.clone(),
                             previous_content: last_revision.as_ref().map(|rev| rev.data.clone()),
                             requests: configurator_requests,
+                            params: target.params.clone(),
                         },
                     )
                     .await
@@ -1108,6 +1109,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         tags: tracker.tags.clone(),
                         previous_content: last_revision.as_ref().map(|rev| rev.data.clone()),
                         responses: Some(responses.clone()),
+                        params: target.params.clone(),
                     },
                 )
                 .await
@@ -1361,11 +1363,38 @@ mod tests {
                     }],
                     configurator: Some("(async () => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
                     extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify({ key: 'value' })) })();".to_string()),
+                    params: None,
                 })).build(),
             )
             .await?;
 
         assert_eq!(tracker, api.get_tracker(tracker.id).await?.unwrap());
+
+        let tracker = api
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_three")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(
+                            Url::parse("https://retrack.dev/api")?,
+                        )],
+                        configurator: None,
+                        extractor: Some("((context) => ({ body: Deno.core.encode(JSON.stringify(context.params)) }))(context);".to_string()),
+                        params: Some(json!({ "secrets": { "api_key": "s3cr3t", "token": "tok123" } })),
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let retrieved = api.get_tracker(tracker.id).await?.unwrap();
+        assert_eq!(tracker, retrieved);
+        if let TrackerTarget::Api(ref api_target) = retrieved.target {
+            assert_eq!(
+                api_target.params,
+                Some(json!({ "secrets": { "api_key": "s3cr3t", "token": "tok123" } }))
+            );
+        } else {
+            panic!("Expected Api target");
+        }
 
         Ok(())
     }
@@ -1924,7 +1953,8 @@ mod tests {
                 target: TrackerTarget::Api(ApiTarget {
                     requests: vec![],
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -1950,6 +1980,7 @@ mod tests {
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
                     extractor: None,
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -1974,7 +2005,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2013,7 +2045,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2038,7 +2071,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: Some("".to_string()),
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2065,7 +2099,8 @@ mod tests {
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
                     ),
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2090,7 +2125,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: None,
-                    extractor: Some("".to_string())
+                    extractor: Some("".to_string()),
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2117,7 +2153,8 @@ mod tests {
                     configurator: None,
                     extractor: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
-                    )
+                    ),
+                    params: None,
                 }),
                 config: config.clone(),
                 tags: tags.clone(),
@@ -2834,7 +2871,8 @@ mod tests {
                 target: Some(TrackerTarget::Api(ApiTarget {
                     requests: vec![],
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2855,7 +2893,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }, 11).collect::<Vec<_>>(),
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2876,7 +2915,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2897,7 +2937,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: Some("".to_string()),
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2920,7 +2961,8 @@ mod tests {
                     configurator: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
                     ),
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2941,7 +2983,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: None,
-                    extractor: Some("".to_string())
+                    extractor: Some("".to_string()),
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -2964,7 +3007,8 @@ mod tests {
                     configurator: None,
                     extractor: Some(
                         "a".repeat(global_config.trackers.max_script_size.as_u64() as usize + 1)
-                    )
+                    ),
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -3000,7 +3044,8 @@ mod tests {
                         accept_invalid_certificates: false,
                     }],
                     configurator: None,
-                    extractor: None
+                    extractor: None,
+                    params: None,
                 })),
                 ..Default::default()
             }).await),
@@ -3699,6 +3744,7 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: None,
+                        params: None,
                     }))
                     .build(),
             )
@@ -3718,7 +3764,8 @@ mod tests {
                             accept_invalid_certificates: true
                         }],
                         configurator: Some(format!("((context) => ({{ requests: [{{ url: '{}', method: 'POST', headers: {{ 'x-custom-header': 'x-custom-value' }}, body: Deno.core.encode(JSON.stringify({{ key: `overridden-${{JSON.parse(Deno.core.decode(context.requests[0].body)).key}}` }})) }}] }}))(context);", server.url("/api/post-call"))),
-                        extractor: None
+                        extractor: None,
+                        params: None,
                     })).build(),
             )
             .await?;
@@ -3903,6 +3950,7 @@ mod tests {
 }})(context);"#
                                 .to_string(),
                         ),
+                        params: None,
                     })).build(),
             )
             .await?;
@@ -3978,6 +4026,70 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_params(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/get-call").parse()?,
+                            method: None,
+                            headers: None,
+                            body: None,
+                            media_type: None,
+                            accept_statuses: None,
+                            accept_invalid_certificates: false,
+                        }],
+                        configurator: None,
+                        extractor: Some(
+                            r#"
+((context) => {{
+  const body = JSON.parse(Deno.core.decode(new Uint8Array(context.responses[0].body)));
+  const secret = context.params?.secrets?.api_key ?? "none";
+  return {
+    body: Deno.core.encode(JSON.stringify({ data: body, secret }))
+  };
+}})(context);"#
+                                .to_string(),
+                        ),
+                        params: Some(json!({ "secrets": { "api_key": "s3cr3t" } })),
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let content = TrackerDataValue::new(json!("\"hello\""));
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/get-call");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body_obj(content.value());
+        });
+
+        trackers.create_tracker_data_revision(tracker.id).await?;
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].tracker_id, tracker.id);
+        assert_eq!(
+            tracker_data[0].data,
+            TrackerDataValue::new(json!({ "data": "\"hello\"", "secret": "s3cr3t" }))
+        );
+
+        content_mock.assert();
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn properly_saves_api_target_revision_with_non_success_code(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -4030,6 +4142,7 @@ mod tests {
   };
 }})(context);"#.to_string(),
                         ),
+                        params: None,
                     }))
                     .build(),
             )
@@ -4115,7 +4228,8 @@ mod tests {
 }})(context);"#
                                 .to_string(),
                         ),
-                        extractor: None
+                        extractor: None,
+                        params: None,
                     })).build(),
             )
             .await?;
@@ -4199,6 +4313,7 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: None,
+                        params: None,
                     }))
                     .build(),
             )
@@ -4314,6 +4429,7 @@ mod tests {
                         }],
                         configurator: None,
                         extractor: None,
+                        params: None,
                     }))
                     .build(),
             )
@@ -4425,6 +4541,7 @@ mod tests {
 }})(context);"#
                                 .to_string(),
                         ),
+                        params: None,
                     }))
                     .build(),
             )
@@ -4506,6 +4623,7 @@ mod tests {
                         }],
                         configurator: Some(server.url("/configurator.js")),
                         extractor: Some(server.url("/extractor.js")),
+                        params: None,
                     }))
                     .build(),
             )
@@ -5741,6 +5859,7 @@ mod tests {
                         )],
                         configurator: None,
                         extractor: None,
+                        params: None,
                     }))
                     .with_actions(vec![TrackerAction::Email(EmailAction {
                         to: vec!["dev@retrack.dev".to_string()],

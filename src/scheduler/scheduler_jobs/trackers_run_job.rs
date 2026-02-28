@@ -1078,6 +1078,7 @@ mod tests {
                         requests: vec![TargetRequest::new(server.url("/api-normal-job").parse()?)],
                         configurator: None,
                         extractor: None,
+                        params: None,
                     }))
                     .build(),
             )
@@ -1177,6 +1178,7 @@ mod tests {
                 requests: vec![TargetRequest::new(server.url("/api-retry-job").parse()?)],
                 configurator: None,
                 extractor: None,
+                params: None,
             }))
             .build();
         create_params.config.job = Some(SchedulerJobConfig {
@@ -1290,6 +1292,7 @@ mod tests {
                         requests: vec![TargetRequest::new(server.url("/api-failed-job").parse()?)],
                         configurator: None,
                         extractor: None,
+                        params: None,
                     }))
                     .with_tags(vec!["tag1".to_string(), "tag2".to_string()])
                     .build(),
@@ -1433,6 +1436,7 @@ mod tests {
                 requests: vec![TargetRequest::new(server.url("/api-failed-retry").parse()?)],
                 configurator: None,
                 extractor: None,
+                params: None,
             }))
             .build();
         create_params.config.job = Some(SchedulerJobConfig {
@@ -1575,6 +1579,7 @@ mod tests {
                 requests: vec![TargetRequest::new(api_url.parse()?)],
                 configurator: Some(format!("((context) => ({{ requests: [{{ url: '{api_url}', headers: {{ 'x-custom-header': context.tags[0] }} }}] }}))(context);")),
                 extractor: None,
+                params: None,
             }))
             .with_tags(vec!["attempt-1".to_string()])
             .build();
