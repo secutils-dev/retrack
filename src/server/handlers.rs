@@ -3,6 +3,8 @@ pub mod trackers_bulk_remove;
 pub mod trackers_clear_revisions;
 pub mod trackers_create;
 pub mod trackers_create_revision;
+pub mod trackers_debug;
+pub mod trackers_debug_existing;
 pub mod trackers_get;
 pub mod trackers_get_revision;
 pub mod trackers_list;
@@ -15,9 +17,13 @@ use crate::server::Status;
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
-        ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
-        Tracker, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataRevision,
-        TrackerDataValue, TrackerTarget, TrackerUpdateParams, WebhookAction,
+        ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTarget,
+        ApiTrackerDebugResult, AutoParseDebugInfo, EmailAction, ExtractorEngine, PageLogEntry,
+        PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
+        ServerLogAction, TargetRequest, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
+        TrackerDataRevision, TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams,
+        TrackerDebugResult, TrackerDebugTargetResult, TrackerTarget, TrackerUpdateParams,
+        WebhookAction, WebhookDestinationDebugInfo,
     },
 };
 use utoipa::OpenApi;
@@ -43,14 +49,27 @@ use utoipa::OpenApi;
         trackers_create_revision::trackers_create_revision,
         trackers_clear_revisions::trackers_clear_revisions,
         trackers_get_revision::trackers_get_revision,
-        trackers_remove_revision::trackers_remove_revision
+        trackers_remove_revision::trackers_remove_revision,
+        trackers_debug::trackers_debug,
+        trackers_debug_existing::trackers_debug_existing
     ),
     components(schemas(
+        ActionDebugInfo,
+        ActionDestinationDebugInfo,
+        ApiRequestDebugInfo,
         ApiTarget,
+        ApiTrackerDebugResult,
+        AutoParseDebugInfo,
         EmailAction,
         ExtractorEngine,
+        PageLogEntry,
+        PageTarget,
+        PageTrackerDebugResult,
+        RenderedEmailDebugInfo,
         SchedulerJobConfig,
         SchedulerJobRetryStrategy,
+        ScriptDebugInfo,
+        ServerLogAction,
         Status,
         TargetRequest,
         Tracker,
@@ -59,11 +78,14 @@ use utoipa::OpenApi;
         TrackerCreateParams,
         TrackerDataRevision,
         TrackerDataValue,
+        TrackerDebugExistingParams,
+        TrackerDebugParams,
+        TrackerDebugResult,
+        TrackerDebugTargetResult,
         TrackerTarget,
         TrackerUpdateParams,
-        PageTarget,
-        ServerLogAction,
-        WebhookAction
+        WebhookAction,
+        WebhookDestinationDebugInfo
     ))
 )]
 pub(super) struct RetrackOpenApi;

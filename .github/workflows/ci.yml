@@ -63,7 +63,7 @@ jobs:
 
       - name: Test (default features)
         timeout-minutes: 6
-        run: cargo test -- --nocapture
+        run: cargo test --all -- --nocapture
 
       - name: Check database schema
         run: cargo sqlx prepare --check

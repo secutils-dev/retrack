@@ -64,11 +64,23 @@ if (typeof extractorModule?.execute !== 'function') {
 
 // Logger to post messages to the main thread.
 const log = {
+  debug: (message: string, args?: ReadonlyArray<object>) =>
+    parentPort?.postMessage({ type: WorkerMessageType.LOG, level: 'debug', message, args }),
   info: (message: string, args?: ReadonlyArray<object>) =>
     parentPort?.postMessage({ type: WorkerMessageType.LOG, message, args }),
+  warn: (message: string, args?: ReadonlyArray<object>) =>
+    parentPort?.postMessage({ type: WorkerMessageType.LOG, level: 'warn', message, args }),
   error: (message: string, args?: ReadonlyArray<object>) =>
     parentPort?.postMessage({ type: WorkerMessageType.LOG, level: 'error', message, args }),
 };
+
+// Redirect worker-thread console methods so that console.log/warn/error calls
+// inside extractor scripts are captured in the debug log stream.
+console.log = (...args: unknown[]) => log.info(args.map(String).join(' '));
+console.debug = (...args: unknown[]) => log.debug(args.map(String).join(' '));
+console.info = console.log;
+console.warn = (...args: unknown[]) => log.warn(args.map(String).join(' '));
+console.error = (...args: unknown[]) => log.error(args.map(String).join(' '));
 
 const { connectToBrowserServer } = await import('../../utilities/browser.js');
 
@@ -115,6 +127,22 @@ delete contextPrototype.newCDPSession;
 delete contextPrototype.constructor;
 
 const page = await context.newPage();
+
+// Capture browser-side console messages (from page.evaluate, in-page JS, etc.).
+page.on('console', (msg) => {
+  const level = msg.type();
+  const message = `[browser] ${msg.text()}`;
+  if (level === 'debug') {
+    log.debug(message);
+  } else if (level === 'warning') {
+    log.warn(message);
+  } else if (level === 'error') {
+    log.error(message);
+  } else {
+    log.info(message);
+  }
+});
+
 try {
   parentPort?.postMessage({
     type: WorkerMessageType.RESULT,

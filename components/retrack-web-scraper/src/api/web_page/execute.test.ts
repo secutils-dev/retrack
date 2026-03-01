@@ -53,9 +53,10 @@ export async function execute(page) {
 
   assert.strictEqual(
     response.body,
-    JSON.stringify(
-      '<html lang="en"><head><title>Retrack.dev</title></head><body><div>Hello Retrack and world!</div></body></html>',
-    ),
+    JSON.stringify({
+      result:
+        '<html lang="en"><head><title>Retrack.dev</title></head><body><div>Hello Retrack and world!</div></body></html>',
+    }),
   );
   assert.strictEqual(response.statusCode, 200);
 });
@@ -86,7 +87,7 @@ await test('[/api/web_page/execute] accepts context overrides', async (t) => {
   assert.ok(userAgentOverrideMessage);
   assert.equal((userAgentOverrideMessage.params as { userAgent: string }).userAgent, 'Retrack/1.0.0');
 
-  assert.strictEqual(response.body, JSON.stringify('success'));
+  assert.strictEqual(response.body, JSON.stringify({ result: 'success' }));
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -112,9 +113,11 @@ export async function execute(page, context) {
   });
 
   assert.deepEqual(JSON.parse(response.body), {
-    tags: ['tag1', 'tag2'],
-    previousContent: 'some previous content',
-    params: { param: 'value' },
+    result: {
+      tags: ['tag1', 'tag2'],
+      previousContent: 'some previous content',
+      params: { param: 'value' },
+    },
   });
   assert.strictEqual(response.statusCode, 200);
 
@@ -135,8 +138,10 @@ export async function execute(page, context) {
   });
 
   assert.deepEqual(JSON.parse(response.body), {
-    previousContent: { a: 1 },
-    tags: ['tag1', 'tag2'],
+    result: {
+      previousContent: { a: 1 },
+      tags: ['tag1', 'tag2'],
+    },
   });
   assert.strictEqual(response.statusCode, 200);
 });
@@ -159,7 +164,7 @@ export async function execute(page) {
     },
   });
 
-  assert.strictEqual(response.body, JSON.stringify("Map(2) { 'one' => 1, 'two' => 2 }"));
+  assert.strictEqual(response.body, JSON.stringify({ result: "Map(2) { 'one' => 1, 'two' => 2 }" }));
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -192,7 +197,7 @@ export async function execute() {
     },
   });
 
-  assert.strictEqual(response.body, JSON.stringify('OK'));
+  assert.strictEqual(response.body, JSON.stringify({ result: 'OK' }));
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -214,7 +219,7 @@ export async function execute(page) {
     },
   });
 
-  assert.strictEqual(response.body, JSON.stringify(2));
+  assert.strictEqual(response.body, JSON.stringify({ result: 2 }));
   assert.strictEqual(response.statusCode, 200);
 });
 
@@ -236,12 +241,12 @@ export async function execute() {
     },
   });
 
+  const body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: Extractor script is not allowed to import "node:fs" module.`,
-    }),
+    body.message,
+    `Failed to execute extractor script: Extractor script is not allowed to import "node:fs" module.`,
   );
+  assert.strictEqual(body.error, `Extractor script is not allowed to import "node:fs" module.`);
   assert.strictEqual(response.statusCode, 500);
 });
 
@@ -263,12 +268,12 @@ export async function execute() {
     },
   });
 
+  const body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: Extractor script is not allowed to import "../../utilities/browser.js" module.`,
-    }),
+    body.message,
+    `Failed to execute extractor script: Extractor script is not allowed to import "../../utilities/browser.js" module.`,
   );
+  assert.strictEqual(body.error, `Extractor script is not allowed to import "../../utilities/browser.js" module.`);
   assert.strictEqual(response.statusCode, 500);
 });
 
@@ -290,12 +295,12 @@ export async function execute() {
     },
   });
 
+  const body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: Extractor script is not allowed to import "node:crypto" module.`,
-    }),
+    body.message,
+    `Failed to execute extractor script: Extractor script is not allowed to import "node:crypto" module.`,
   );
+  assert.strictEqual(body.error, `Extractor script is not allowed to import "node:crypto" module.`);
   assert.strictEqual(response.statusCode, 500);
 });
 
@@ -319,12 +324,12 @@ export async function execute(page) {
     },
   });
 
+  let body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: Cannot add property polluted, object is not extensible`,
-    }),
+    body.message,
+    `Failed to execute extractor script: Cannot add property polluted, object is not extensible`,
   );
+  assert.strictEqual(body.error, `Cannot add property polluted, object is not extensible`);
   assert.strictEqual(response.statusCode, 500);
 
   response = await mockRoute.inject({
@@ -343,12 +348,12 @@ export async function execute(page) {
     },
   });
 
+  body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: Cannot add property polluted, object is not extensible`,
-    }),
+    body.message,
+    `Failed to execute extractor script: Cannot add property polluted, object is not extensible`,
   );
+  assert.strictEqual(body.error, `Cannot add property polluted, object is not extensible`);
   assert.strictEqual(response.statusCode, 500);
 
   response = await mockRoute.inject({
@@ -367,12 +372,12 @@ export async function execute(page) {
     },
   });
 
+  body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: Cannot add property polluted, object is not extensible`,
-    }),
+    body.message,
+    `Failed to execute extractor script: Cannot add property polluted, object is not extensible`,
   );
+  assert.strictEqual(body.error, `Cannot add property polluted, object is not extensible`);
   assert.strictEqual(response.statusCode, 500);
 });
 
@@ -397,11 +402,89 @@ export async function execute(page) {
     },
   });
 
+  const body = JSON.parse(response.body);
   assert.strictEqual(
-    response.body,
-    JSON.stringify({
-      message: `Failed to execute extractor script: The execution was terminated due to timeout 5000ms.`,
-    }),
+    body.message,
+    `Failed to execute extractor script: The execution was terminated due to timeout 5000ms.`,
   );
+  assert.strictEqual(body.error, `The execution was terminated due to timeout 5000ms.`);
   assert.strictEqual(response.statusCode, 500);
+});
+
+await test('[/api/web_page/execute] debug mode returns result with debug info on success', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `export async function execute(page) { return 'debug-ok'; };`,
+      tags: [],
+      debug: true,
+    },
+  });
+
+  assert.strictEqual(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.strictEqual(body.result, 'debug-ok');
+  assert.ok(body.debug, 'expected debug field to be present');
+  assert.ok(Array.isArray(body.debug.logs), 'expected debug.logs to be an array');
+});
+
+await test('[/api/web_page/execute] debug mode returns error with debug info on failure', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `export async function execute() { throw new Error('boom'); };`,
+      tags: [],
+      debug: true,
+    },
+  });
+
+  assert.strictEqual(response.statusCode, 500);
+  const body = JSON.parse(response.body);
+  assert.ok(body.message.includes('boom'), 'expected error message to contain "boom"');
+  assert.ok(body.error.includes('boom'), 'expected error field to contain "boom"');
+  assert.ok(body.debug, 'expected debug field to be present');
+  assert.ok(Array.isArray(body.debug.logs), 'expected debug.logs to be an array');
+});
+
+await test('[/api/web_page/execute] non-debug mode does not include debug field', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `export async function execute(page) { return 42; };`,
+      tags: [],
+    },
+  });
+
+  assert.strictEqual(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.strictEqual(body.result, 42);
+  assert.strictEqual(body.debug, undefined, 'expected no debug field in non-debug mode');
+});
+
+await test('[/api/web_page/execute] non-debug error does not include debug field', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `export async function execute() { throw new Error('oops'); };`,
+      tags: [],
+    },
+  });
+
+  assert.strictEqual(response.statusCode, 500);
+  const body = JSON.parse(response.body);
+  assert.ok(body.message);
+  assert.ok(body.error);
+  assert.strictEqual(body.debug, undefined, 'expected no debug field in non-debug mode');
 });

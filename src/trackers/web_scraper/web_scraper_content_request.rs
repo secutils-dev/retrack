@@ -35,6 +35,10 @@ pub struct WebScraperContentRequest<'a> {
 
     /// Optional content of the web page that has been extracted previously.
     pub previous_content: Option<&'a TrackerDataValue>,
+
+    /// When true, the web scraper returns a structured debug response with logs.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub debug: bool,
 }
 
 /// Represents engines supported by the Web Scraper component.
@@ -65,7 +69,8 @@ mod tests {
             timeout: Some(Duration::from_millis(100)),
             previous_content: Some(&TrackerDataValue::new(json!("some content"))),
             user_agent: Some("Retrack/1.0.0"),
-            accept_invalid_certificates: true
+            accept_invalid_certificates: true,
+            debug: false,
         }, @r###"
         {
           "extractor": "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",

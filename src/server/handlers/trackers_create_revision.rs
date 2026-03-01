@@ -88,7 +88,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content_one.value());
+                .json_body(json!({ "result": content_one.value() }));
         });
 
         // Add tracker data revision.
@@ -182,7 +182,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .body("\"rev_1\"");
+                .json_body(json!({ "result": "rev_1" }));
         });
 
         // Add tracker data revision.

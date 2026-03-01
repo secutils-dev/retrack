@@ -11,7 +11,10 @@ use crate::{
         database_ext::TrackersDatabaseExt,
         parsers::{CsvParser, XlsParser},
         tracker_data_revisions_diff::tracker_data_revisions_diff,
-        web_scraper::{WebScraperBackend, WebScraperContentRequest, WebScraperErrorResponse},
+        web_scraper::{
+            WebScraperBackend, WebScraperContentRequest, WebScraperErrorResponse,
+            WebScraperSuccessResponse,
+        },
     },
 };
 use anyhow::{Context, anyhow, bail};
@@ -20,17 +23,23 @@ use croner::Cron;
 use http::Method;
 use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
 use lettre::message::Mailbox;
+use mediatype::MediaTypeBuf;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_tracing::{SpanBackendWithUrl, TracingMiddleware};
 use retrack_types::{
     scheduler::SchedulerJobRetryStrategy,
     trackers::{
-        ApiTarget, ConfiguratorScriptArgs, ConfiguratorScriptResult, ExtractorEngine,
-        ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
-        PageTarget, ServerLogAction, TargetResponse, Tracker, TrackerAction, TrackerCreateParams,
-        TrackerDataRevision, TrackerDataValue, TrackerListRevisionsParams, TrackerTarget,
-        TrackerUpdateParams, TrackersListParams, WebhookAction, WebhookActionPayload,
-        WebhookActionPayloadResult,
+        ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTarget,
+        ApiTrackerDebugResult, AutoParseDebugInfo, ConfiguratorScriptArgs,
+        ConfiguratorScriptResult, EmailDestinationDebugInfo, ExtractorEngine, ExtractorScriptArgs,
+        ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult, PageLogEntry,
+        PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
+        ServerLogAction, TargetRequest, TargetResponse, Tracker, TrackerAction,
+        TrackerCreateParams, TrackerDataRevision, TrackerDataValue, TrackerDebugExistingParams,
+        TrackerDebugParams, TrackerDebugResult, TrackerDebugTargetResult,
+        TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
+        WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
+        WebhookDestinationDebugInfo,
     },
 };
 use serde_json::{Value as JsonValue, json};
@@ -51,7 +60,7 @@ const MAX_TRACKER_PAGE_USER_AGENT_LENGTH: usize = 200;
 /// We currently support up to 10 retry attempts for the tracker.
 const MAX_TRACKER_RETRY_ATTEMPTS: u32 = 10;
 
-/// We currently support maximum 12 hours between retry attempts for the tracker.
+/// We currently support a maximum 12 hours between retry attempts for the tracker.
 const MAX_TRACKER_RETRY_INTERVAL: Duration = Duration::from_secs(12 * 3600);
 
 /// Defines the maximum length of a tracker name.
@@ -77,6 +86,13 @@ pub const MAX_TRACKER_WEBHOOK_ACTION_HEADERS_COUNT: usize = 20;
 
 /// Defines a prefix for the tracker task tags.
 const TRACKER_TASK_TAG_PREFIX: &str = "@retrack";
+
+/// Well-known tracker ID used in logs for ad-hoc debug runs.
+const DEBUG_TRACKER_ID: Uuid = Uuid::nil();
+/// Well-known tracker name used in logs for ad-hoc debug runs.
+const DEBUG_TRACKER_NAME: &str = "_debug";
+/// Maximum raw response body bytes included in debug output.
+const DEBUG_MAX_RAW_BODY_BYTES: usize = 64 * 1024;
 
 pub struct TrackersApiExt<'a, DR: DnsResolver> {
     api: &'a Api<DR>,
@@ -903,6 +919,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             accept_invalid_certificates: target.accept_invalid_certificates,
             timeout: tracker.config.timeout,
             previous_content: previous_revision.as_ref().map(|rev| &rev.data),
+            debug: false,
         };
 
         let scraper_response = self
@@ -925,15 +942,15 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             bail!(scraper_error_response.message);
         }
 
+        let success_response: WebScraperSuccessResponse = scraper_response
+            .json()
+            .await
+            .context("Cannot deserialize the web scraper service response")?;
+
         Ok(TrackerDataRevision {
             id: Uuid::now_v7(),
             tracker_id: tracker.id,
-            data: TrackerDataValue::new(
-                scraper_response
-                    .json()
-                    .await
-                    .context("Cannot deserialize the web scraper service response")?,
-            ),
+            data: TrackerDataValue::new(success_response.result),
             created_at: Database::utc_now()?,
         })
     }
@@ -1134,7 +1151,16 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         } else if responses.len() == 1 {
             serde_json::from_slice(&responses[0].body).context("Cannot deserialize API response")?
         } else {
-            json!(&responses)
+            JsonValue::Array(
+                responses
+                    .iter()
+                    .map(|r| {
+                        serde_json::from_slice::<JsonValue>(&r.body).unwrap_or_else(|_| {
+                            JsonValue::String(String::from_utf8_lossy(&r.body).into_owned())
+                        })
+                    })
+                    .collect(),
+            )
         };
 
         Ok(TrackerDataRevision {
@@ -1243,6 +1269,983 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .await?)
     }
 
+    /// Runs the full tracker pipeline (extraction + action dry-run) without persisting
+    /// anything. Accepts the same shape as `TrackerCreateParams`.
+    pub async fn debug_tracker(
+        &self,
+        params: TrackerDebugParams,
+    ) -> anyhow::Result<TrackerDebugResult> {
+        let tracker = Tracker {
+            id: DEBUG_TRACKER_ID,
+            name: DEBUG_TRACKER_NAME.to_string(),
+            enabled: true,
+            target: params.target,
+            config: params.config,
+            tags: Self::normalize_tracker_tags(params.tags),
+            actions: params.actions,
+            job_id: None,
+            created_at: Database::utc_now()?,
+            updated_at: Database::utc_now()?,
+        };
+
+        self.validate_debug_tracker(&tracker).await?;
+
+        self.run_debug(&tracker, params.previous_content).await
+    }
+
+    /// Runs the full tracker pipeline against a stored tracker, with optional overrides.
+    pub async fn debug_existing_tracker(
+        &self,
+        tracker_id: Uuid,
+        params: TrackerDebugExistingParams,
+    ) -> anyhow::Result<TrackerDebugResult> {
+        let Some(mut tracker) = self.get_tracker(tracker_id).await? else {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{tracker_id}') is not found."
+            )));
+        };
+
+        if let Some(target) = params.target {
+            tracker.target = target;
+        }
+        if let Some(config) = params.config {
+            tracker.config = config;
+        }
+        if let Some(tags) = params.tags {
+            tracker.tags = Self::normalize_tracker_tags(tags);
+        }
+        if let Some(actions) = params.actions {
+            tracker.actions = actions;
+        }
+
+        self.validate_debug_tracker(&tracker).await?;
+
+        let previous_content = if params.previous_content.is_some() {
+            params.previous_content
+        } else {
+            self.trackers
+                .get_tracker_data_revisions(tracker.id, 1)
+                .await?
+                .pop()
+                .map(|rev| rev.data)
+        };
+
+        self.run_debug(&tracker, previous_content).await
+    }
+
+    /// Validates tracker fields relevant to a debug run (target + timeout), skipping
+    /// name, schedule, revisions, and action recipient validation.
+    async fn validate_debug_tracker(&self, tracker: &Tracker) -> anyhow::Result<()> {
+        let config = &self.api.config.trackers;
+        match tracker.target {
+            TrackerTarget::Page(ref target) => {
+                self.validate_page_target(target).await?;
+            }
+            TrackerTarget::Api(ref target) => {
+                self.validate_api_target(config, target).await?;
+            }
+        }
+
+        if let Some(ref timeout) = tracker.config.timeout
+            && timeout > &config.max_timeout
+        {
+            bail!(RetrackError::client(format!(
+                "Tracker timeout cannot be greater than {}ms.",
+                config.max_timeout.as_millis()
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Core debug execution: runs extraction pipeline then simulates actions.
+    async fn run_debug(
+        &self,
+        tracker: &Tracker,
+        previous_content: Option<TrackerDataValue>,
+    ) -> anyhow::Result<TrackerDebugResult> {
+        let overall_start = Instant::now();
+
+        info!(
+            tracker.id = %tracker.id,
+            tracker.name = tracker.name,
+            tracker.tags = ?tracker.tags,
+            "Debug: starting tracker debug run"
+        );
+
+        let previous_revision = previous_content.map(|data| TrackerDataRevision {
+            id: Uuid::nil(),
+            tracker_id: tracker.id,
+            data,
+            created_at: tracker.created_at,
+        });
+
+        // Run extraction pipeline (returns target debug info + optional revision + optional error).
+        let (target_result, new_revision, extraction_error) = match tracker.target {
+            TrackerTarget::Page(_) => self.debug_tracker_page(tracker, &previous_revision).await,
+            TrackerTarget::Api(_) => self.debug_tracker_api(tracker, &previous_revision).await,
+        };
+
+        // Simulate actions.
+        let actions = self
+            .debug_tracker_actions(tracker, new_revision.as_ref(), previous_revision.as_ref())
+            .await;
+
+        let result = new_revision.as_ref().map(|r| r.data.value().clone());
+        let duration_ms = overall_start.elapsed();
+
+        info!(
+            tracker.id = %tracker.id,
+            tracker.name = tracker.name,
+            duration_ms = duration_ms.as_millis(),
+            success = extraction_error.is_none(),
+            "Debug: tracker debug run completed"
+        );
+
+        Ok(TrackerDebugResult {
+            duration_ms,
+            result,
+            error: extraction_error,
+            target: target_result,
+            actions,
+        })
+    }
+
+    /// Debug extraction for a Page tracker target.
+    async fn debug_tracker_page(
+        &self,
+        tracker: &Tracker,
+        previous_revision: &Option<TrackerDataRevision>,
+    ) -> (
+        TrackerDebugTargetResult,
+        Option<TrackerDataRevision>,
+        Option<String>,
+    ) {
+        let TrackerTarget::Page(ref target) = tracker.target else {
+            return (
+                TrackerDebugTargetResult::Page(PageTrackerDebugResult {
+                    params: None,
+                    engine: None,
+                    extractor_source: String::new(),
+                    logs: vec![],
+                    duration_ms: Duration::ZERO,
+                    error: Some("Tracker target is not `Page`.".to_string()),
+                }),
+                None,
+                Some("Tracker target is not `Page`.".to_string()),
+            );
+        };
+
+        let extractor_start = Instant::now();
+        let extractor_source = match self.get_script_content(&target.extractor).await {
+            Ok(content) => content,
+            Err(err) => {
+                let error_msg = format!("Cannot retrieve tracker extractor script: {err}");
+                return (
+                    TrackerDebugTargetResult::Page(PageTrackerDebugResult {
+                        params: target.params.clone(),
+                        engine: target.engine,
+                        extractor_source: target.extractor.clone(),
+                        logs: vec![],
+                        duration_ms: extractor_start.elapsed(),
+                        error: Some(error_msg.clone()),
+                    }),
+                    None,
+                    Some(error_msg),
+                );
+            }
+        };
+
+        let scraper_request = WebScraperContentRequest {
+            extractor: &extractor_source,
+            extractor_params: target.params.as_ref(),
+            extractor_backend: Some(match target.engine {
+                Some(ExtractorEngine::Chromium) | None => WebScraperBackend::Chromium,
+                Some(ExtractorEngine::Camoufox) => WebScraperBackend::Firefox,
+            }),
+            tags: &tracker.tags,
+            user_agent: target.user_agent.as_deref(),
+            accept_invalid_certificates: target.accept_invalid_certificates,
+            timeout: tracker.config.timeout,
+            previous_content: previous_revision.as_ref().map(|rev| &rev.data),
+            debug: true,
+        };
+
+        let scraper_result = self
+            .http_client(false)
+            .post(format!(
+                "{}api/web_page/execute",
+                self.api.config.as_ref().components.web_scraper_url.as_str()
+            ))
+            .json(&scraper_request)
+            .send()
+            .await;
+
+        let duration_ms = extractor_start.elapsed();
+        let (result, error_msg, debug_info) = match scraper_result {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    match response.json::<WebScraperSuccessResponse>().await {
+                        Ok(success_resp) => (Some(success_resp.result), None, success_resp.debug),
+                        Err(err) => (
+                            None,
+                            Some(format!(
+                                "Cannot deserialize web scraper response (HTTP {status}): {err}"
+                            )),
+                            None,
+                        ),
+                    }
+                } else {
+                    match response.json::<WebScraperErrorResponse>().await {
+                        Ok(error_resp) => (None, Some(error_resp.message), error_resp.debug),
+                        Err(err) => (
+                            None,
+                            Some(format!(
+                                "Cannot deserialize web scraper error response (HTTP {status}): {err}"
+                            )),
+                            None,
+                        ),
+                    }
+                }
+            }
+            Err(err) => (
+                None,
+                Some(format!("Cannot connect to the web scraper service: {err}")),
+                None,
+            ),
+        };
+
+        (
+            TrackerDebugTargetResult::Page(PageTrackerDebugResult {
+                params: target.params.clone(),
+                engine: target.engine,
+                extractor_source,
+                logs: debug_info
+                    .into_iter()
+                    .flat_map(|d| d.logs)
+                    .map(|l| PageLogEntry {
+                        level: l.level,
+                        message: l.message,
+                        args: l.args,
+                    })
+                    .collect::<Vec<_>>(),
+                duration_ms,
+                error: error_msg.clone(),
+            }),
+            result.map(|value| TrackerDataRevision {
+                id: Uuid::nil(),
+                tracker_id: tracker.id,
+                data: TrackerDataValue::new(value),
+                created_at: tracker.created_at,
+            }),
+            error_msg,
+        )
+    }
+
+    /// Debug extraction for an API tracker target.
+    async fn debug_tracker_api(
+        &self,
+        tracker: &Tracker,
+        previous_revision: &Option<TrackerDataRevision>,
+    ) -> (
+        TrackerDebugTargetResult,
+        Option<TrackerDataRevision>,
+        Option<String>,
+    ) {
+        let TrackerTarget::Api(ref target) = tracker.target else {
+            return (
+                TrackerDebugTargetResult::Api(ApiTrackerDebugResult {
+                    params: None,
+                    configurator: None,
+                    requests: vec![],
+                    extractor: None,
+                }),
+                None,
+                Some("Tracker target is not `Api`.".to_string()),
+            );
+        };
+
+        // Stage 1: Configurator script.
+        let mut configurator_debug: Option<ScriptDebugInfo> = None;
+        let mut configurator_result_opt: Option<ConfiguratorScriptResult> = None;
+
+        if let Some(ref configurator) = target.configurator {
+            let configurator_start = Instant::now();
+            let configurator_source = match self.get_script_content(configurator).await {
+                Ok(c) => c,
+                Err(err) => {
+                    configurator_debug = Some(ScriptDebugInfo {
+                        source: configurator.clone(),
+                        duration_ms: configurator_start.elapsed(),
+                        result: None,
+                        error: Some(format!("Cannot retrieve configurator script: {err}")),
+                    });
+                    String::new()
+                }
+            };
+
+            if configurator_debug.is_none() {
+                let mut configurator_requests = Vec::with_capacity(target.requests.len());
+                for request in &target.requests {
+                    match request.clone().try_into() {
+                        Ok(r) => configurator_requests.push(r),
+                        Err(err) => {
+                            configurator_debug = Some(ScriptDebugInfo {
+                                source: configurator_source.clone(),
+                                duration_ms: configurator_start.elapsed(),
+                                result: None,
+                                error: Some(format!(
+                                    "Cannot convert request to configurator format: {err}"
+                                )),
+                            });
+                            break;
+                        }
+                    }
+                }
+
+                if configurator_debug.is_none() {
+                    let script_result = self
+                        .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
+                            configurator_source.clone(),
+                            ConfiguratorScriptArgs {
+                                tags: tracker.tags.clone(),
+                                previous_content: previous_revision
+                                    .as_ref()
+                                    .map(|rev| rev.data.clone()),
+                                requests: configurator_requests,
+                                params: target.params.clone(),
+                            },
+                        )
+                        .await;
+
+                    let script_result = match script_result {
+                        Ok(Some(result)) => {
+                            let result_json = Self::configurator_result_to_debug_json(&result);
+                            configurator_result_opt = Some(result);
+                            Ok(Some(result_json))
+                        }
+                        Ok(None) => Ok(None),
+                        Err(err) => Err(format!("{err}")),
+                    };
+
+                    let duration_ms = configurator_start.elapsed();
+                    configurator_debug = Some(match script_result {
+                        Ok(result) => ScriptDebugInfo {
+                            source: configurator_source,
+                            duration_ms,
+                            result,
+                            error: None,
+                        },
+                        Err(err) => ScriptDebugInfo {
+                            source: configurator_source,
+                            duration_ms,
+                            result: None,
+                            error: Some(err),
+                        },
+                    });
+                }
+            }
+        }
+
+        // Stage 2: Execute requests (or use mock responses from the configurator).
+        let mut request_debug_infos: Vec<ApiRequestDebugInfo> = Vec::new();
+        let mut responses: Vec<TargetResponse> = Vec::new();
+
+        let (effective_requests, request_source, mock_responses) = match &configurator_result_opt {
+            Some(ConfiguratorScriptResult::Requests(reqs)) if !reqs.is_empty() => {
+                let converted: Vec<_> = reqs
+                    .iter()
+                    .filter_map(|r| {
+                        let tr: Result<TargetRequest, _> = r.clone().try_into();
+                        tr.ok()
+                    })
+                    .collect();
+                (converted, "configurator", None)
+            }
+            Some(ConfiguratorScriptResult::Responses(resps)) => {
+                (vec![], "mock", Some(resps.clone()))
+            }
+            _ => (target.requests.clone(), "original", None),
+        };
+
+        if let Some(mock_resps) = mock_responses {
+            for (i, mock) in mock_resps.iter().enumerate() {
+                let req_start = Instant::now();
+                let raw_size = mock.body.len() as u64;
+                let truncated_body = Self::truncate_body_for_debug(&mock.body);
+                let parsed = serde_json::from_slice::<JsonValue>(&mock.body).ok();
+
+                responses.push(mock.clone());
+
+                request_debug_infos.push(ApiRequestDebugInfo {
+                    index: i,
+                    source: "mock".to_string(),
+                    url: None,
+                    method: None,
+                    request_headers: None,
+                    request_body: None,
+                    status_code: Some(mock.status.as_u16()),
+                    response_headers: Some(mock.headers.clone()),
+                    response_body_raw: Some(truncated_body),
+                    response_body_raw_size: Some(raw_size),
+                    response_body_parsed: parsed,
+                    auto_parse: None,
+                    duration_ms: req_start.elapsed(),
+                    error: None,
+                });
+            }
+        } else {
+            for (i, request) in effective_requests.iter().enumerate() {
+                let req_start = Instant::now();
+                let request_body_json = request.body.clone();
+                let method = request.method.as_ref().unwrap_or(&Method::GET);
+                let client = self.http_client(request.accept_invalid_certificates);
+
+                let mut request_builder = client.request(method.clone(), request.url.clone());
+                if let Some(ref headers) = request.headers {
+                    request_builder = request_builder.headers(headers.clone());
+                }
+                if let Some(ref body) = request.body {
+                    match serde_json::to_vec(body) {
+                        Ok(body_bytes) => {
+                            request_builder = request_builder.body(body_bytes);
+                        }
+                        Err(err) => {
+                            request_debug_infos.push(ApiRequestDebugInfo {
+                                index: i,
+                                source: request_source.to_string(),
+                                url: Some(request.url.clone()),
+                                method: Some(method.clone()),
+                                request_headers: request.headers.clone(),
+                                request_body: request_body_json,
+                                status_code: None,
+                                response_headers: None,
+                                response_body_raw: None,
+                                response_body_raw_size: None,
+                                response_body_parsed: None,
+                                auto_parse: None,
+                                duration_ms: req_start.elapsed(),
+                                error: Some(format!("Cannot serialize request body: {err}")),
+                            });
+                            continue;
+                        }
+                    }
+                }
+
+                if let Some(ref timeout) = tracker.config.timeout {
+                    request_builder = request_builder.timeout(*timeout);
+                }
+
+                match request_builder.send().await {
+                    Ok(response) => {
+                        let status = response.status();
+                        let response_headers_map = response.headers().clone();
+                        let media_type = request.media_type.as_ref().map(|m| m.to_ref());
+
+                        let body_bytes = match response.bytes().await {
+                            Ok(b) => b.to_vec(),
+                            Err(err) => {
+                                request_debug_infos.push(ApiRequestDebugInfo {
+                                    index: i,
+                                    source: request_source.to_string(),
+                                    url: Some(request.url.clone()),
+                                    method: Some(method.clone()),
+                                    request_headers: request.headers.clone(),
+                                    request_body: request_body_json,
+                                    status_code: Some(status.as_u16()),
+                                    response_headers: Some(response_headers_map),
+                                    response_body_raw: None,
+                                    response_body_raw_size: None,
+                                    response_body_parsed: None,
+                                    auto_parse: None,
+                                    duration_ms: req_start.elapsed(),
+                                    error: Some(format!("Failed to read response body: {err}")),
+                                });
+                                continue;
+                            }
+                        };
+
+                        let raw_size = body_bytes.len() as u64;
+                        let truncated_body = Self::truncate_body_for_debug(&body_bytes);
+
+                        let (parsed, auto_parse_info) = if status.is_success() {
+                            Self::debug_auto_parse(&body_bytes, media_type.as_ref())
+                        } else {
+                            (serde_json::from_slice::<JsonValue>(&body_bytes).ok(), None)
+                        };
+
+                        let body_for_responses = if status.is_success() {
+                            if let (Some(parsed_val), Some(info)) = (&parsed, &auto_parse_info) {
+                                if info.success {
+                                    serde_json::to_vec(parsed_val).unwrap_or(body_bytes.clone())
+                                } else {
+                                    body_bytes.clone()
+                                }
+                            } else {
+                                body_bytes.clone()
+                            }
+                        } else {
+                            body_bytes.clone()
+                        };
+
+                        responses.push(TargetResponse {
+                            status,
+                            headers: response_headers_map.clone(),
+                            body: body_for_responses,
+                        });
+
+                        request_debug_infos.push(ApiRequestDebugInfo {
+                            index: i,
+                            source: request_source.to_string(),
+                            url: Some(request.url.clone()),
+                            method: Some(method.clone()),
+                            request_headers: request.headers.clone(),
+                            request_body: request_body_json,
+                            status_code: Some(status.as_u16()),
+                            response_headers: Some(response_headers_map),
+                            response_body_raw: Some(truncated_body),
+                            response_body_raw_size: Some(raw_size),
+                            response_body_parsed: parsed,
+                            auto_parse: auto_parse_info,
+                            duration_ms: req_start.elapsed(),
+                            error: None,
+                        });
+                    }
+                    Err(err) => {
+                        request_debug_infos.push(ApiRequestDebugInfo {
+                            index: i,
+                            source: request_source.to_string(),
+                            url: Some(request.url.clone()),
+                            method: Some(method.clone()),
+                            request_headers: request.headers.clone(),
+                            request_body: request_body_json,
+                            status_code: None,
+                            response_headers: None,
+                            response_body_raw: None,
+                            response_body_raw_size: None,
+                            response_body_parsed: None,
+                            auto_parse: None,
+                            duration_ms: req_start.elapsed(),
+                            error: Some(format!("Request failed: {err}")),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Stage 3: Extractor script.
+        let mut extractor_debug: Option<ScriptDebugInfo> = None;
+        let mut final_result: Option<JsonValue> = None;
+        let mut extraction_error: Option<String> = None;
+
+        if let Some(ref extractor) = target.extractor {
+            let extractor_start = Instant::now();
+            let extractor_source = match self.get_script_content(extractor).await {
+                Ok(c) => c,
+                Err(err) => {
+                    let error_msg = format!("Cannot retrieve extractor script: {err}");
+                    extractor_debug = Some(ScriptDebugInfo {
+                        source: extractor.clone(),
+                        duration_ms: extractor_start.elapsed(),
+                        result: None,
+                        error: Some(error_msg.clone()),
+                    });
+                    extraction_error = Some(error_msg);
+                    String::new()
+                }
+            };
+
+            if extractor_debug.is_none() {
+                let args = ExtractorScriptArgs {
+                    tags: tracker.tags.clone(),
+                    previous_content: previous_revision.as_ref().map(|rev| rev.data.clone()),
+                    responses: Some(responses.clone()),
+                    params: target.params.clone(),
+                };
+
+                let script_result = self
+                    .execute_script::<ExtractorScriptArgs, ExtractorScriptResult>(
+                        extractor_source.clone(),
+                        args,
+                    )
+                    .await;
+                let script_result = match script_result {
+                    Ok(Some(result)) => {
+                        let result_json = result
+                            .body
+                            .as_ref()
+                            .and_then(|b| serde_json::from_slice::<JsonValue>(b).ok());
+                        final_result = result_json.clone();
+                        Ok(result_json)
+                    }
+                    Ok(None) => Ok(None),
+                    Err(err) => {
+                        let error_msg = format!("{err}");
+                        extraction_error = Some(error_msg.clone());
+                        Err(error_msg)
+                    }
+                };
+
+                let duration_ms = extractor_start.elapsed();
+                extractor_debug = Some(match script_result {
+                    Ok(result) => ScriptDebugInfo {
+                        source: extractor_source,
+                        duration_ms,
+                        result,
+                        error: None,
+                    },
+                    Err(err) => ScriptDebugInfo {
+                        source: extractor_source,
+                        duration_ms,
+                        result: None,
+                        error: Some(err),
+                    },
+                });
+            }
+        } else if responses.len() == 1 {
+            final_result = Some(
+                serde_json::from_slice::<JsonValue>(&responses[0].body).unwrap_or_else(|_| {
+                    JsonValue::String(String::from_utf8_lossy(&responses[0].body).into_owned())
+                }),
+            );
+        } else if !responses.is_empty() {
+            final_result = Some(JsonValue::Array(
+                responses
+                    .iter()
+                    .map(|r| {
+                        serde_json::from_slice::<JsonValue>(&r.body).unwrap_or_else(|_| {
+                            JsonValue::String(String::from_utf8_lossy(&r.body).into_owned())
+                        })
+                    })
+                    .collect(),
+            ));
+        }
+
+        (
+            TrackerDebugTargetResult::Api(ApiTrackerDebugResult {
+                params: target.params.clone(),
+                configurator: configurator_debug,
+                requests: request_debug_infos,
+                extractor: extractor_debug,
+            }),
+            final_result.map(|value| TrackerDataRevision {
+                id: Uuid::nil(),
+                tracker_id: tracker.id,
+                data: TrackerDataValue::new(value),
+                created_at: tracker.created_at,
+            }),
+            extraction_error,
+        )
+    }
+
+    /// Simulates every configured action without dispatching side effects.
+    async fn debug_tracker_actions(
+        &self,
+        tracker: &Tracker,
+        new_revision: Option<&TrackerDataRevision>,
+        previous_revision: Option<&TrackerDataRevision>,
+    ) -> Vec<ActionDebugInfo> {
+        let all_actions: Vec<_> = tracker
+            .actions
+            .iter()
+            .chain(self.api.config.trackers.default_actions.iter().flatten())
+            .collect();
+        if all_actions.is_empty() {
+            return vec![];
+        }
+
+        let mut result = Vec::with_capacity(all_actions.len());
+
+        for (i, action) in all_actions.iter().enumerate() {
+            let action_start = Instant::now();
+            let type_tag = action.type_tag().to_string();
+
+            let make_destination = |rendered_email: Option<RenderedEmailDebugInfo>| match action {
+                TrackerAction::Email(email) => {
+                    ActionDestinationDebugInfo::Email(EmailDestinationDebugInfo {
+                        to: email.to.iter().map(|m| m.to_string()).collect(),
+                        rendered_email,
+                    })
+                }
+                TrackerAction::Webhook(wh) => {
+                    ActionDestinationDebugInfo::Webhook(WebhookDestinationDebugInfo {
+                        url: wh.url.clone(),
+                        method: wh.method.clone().unwrap_or(Method::POST),
+                        headers: wh.headers.clone(),
+                    })
+                }
+                TrackerAction::ServerLog(_) => ActionDestinationDebugInfo::ServerLog {},
+            };
+
+            let Some(new_rev) = new_revision else {
+                result.push(ActionDebugInfo {
+                    type_tag,
+                    index: i,
+                    formatter: None,
+                    skipped: false,
+                    payload: None,
+                    destination: make_destination(None),
+                    duration_ms: action_start.elapsed(),
+                    error: Some("Extraction failed, no revision available".to_string()),
+                });
+                continue;
+            };
+
+            // Run formatter if present.
+            let (formatter_debug, payload_result, skipped) =
+                if let Some(formatter_ref) = action.formatter() {
+                    let fmt_start = Instant::now();
+                    let formatter_source = match self.get_script_content(formatter_ref).await {
+                        Ok(s) => s,
+                        Err(err) => {
+                            result.push(ActionDebugInfo {
+                                type_tag,
+                                index: i,
+                                formatter: Some(ScriptDebugInfo {
+                                    source: formatter_ref.to_string(),
+                                    duration_ms: fmt_start.elapsed(),
+                                    result: None,
+                                    error: Some(format!("Cannot retrieve formatter script: {err}")),
+                                }),
+                                skipped: false,
+                                payload: None,
+                                destination: make_destination(None),
+                                duration_ms: action_start.elapsed(),
+                                error: Some(format!("Cannot retrieve formatter script: {err}")),
+                            });
+                            continue;
+                        }
+                    };
+
+                    let new_data_value = &new_rev.data;
+                    let previous_value =
+                        previous_revision
+                            .map(|rev| &rev.data)
+                            .and_then(|previous_data_value| {
+                                if new_data_value.mods().is_none() {
+                                    Some(previous_data_value.original())
+                                } else {
+                                    previous_data_value
+                                        .mods()?
+                                        .get(new_data_value.mods()?.len() - 1)
+                                }
+                            });
+
+                    let script_result = self
+                        .execute_script::<FormatterScriptArgs, FormatterScriptResult>(
+                            formatter_source.clone(),
+                            FormatterScriptArgs {
+                                action: action.type_tag(),
+                                new_content: new_data_value.value().clone(),
+                                previous_content: previous_value.cloned(),
+                            },
+                        )
+                        .await;
+
+                    let fmt_duration = fmt_start.elapsed();
+
+                    match script_result {
+                        Ok(Some(fmt_result)) => {
+                            let result_json =
+                                fmt_result.content.as_ref().map(|c| json!({"content": c}));
+                            let is_skip = fmt_result.content.is_none();
+                            let payload: Result<Option<JsonValue>, String> = Ok(fmt_result.content);
+                            (
+                                Some(ScriptDebugInfo {
+                                    source: formatter_source,
+                                    duration_ms: fmt_duration,
+                                    result: result_json,
+                                    error: None,
+                                }),
+                                payload,
+                                is_skip,
+                            )
+                        }
+                        Ok(None) => (
+                            Some(ScriptDebugInfo {
+                                source: formatter_source,
+                                duration_ms: fmt_duration,
+                                result: None,
+                                error: None,
+                            }),
+                            Ok(Some(new_data_value.value().clone())),
+                            false,
+                        ),
+                        Err(err) => (
+                            Some(ScriptDebugInfo {
+                                source: formatter_source,
+                                duration_ms: fmt_duration,
+                                result: None,
+                                error: Some(format!("{err}")),
+                            }),
+                            Err(format!("{err}")),
+                            false,
+                        ),
+                    }
+                } else {
+                    (
+                        None,
+                        Ok(Some(new_rev.data.value().clone())) as Result<Option<JsonValue>, String>,
+                        false,
+                    )
+                };
+
+            let (payload, error) = match payload_result {
+                Ok(p) => (p, None),
+                Err(e) => (None, Some(e)),
+            };
+
+            let rendered_email = if let TrackerAction::Email(_) = action {
+                if let Some(ref payload_val) = payload {
+                    let result_str = payload_val
+                        .as_str()
+                        .map(|s| s.to_owned())
+                        .unwrap_or_else(|| payload_val.to_string());
+
+                    match (EmailTemplate::TrackerCheckResult {
+                        tracker_id: tracker.id,
+                        tracker_name: tracker.name.clone(),
+                        result: Ok(result_str),
+                    })
+                    .compile_to_email(self.api)
+                    .await
+                    {
+                        Ok(email) => Some(RenderedEmailDebugInfo {
+                            subject: email.subject,
+                            text: email.text,
+                            html: email.html,
+                        }),
+                        Err(err) => {
+                            debug!("Debug: failed to render email preview: {err}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            result.push(ActionDebugInfo {
+                type_tag,
+                index: i,
+                formatter: formatter_debug,
+                skipped,
+                payload,
+                destination: make_destination(rendered_email),
+                duration_ms: action_start.elapsed(),
+                error,
+            });
+        }
+
+        result
+    }
+
+    /// Attempt auto-parsing of a response body based on media type (CSV, XLS, JSON).
+    fn debug_auto_parse(
+        body: &[u8],
+        media_type: Option<&mediatype::MediaType>,
+    ) -> (Option<JsonValue>, Option<AutoParseDebugInfo>) {
+        let Some(mt) = media_type else {
+            let parsed = serde_json::from_slice::<JsonValue>(body).ok();
+            return (parsed, None);
+        };
+
+        let essence = MediaTypeBuf::from_string(mt.essence().to_string())
+            .expect("essence of a valid MediaType is always valid");
+        if CsvParser::supports(mt) {
+            match CsvParser::parse(body) {
+                Ok(parsed) => (
+                    serde_json::from_slice::<JsonValue>(&parsed).ok(),
+                    Some(AutoParseDebugInfo {
+                        media_type: essence,
+                        success: true,
+                        error: None,
+                    }),
+                ),
+                Err(err) => {
+                    let parsed = serde_json::from_slice::<JsonValue>(body).ok();
+                    (
+                        parsed,
+                        Some(AutoParseDebugInfo {
+                            media_type: essence,
+                            success: false,
+                            error: Some(format!("{err}")),
+                        }),
+                    )
+                }
+            }
+        } else if XlsParser::supports(mt) {
+            match XlsParser::parse(body) {
+                Ok(parsed) => (
+                    serde_json::from_slice::<JsonValue>(&parsed).ok(),
+                    Some(AutoParseDebugInfo {
+                        media_type: essence,
+                        success: true,
+                        error: None,
+                    }),
+                ),
+                Err(err) => (
+                    None,
+                    Some(AutoParseDebugInfo {
+                        media_type: essence,
+                        success: false,
+                        error: Some(format!("{err}")),
+                    }),
+                ),
+            }
+        } else {
+            (serde_json::from_slice::<JsonValue>(body).ok(), None)
+        }
+    }
+
+    /// Truncate a response body to fit in the debug output, returning a UTF-8 string.
+    /// Invalid UTF-8 bytes are replaced with U+FFFD (�) so text-heavy responses
+    /// (like HTML with a few stray bytes) remain readable instead of being hidden
+    /// behind a "[binary]" placeholder.
+    fn truncate_body_for_debug(body: &[u8]) -> String {
+        let (slice, suffix) = if body.len() <= DEBUG_MAX_RAW_BODY_BYTES {
+            (body, "")
+        } else {
+            (&body[..DEBUG_MAX_RAW_BODY_BYTES], "…[truncated]")
+        };
+        format!("{}{suffix}", String::from_utf8_lossy(slice))
+    }
+
+    /// Converts raw `body` bytes (`Vec<u8>`) into a debug-friendly JSON value:
+    /// valid JSON is returned parsed, otherwise the bytes are decoded as a UTF-8 string.
+    fn body_bytes_to_debug_json(body: &[u8]) -> JsonValue {
+        serde_json::from_slice::<JsonValue>(body)
+            .unwrap_or_else(|_| JsonValue::String(String::from_utf8_lossy(body).into_owned()))
+    }
+
+    /// Builds a debug-friendly JSON representation of a `ConfiguratorScriptResult`,
+    /// converting raw byte bodies in requests/responses to readable strings or parsed JSON.
+    fn configurator_result_to_debug_json(result: &ConfiguratorScriptResult) -> JsonValue {
+        let mut json = serde_json::to_value(result).unwrap_or_default();
+        // Replace raw byte arrays in body fields with human-readable JSON or UTF-8 strings.
+        let items_key = match result {
+            ConfiguratorScriptResult::Requests(_) => "requests",
+            ConfiguratorScriptResult::Responses(_) => "responses",
+        };
+        if let Some(items) = json.get_mut(items_key).and_then(|v| v.as_array_mut()) {
+            for item in items {
+                if let Some(obj) = item.as_object_mut()
+                    && let Some(body) = obj.get("body").and_then(|b| b.as_array()).cloned()
+                {
+                    let bytes: Vec<u8> = body
+                        .iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u8))
+                        .collect();
+                    obj.insert("body".into(), Self::body_bytes_to_debug_json(&bytes));
+                }
+            }
+        }
+        json
+    }
+
     /// Constructs a new instance of the HTTP client with tracing and caching middleware.
     fn http_client(&self, accept_invalid_certificates: bool) -> ClientWithMiddleware {
         let client_builder = ClientBuilder::new(
@@ -1292,12 +2295,13 @@ mod tests {
     use futures::StreamExt;
     use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE};
     use httpmock::MockServer;
-    use insta::assert_debug_snapshot;
+    use insta::{assert_debug_snapshot, assert_json_snapshot};
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
             ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
             Tracker, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
+            TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugTargetResult,
             TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
             WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
         },
@@ -3476,7 +4480,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content_one.value());
+                .json_body(json!({ "result": content_one.value() }));
         });
 
         trackers
@@ -3510,7 +4514,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content_two.value());
+                .json_body(json!({ "result": content_two.value() }));
         });
 
         let revision = trackers
@@ -3539,7 +4543,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content_two.value());
+                .json_body(json!({ "result": content_two.value() }));
         });
         let revision = trackers
             .create_tracker_data_revision(tracker_two.id)
@@ -3647,7 +4651,7 @@ mod tests {
                 .json_body(serde_json::to_value(web_scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&json!("\"rev_1\""));
+                .json_body(json!({ "result": "\"rev_1\"" }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -3678,7 +4682,7 @@ mod tests {
                 .json_body(serde_json::to_value(web_scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&json!("\"rev_2\""));
+                .json_body(json!({ "result": "\"rev_2\"" }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -3708,7 +4712,7 @@ mod tests {
                 .json_body(serde_json::to_value(web_scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&json!("\"rev_3\""));
+                .json_body(json!({ "result": "\"rev_3\"" }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -4755,7 +5759,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         let scheduled_before_or_at = OffsetDateTime::now_utc()
@@ -4854,7 +5858,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -4885,7 +5889,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(new_content.value());
+                .json_body(json!({ "result": new_content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5005,6 +6009,8 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&WebScraperErrorResponse {
                     message: "Uh oh".to_string(),
+                    error: None,
+                    debug: None,
                 });
         });
 
@@ -5140,6 +6146,8 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&WebScraperErrorResponse {
                     message: "Uh oh".to_string(),
+                    error: None,
+                    debug: None,
                 });
         });
 
@@ -5213,7 +6221,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         let scheduled_before_or_at = OffsetDateTime::now_utc()
@@ -5312,7 +6320,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5343,7 +6351,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(new_content.value());
+                .json_body(json!({ "result": new_content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5453,7 +6461,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         let scheduled_before_or_at = OffsetDateTime::now_utc()
@@ -5527,7 +6535,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5558,7 +6566,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(new_content.value());
+                .json_body(json!({ "result": new_content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5657,7 +6665,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         let scheduled_before_or_at = OffsetDateTime::now_utc()
@@ -5754,7 +6762,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content.value());
+                .json_body(json!({ "result": content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5785,7 +6793,7 @@ mod tests {
                 .json_body(serde_json::to_value(scraper_request).unwrap());
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(new_content.value());
+                .json_body(json!({ "result": new_content.value() }));
         });
 
         trackers.create_tracker_data_revision(tracker.id).await?;
@@ -5949,6 +6957,8 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .json_body_obj(&WebScraperErrorResponse {
                     message: "some client-error".to_string(),
+                    error: None,
+                    debug: None,
                 });
         });
 
@@ -6004,7 +7014,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(content_one.value());
+                .json_body(json!({ "result": content_one.value() }));
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
@@ -6026,7 +7036,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&content_two);
+                .json_body(json!({ "result": content_two }));
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
@@ -6073,7 +7083,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&content);
+                .json_body(json!({ "result": content }));
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
@@ -6128,7 +7138,7 @@ mod tests {
                 );
             then.status(200)
                 .header("Content-Type", "application/json")
-                .json_body_obj(&content);
+                .json_body(json!({ "result": content }));
         });
 
         let revision = trackers.create_tracker_data_revision(tracker.id).await?;
@@ -6195,8 +7205,8 @@ mod tests {
                             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
-                            })
-                        })
+                            }),
+                        }),
                     }),
                     tags: Some(vec!["tag".to_string()]),
                     actions: Some(vec![TrackerAction::ServerLog(Default::default())]),
@@ -6281,14 +7291,14 @@ mod tests {
                             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
-                            })
-                        })
+                            }),
+                        }),
                     }),
                     tags: Some(vec!["tag_two".to_string()]),
                     actions: Some(vec![TrackerAction::Email(EmailAction {
                         to: vec!["dev@retrack.dev".to_string()],
                         formatter: None,
-                    })])
+                    })]),
                 },
             )
             .await?;
@@ -6362,14 +7372,14 @@ mod tests {
                             retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
                                 interval: Duration::from_secs(120),
                                 max_attempts: 5,
-                            })
-                        })
+                            }),
+                        }),
                     }),
                     tags: Some(vec!["tag_two".to_string()]),
                     actions: Some(vec![TrackerAction::Email(EmailAction {
                         to: vec!["dev@retrack.dev".to_string()],
                         formatter: None,
-                    })])
+                    })]),
                 },
             )
             .await?;
@@ -6468,6 +7478,1646 @@ mod tests {
             .get_tracker_by_job_id(uuid!("11e55044-10b1-426f-9247-bb680e5fe0c8"))
             .await?;
         assert!(scheduled_tracker.is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_happy_path(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"key": "value"}));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/data", server.base_url()).parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 10,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": {
+            "key": "value"
+          },
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "15",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "{\"key\":\"value\"}",
+                "responseBodyRawSize": 15,
+                "responseBodyParsed": {
+                  "key": "value"
+                },
+                "durationMs": 10
+              }
+            ]
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_with_request_failure(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        "http://127.0.0.1:1/nonexistent".parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: TrackerConfig {
+                    revisions: 0,
+                    timeout: Some(Duration::from_millis(500)),
+                    job: None,
+                },
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 10
+        }, @r###"
+        {
+          "durationMs": 10,
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "http://127.0.0.1:1/nonexistent",
+                "method": "GET",
+                "durationMs": 10,
+                "error": "Request failed: Cache error: error sending request for url (http://127.0.0.1:1/nonexistent)"
+              }
+            ]
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_existing_tracker_not_found(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let result = trackers
+            .debug_existing_tracker(
+                uuid!("00000000-0000-0000-0000-000000000001"),
+                TrackerDebugExistingParams::default(),
+            )
+            .await;
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Tracker ('00000000-0000-0000-0000-000000000001') is not found."
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_existing_tracker_with_overrides(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("test-debug")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(
+                            format!("{}/original", server.base_url()).parse()?,
+                        )],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let override_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/override");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"overridden": true}));
+        });
+
+        let result = trackers
+            .debug_existing_tracker(
+                tracker.id,
+                TrackerDebugExistingParams {
+                    target: Some(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(
+                            format!("{}/override", server.base_url()).parse()?,
+                        )],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    })),
+                    tags: Some(vec!["overridden-tag".to_string()]),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        override_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 10,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/override"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": {
+            "overridden": true
+          },
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "19",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "{\"overridden\":true}",
+                "responseBodyRawSize": 19,
+                "responseBodyParsed": {
+                  "overridden": true
+                },
+                "durationMs": 10
+              }
+            ]
+          },
+          "actions": [
+            {
+              "typeTag": "log",
+              "index": 0,
+              "skipped": false,
+              "payload": {
+                "overridden": true
+              },
+              "destination": {
+                "type": "log"
+              },
+              "durationMs": 0
+            }
+          ]
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_action_dry_run_no_formatter(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("test-data"));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/data", server.base_url()).parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![TrackerAction::ServerLog(Default::default())],
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 10,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": "test-data",
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "11",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "\"test-data\"",
+                "responseBodyRawSize": 11,
+                "responseBodyParsed": "test-data",
+                "durationMs": 10
+              }
+            ]
+          },
+          "actions": [
+            {
+              "typeTag": "log",
+              "index": 0,
+              "skipped": false,
+              "payload": "test-data",
+              "destination": {
+                "type": "log"
+              },
+              "durationMs": 0
+            }
+          ]
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_action_dry_run_with_formatter(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("original-data"));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/data", server.base_url()).parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![TrackerAction::ServerLog(ServerLogAction {
+                    formatter: Some(
+                        "(async () => ({ content: JSON.stringify({ formatted: true }) }))();"
+                            .to_string(),
+                    ),
+                })],
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+            ".actions[0].durationMs" => 12,
+            ".actions[0].formatter.durationMs" => 13,
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": "original-data",
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "15",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "\"original-data\"",
+                "responseBodyRawSize": 15,
+                "responseBodyParsed": "original-data",
+                "durationMs": 11
+              }
+            ]
+          },
+          "actions": [
+            {
+              "typeTag": "log",
+              "index": 0,
+              "formatter": {
+                "source": "(async () => ({ content: JSON.stringify({ formatted: true }) }))();",
+                "durationMs": 13,
+                "result": {
+                  "content": "{\"formatted\":true}"
+                }
+              },
+              "skipped": false,
+              "payload": "{\"formatted\":true}",
+              "destination": {
+                "type": "log"
+              },
+              "durationMs": 12
+            }
+          ]
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_action_dry_run_formatter_returns_null_skips(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("test"));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/data", server.base_url()).parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![TrackerAction::ServerLog(ServerLogAction {
+                    formatter: Some("(async () => ({ content: null }))();".to_string()),
+                })],
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+            ".actions[0].durationMs" => 12,
+            ".actions[0].formatter.durationMs" => 13,
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": "test",
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "6",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "\"test\"",
+                "responseBodyRawSize": 6,
+                "responseBodyParsed": "test",
+                "durationMs": 11
+              }
+            ]
+          },
+          "actions": [
+            {
+              "typeTag": "log",
+              "index": 0,
+              "formatter": {
+                "source": "(async () => ({ content: null }))();",
+                "durationMs": 13
+              },
+              "skipped": true,
+              "destination": {
+                "type": "log"
+              },
+              "durationMs": 12
+            }
+          ]
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_action_dry_run_webhook_destination(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("data"));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/data", server.base_url()).parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![TrackerAction::Webhook(WebhookAction {
+                    url: "https://hooks.example.com/trigger".parse()?,
+                    method: Some(Method::PUT),
+                    headers: None,
+                    formatter: None,
+                })],
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+            ".actions[0].durationMs" => 12,
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": "data",
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "6",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "\"data\"",
+                "responseBodyRawSize": 6,
+                "responseBodyParsed": "data",
+                "durationMs": 11
+              }
+            ]
+          },
+          "actions": [
+            {
+              "typeTag": "webhook",
+              "index": 0,
+              "skipped": false,
+              "payload": "data",
+              "destination": {
+                "type": "webhook",
+                "url": "https://hooks.example.com/trigger",
+                "method": "PUT"
+              },
+              "durationMs": 12
+            }
+          ]
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_action_dry_run_extraction_failed(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        "http://127.0.0.1:1/nonexistent".parse()?,
+                    )],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: TrackerConfig {
+                    revisions: 0,
+                    timeout: Some(Duration::from_millis(500)),
+                    job: None,
+                },
+                tags: vec![],
+                actions: vec![TrackerAction::ServerLog(Default::default())],
+                previous_content: None,
+            })
+            .await?;
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".actions[0].durationMs" => 12,
+        }, @r###"
+        {
+          "durationMs": 10,
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "http://127.0.0.1:1/nonexistent",
+                "method": "GET",
+                "durationMs": 11,
+                "error": "Request failed: Cache error: error sending request for url (http://127.0.0.1:1/nonexistent)"
+              }
+            ]
+          },
+          "actions": [
+            {
+              "typeTag": "log",
+              "index": 0,
+              "skipped": false,
+              "destination": {
+                "type": "log"
+              },
+              "durationMs": 12,
+              "error": "Extraction failed, no revision available"
+            }
+          ]
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_with_extractor(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"items": [1, 2, 3]}));
+        });
+
+        let extractor_script =
+            "(async () => ({ body: Deno.core.encode(JSON.stringify({ extracted: true })) }))();";
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/data", server.base_url()).parse()?,
+                    )],
+                    configurator: None,
+                    extractor: Some(extractor_script.to_string()),
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+            ".target.extractor.durationMs" => 14,
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": {
+            "extracted": true
+          },
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "17",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "{\"items\":[1,2,3]}",
+                "responseBodyRawSize": 17,
+                "responseBodyParsed": {
+                  "items": [
+                    1,
+                    2,
+                    3
+                  ]
+                },
+                "durationMs": 11
+              }
+            ],
+            "extractor": {
+              "source": "(async () => ({ body: Deno.core.encode(JSON.stringify({ extracted: true })) }))();",
+              "durationMs": 14,
+              "result": {
+                "extracted": true
+              }
+            }
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_with_configurator(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let configurator_url = format!("{}/modified-data", server.base_url());
+        let configurator_script = format!(
+            "(async () => ({{ requests: [{{ url: '{}' }}] }}))();",
+            configurator_url
+        );
+
+        let modified_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/modified-data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"configured": true}));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/original-data", server.base_url()).parse()?,
+                    )],
+                    configurator: Some(configurator_script),
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        modified_mock.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.configurator.durationMs" => 14,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/modified-data"));
+                "[url]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+           ".target.configurator.source" => "[script]",
+            ".target.configurator.result.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/modified-data"));
+                "[url]"
+            }),
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": {
+            "configured": true
+          },
+          "target": {
+            "type": "api",
+            "configurator": {
+              "source": "[script]",
+              "durationMs": 14,
+              "result": {
+                "requests": [
+                  {
+                    "url": "[url]"
+                  }
+                ]
+              }
+            },
+            "requests": [
+              {
+                "index": 0,
+                "source": "configurator",
+                "url": "[url]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "19",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "{\"configured\":true}",
+                "responseBodyRawSize": 19,
+                "responseBodyParsed": {
+                  "configured": true
+                },
+                "durationMs": 11
+              }
+            ]
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_with_mock_responses(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let configurator_script = r#"(async () => ({ responses: [{ status: 200, headers: {}, body: Deno.core.encode(JSON.stringify({"mock":true})) }] }))();"#;
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![TargetRequest::new(
+                        format!("{}/original", server.base_url()).parse()?,
+                    )],
+                    configurator: Some(configurator_script.to_string()),
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.configurator.durationMs" => 14,
+            ".target.requests[0].durationMs" => 11,
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": {
+            "mock": true
+          },
+          "target": {
+            "type": "api",
+            "configurator": {
+              "source": "(async () => ({ responses: [{ status: 200, headers: {}, body: Deno.core.encode(JSON.stringify({\"mock\":true})) }] }))();",
+              "durationMs": 14,
+              "result": {
+                "responses": [
+                  {
+                    "status": 200,
+                    "headers": {},
+                    "body": {
+                      "mock": true
+                    }
+                  }
+                ]
+              }
+            },
+            "requests": [
+              {
+                "index": 0,
+                "source": "mock",
+                "statusCode": 200,
+                "responseHeaders": {},
+                "responseBodyRaw": "{\"mock\":true}",
+                "responseBodyRawSize": 13,
+                "responseBodyParsed": {
+                  "mock": true
+                },
+                "durationMs": 11
+              }
+            ]
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_multiple_requests(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let mock_one = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data1");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"page": 1}));
+        });
+
+        let mock_two = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data2");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"page": 2}));
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![
+                        TargetRequest::new(format!("{}/data1", server.base_url()).parse()?),
+                        TargetRequest::new(format!("{}/data2", server.base_url()).parse()?),
+                    ],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        mock_one.assert();
+        mock_two.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data1"));
+                "[url1]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+            ".target.requests[1].durationMs" => 15,
+            ".target.requests[1].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/data2"));
+                "[url2]"
+            }),
+            ".target.requests[1].responseHeaders.date" => "[date]",
+            r#".target.requests[1].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[1].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[1].responseHeaders" => insta::sorted_redaction(),
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": [
+            {
+              "page": 1
+            },
+            {
+              "page": 2
+            }
+          ],
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url1]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "10",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "{\"page\":1}",
+                "responseBodyRawSize": 10,
+                "responseBodyParsed": {
+                  "page": 1
+                },
+                "durationMs": 11
+              },
+              {
+                "index": 1,
+                "source": "original",
+                "url": "[url2]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "10",
+                  "content-type": "application/json",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "{\"page\":2}",
+                "responseBodyRawSize": 10,
+                "responseBodyParsed": {
+                  "page": 2
+                },
+                "durationMs": 15
+              }
+            ]
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_api_target_multiple_requests_html(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let mock_one = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/page1");
+            then.status(200)
+                .header("Content-Type", "text/html")
+                .body("<html><body><h1>Page One</h1></body></html>");
+        });
+
+        let mock_two = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/page2");
+            then.status(200)
+                .header("Content-Type", "text/html")
+                .body("<html><body><h1>Page Two</h1></body></html>");
+        });
+
+        let result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: TrackerTarget::Api(ApiTarget {
+                    requests: vec![
+                        TargetRequest::new(format!("{}/page1", server.base_url()).parse()?),
+                        TargetRequest::new(format!("{}/page2", server.base_url()).parse()?),
+                    ],
+                    configurator: None,
+                    extractor: None,
+                    params: None,
+                }),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        mock_one.assert();
+        mock_two.assert();
+
+        assert_json_snapshot!(result, {
+            ".durationMs" => 10,
+            ".target.requests[0].durationMs" => 11,
+            ".target.requests[0].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/page1"));
+                "[url1]"
+            }),
+            ".target.requests[0].responseHeaders.date" => "[date]",
+            r#".target.requests[0].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[0].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[0].responseHeaders" => insta::sorted_redaction(),
+            ".target.requests[1].durationMs" => 15,
+            ".target.requests[1].url" => insta::dynamic_redaction(|value, _| {
+                assert!(value.as_str().unwrap().ends_with("/page2"));
+                "[url2]"
+            }),
+            ".target.requests[1].responseHeaders.date" => "[date]",
+            r#".target.requests[1].responseHeaders["x-cache"]"# => "[cache]",
+            r#".target.requests[1].responseHeaders["x-cache-lookup"]"# => "[cache]",
+            ".target.requests[1].responseHeaders" => insta::sorted_redaction(),
+        }, @r###"
+        {
+          "durationMs": 10,
+          "result": [
+            "<html><body><h1>Page One</h1></body></html>",
+            "<html><body><h1>Page Two</h1></body></html>"
+          ],
+          "target": {
+            "type": "api",
+            "requests": [
+              {
+                "index": 0,
+                "source": "original",
+                "url": "[url1]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "43",
+                  "content-type": "text/html",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "<html><body><h1>Page One</h1></body></html>",
+                "responseBodyRawSize": 43,
+                "durationMs": 11
+              },
+              {
+                "index": 1,
+                "source": "original",
+                "url": "[url2]",
+                "method": "GET",
+                "statusCode": 200,
+                "responseHeaders": {
+                  "content-length": "43",
+                  "content-type": "text/html",
+                  "date": "[date]",
+                  "x-cache": "[cache]",
+                  "x-cache-lookup": "[cache]"
+                },
+                "responseBodyRaw": "<html><body><h1>Page Two</h1></body></html>",
+                "responseBodyRawSize": 43,
+                "durationMs": 15
+              }
+            ]
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_matches_revision_api_simple(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"key": "value", "count": 42}));
+        });
+
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new(
+                format!("{}/data", server.base_url()).parse()?,
+            )],
+            configurator: None,
+            extractor: None,
+            params: None,
+        });
+
+        let debug_result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: target.clone(),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("debug-vs-real")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(target)
+                    .with_actions(vec![])
+                    .build(),
+            )
+            .await?;
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+
+        api_mock.assert_calls(2);
+        assert_eq!(
+            debug_result.result.as_ref(),
+            Some(revision.data.original()),
+            "debug result must equal the real revision"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_matches_revision_api_with_extractor(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"items": [1, 2, 3], "total": 3}));
+        });
+
+        let extractor =
+            "(async () => ({ body: Deno.core.encode(JSON.stringify({ extracted: true })) }))();";
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new(
+                format!("{}/data", server.base_url()).parse()?,
+            )],
+            configurator: None,
+            extractor: Some(extractor.to_string()),
+            params: None,
+        });
+
+        let debug_result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: target.clone(),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("debug-vs-real-extractor")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(target)
+                    .with_actions(vec![])
+                    .build(),
+            )
+            .await?;
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+
+        api_mock.assert_calls(2);
+        assert_eq!(
+            debug_result.result.as_ref(),
+            Some(revision.data.original()),
+            "debug result with extractor must equal the real revision"
+        );
+
+        let TrackerDebugTargetResult::Api(ref api_debug) = debug_result.target else {
+            panic!("expected API target debug result");
+        };
+        assert!(api_debug.extractor.is_some());
+        assert!(api_debug.extractor.as_ref().unwrap().error.is_none());
+        assert_eq!(
+            api_debug.extractor.as_ref().unwrap().result,
+            Some(json!({"extracted": true}))
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_matches_revision_api_with_configurator(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let redirect_url = format!("{}/redirected", server.base_url());
+        let configurator_script = format!(
+            "(async () => ({{ requests: [{{ url: '{}' }}] }}))();",
+            redirect_url
+        );
+
+        let redirect_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/redirected");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"from_configurator": true}));
+        });
+
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new(
+                format!("{}/original", server.base_url()).parse()?,
+            )],
+            configurator: Some(configurator_script),
+            extractor: None,
+            params: None,
+        });
+
+        let debug_result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: target.clone(),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("debug-vs-real-configurator")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(target)
+                    .with_actions(vec![])
+                    .build(),
+            )
+            .await?;
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+
+        redirect_mock.assert_calls(2);
+        assert_eq!(
+            debug_result.result.as_ref(),
+            Some(revision.data.original()),
+            "debug result with configurator must equal the real revision"
+        );
+
+        let TrackerDebugTargetResult::Api(ref api_debug) = debug_result.target else {
+            panic!("expected API target debug result");
+        };
+        assert!(api_debug.configurator.is_some());
+        assert!(api_debug.configurator.as_ref().unwrap().error.is_none());
+        assert_eq!(api_debug.requests[0].source, "configurator");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_matches_revision_api_with_configurator_and_extractor(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let redirect_url = format!("{}/cfg-data", server.base_url());
+        let configurator_script = format!(
+            "(async () => ({{ requests: [{{ url: '{}' }}] }}))();",
+            redirect_url
+        );
+        let extractor = "(async () => ({ body: Deno.core.encode(JSON.stringify({ processed: context.responses[0].status })) }))();";
+
+        let cfg_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/cfg-data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({"raw": "data"}));
+        });
+
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new(
+                format!("{}/original", server.base_url()).parse()?,
+            )],
+            configurator: Some(configurator_script),
+            extractor: Some(extractor.to_string()),
+            params: None,
+        });
+
+        let debug_result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: target.clone(),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("debug-vs-real-both")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(target)
+                    .with_actions(vec![])
+                    .build(),
+            )
+            .await?;
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+
+        cfg_mock.assert_calls(2);
+        assert_eq!(
+            debug_result.result.as_ref(),
+            Some(revision.data.original()),
+            "debug result with configurator+extractor must equal the real revision"
+        );
+
+        let TrackerDebugTargetResult::Api(ref api_debug) = debug_result.target else {
+            panic!("expected API target debug result");
+        };
+        assert!(api_debug.configurator.is_some());
+        assert!(api_debug.extractor.is_some());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_matches_revision_api_with_mock_responses(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let configurator_script = r#"(async () => ({ responses: [{ status: 200, headers: {}, body: Deno.core.encode(JSON.stringify({"mocked":true})) }] }))();"#;
+
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new(
+                format!("{}/unused", server.base_url()).parse()?,
+            )],
+            configurator: Some(configurator_script.to_string()),
+            extractor: None,
+            params: None,
+        });
+
+        let debug_result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: target.clone(),
+                config: Default::default(),
+                tags: vec![],
+                actions: vec![],
+                previous_content: None,
+            })
+            .await?;
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("debug-vs-real-mock")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(target)
+                    .with_actions(vec![])
+                    .build(),
+            )
+            .await?;
+        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+
+        assert_eq!(
+            debug_result.result.as_ref(),
+            Some(revision.data.original()),
+            "debug result with mock responses must equal the real revision"
+        );
+
+        let TrackerDebugTargetResult::Api(ref api_debug) = debug_result.target else {
+            panic!("expected API target debug result");
+        };
+        assert!(api_debug.configurator.is_some());
+        assert_eq!(api_debug.requests[0].source, "mock");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn debug_matches_revision_api_with_actions(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let api_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("action-test-data"));
+        });
+
+        let formatter =
+            "(async () => ({ content: JSON.stringify({ formatted: true }) }))();".to_string();
+        let actions = vec![
+            TrackerAction::ServerLog(ServerLogAction {
+                formatter: Some(formatter),
+            }),
+            TrackerAction::Webhook(WebhookAction {
+                url: "https://hooks.example.com/test".parse()?,
+                method: Some(Method::POST),
+                headers: None,
+                formatter: None,
+            }),
+        ];
+
+        let target = TrackerTarget::Api(ApiTarget {
+            requests: vec![TargetRequest::new(
+                format!("{}/data", server.base_url()).parse()?,
+            )],
+            configurator: None,
+            extractor: None,
+            params: None,
+        });
+
+        let debug_result = trackers
+            .debug_tracker(TrackerDebugParams {
+                target: target.clone(),
+                config: Default::default(),
+                tags: vec![],
+                actions: actions.clone(),
+                previous_content: None,
+            })
+            .await?;
+
+        api_mock.assert();
+        assert_eq!(
+            debug_result.result,
+            Some(json!("action-test-data")),
+            "debug result must match the expected data"
+        );
+
+        assert_eq!(debug_result.actions.len(), 2, "expected 2 action dry-runs");
+        assert_eq!(debug_result.actions[0].type_tag, "log");
+        assert!(!debug_result.actions[0].skipped);
+        assert_eq!(
+            debug_result.actions[0].payload,
+            Some(json!("{\"formatted\":true}"))
+        );
+
+        assert_eq!(debug_result.actions[1].type_tag, "webhook");
+        assert!(!debug_result.actions[1].skipped);
+        assert_eq!(
+            debug_result.actions[1].payload,
+            Some(json!("action-test-data"))
+        );
 
         Ok(())
     }

@@ -4,6 +4,9 @@ mod tracker_config;
 mod tracker_create_params;
 mod tracker_data_revision;
 mod tracker_data_value;
+mod tracker_debug_existing_params;
+mod tracker_debug_params;
+mod tracker_debug_result;
 mod tracker_list_revisions_params;
 mod tracker_target;
 mod tracker_update_params;
@@ -19,6 +22,14 @@ pub use self::{
     tracker_create_params::TrackerCreateParams,
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
+    tracker_debug_existing_params::TrackerDebugExistingParams,
+    tracker_debug_params::TrackerDebugParams,
+    tracker_debug_result::{
+        ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTrackerDebugResult,
+        AutoParseDebugInfo, EmailDestinationDebugInfo, PageLogEntry, PageTrackerDebugResult,
+        RenderedEmailDebugInfo, ScriptDebugInfo, TrackerDebugResult, TrackerDebugTargetResult,
+        WebhookDestinationDebugInfo,
+    },
     tracker_list_revisions_params::{
         DEFAULT_DIFF_CONTEXT_RADIUS, MAX_DIFF_CONTEXT_RADIUS, TrackerListRevisionsParams,
     },

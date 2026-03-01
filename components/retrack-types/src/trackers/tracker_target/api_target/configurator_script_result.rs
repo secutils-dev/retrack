@@ -1,8 +1,8 @@
 use crate::trackers::{ConfiguratorScriptRequest, TargetResponse};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Result of the "configurator" script execution.
-#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ConfiguratorScriptResult {
     /// Configurator script modifications for the request.

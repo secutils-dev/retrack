@@ -62,6 +62,8 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             .service(handlers::trackers_list::trackers_list)
             .service(handlers::trackers_get::trackers_get)
             .service(handlers::trackers_create::trackers_create)
+            .service(handlers::trackers_debug::trackers_debug)
+            .service(handlers::trackers_debug_existing::trackers_debug_existing)
             .service(handlers::trackers_update::trackers_update)
             .service(handlers::trackers_remove::trackers_remove)
             .service(handlers::trackers_bulk_remove::trackers_bulk_remove)

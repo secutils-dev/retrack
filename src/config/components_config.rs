@@ -24,9 +24,7 @@ mod tests {
 
     #[test]
     fn serialization_and_default() {
-        assert_toml_snapshot!(ComponentsConfig::default(), @r###"
-        web_scraper_url = 'http://localhost:7272/'
-        "###);
+        assert_toml_snapshot!(ComponentsConfig::default(), @"web_scraper_url = 'http://localhost:7272/'");
     }
 
     #[test]

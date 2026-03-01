@@ -55,6 +55,19 @@ interface RequestBodyType {
    * Defaults to false.
    */
   acceptInvalidCertificates?: boolean;
+
+  /**
+   * When true, the response is a JSON object `{ result, logs, error? }` instead of just the
+   * extracted content. Worker log messages are collected and returned alongside the result.
+   */
+  debug?: boolean;
+}
+
+/**
+ * Optional debug information attached to both success and error responses when `debug: true`.
+ */
+interface DebugInfo {
+  logs: Array<{ level: string; message: string; args?: ReadonlyArray<object> }>;
 }
 
 export function registerExecuteRoutes({ config, server, getLocalBrowserServer }: ApiRouteParams) {
@@ -73,6 +86,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
             timeout: { type: 'number' },
             userAgent: { type: 'string' },
             acceptInvalidCertificates: { type: 'boolean' },
+            debug: { type: 'boolean' },
           },
           required: ['extractor', 'tags'],
         },
@@ -132,6 +146,9 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         screenshotsPath: config.browser.screenshotsPath,
       };
 
+      const isDebug = request.body.debug === true;
+      const debugLogs: DebugInfo['logs'] = [];
+
       try {
         // The extractor script is executed in a separate thread to isolate it from the main thread. We filter the
         // environment variables to only include the ones that are necessary for the extractor script to run.
@@ -142,7 +159,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
           workerData,
         });
 
-        return await new Promise((resolve, reject) => {
+        const result = await new Promise<unknown>((resolve, reject) => {
           let errorResult: Error | undefined;
           let successfulResult: unknown = undefined;
 
@@ -160,9 +177,17 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
               } else {
                 workerLog.info(`${message.message}: ${JSON.stringify(message.args)}`);
               }
+
+              if (isDebug) {
+                debugLogs.push({
+                  level: message.level ?? 'info',
+                  message: message.message,
+                  args: message.args,
+                });
+              }
             } else {
               workerLog.debug(`Successfully executed extractor script.`);
-              successfulResult = JSON.stringify(message.content);
+              successfulResult = message.content;
             }
           });
 
@@ -183,11 +208,17 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
             }
           });
         });
+
+        return { result, ...(isDebug ? { debug: { logs: debugLogs } } : {}) } as { result: unknown; debug?: DebugInfo };
       } catch (err) {
-        logger.error(`Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`);
+        const errorMessage = Diagnostics.errorMessage(err);
+        logger.error(`Failed to execute extractor script: ${errorMessage}`);
+
         return reply.code(500).send({
-          message: `Failed to execute extractor script: ${Diagnostics.errorMessage(err)}`,
-        });
+          message: `Failed to execute extractor script: ${errorMessage}`,
+          error: errorMessage,
+          ...(isDebug ? { debug: { logs: debugLogs } } : {}),
+        } as { message: string; error: string; debug?: DebugInfo });
       }
     },
   );
