@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+byte-unit = "5.2"
 http = "1.4"
 http-serde = "2.1"
 mediatype = "0.21"
@@ -22,6 +23,7 @@ insta = "1.46.3"
 
 [features]
 default = [
+    "byte-unit/serde",
     "insta/json",
     "mediatype/serde",
     "serde_with/time_0_3",

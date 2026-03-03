@@ -2,12 +2,12 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import type { Browser, Page } from 'playwright-core';
+import type { Browser, Locator, LocatorScreenshotOptions, Page, PageScreenshotOptions } from 'playwright-core';
 import type { ExtractorSandboxConfig } from '../../config.js';
 
 import { Diagnostics } from '../diagnostics.js';
 import type { WorkerData } from './constants.js';
-import { WorkerMessageType } from './constants.js';
+import { MAX_DEBUG_SCREENSHOTS_COUNT, WorkerMessageType } from './constants.js';
 
 // We need a parent port to communicate the errors and result of an extractor
 // script to the main thread.
@@ -26,6 +26,7 @@ const {
   userAgent,
   acceptInvalidCertificates,
   screenshotsPath,
+  debug: debugOptions,
 } = workerData as WorkerData;
 
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
@@ -143,26 +144,111 @@ page.on('console', (msg) => {
   }
 });
 
+// Debug screenshot capture: intercept page.screenshot(), locator.screenshot(), and optionally
+// auto-capture after every significant Playwright action.
+let screenshotCount = 0;
+let screenshotTotalSize = 0;
+const isDebug = debugOptions?.enabled === true;
+const maxScreenshotSize = debugOptions?.maxScreenshotsTotalSize ?? 0;
+
+const originalPageScreenshot = page.screenshot.bind(page);
+async function captureDebugScreenshot(
+  target: Page | Locator,
+  label: string,
+  options?: PageScreenshotOptions | LocatorScreenshotOptions,
+): Promise<Buffer> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { path, ...safeOptions } = options ?? {};
+
+  // const safeOptions = options ? stripScreenshotPath(options) : {};
+  const buffer = await originalPageScreenshot.call(target, safeOptions);
+  if (screenshotCount < MAX_DEBUG_SCREENSHOTS_COUNT && screenshotTotalSize + buffer.length <= maxScreenshotSize) {
+    screenshotCount++;
+    screenshotTotalSize += buffer.length;
+    parentPort?.postMessage({
+      type: WorkerMessageType.SCREENSHOT,
+      label,
+      data: buffer.toString('base64'),
+      mimeType: `image/${safeOptions.type ?? 'png'}`,
+    });
+  }
+  return buffer;
+}
+
+let tracedPage: Page;
+if (isDebug) {
+  // Intercept Locator.prototype.screenshot() at the prototype level to capture in-memory and strip `path`.
+  Object.getPrototypeOf(page.locator('body')).screenshot = async function (
+    this: Locator,
+    options?: LocatorScreenshotOptions,
+  ): Promise<Buffer> {
+    return captureDebugScreenshot(this, 'locator.screenshot()', options);
+  };
+
+  // Set of page actions that should trigger an automatic viewport screenshot after they succeed.
+  const autoTraceActions: ReadonlySet<string> | undefined =
+    debugOptions?.autoScreenshots !== false
+      ? new Set(['goto', 'click', 'fill', 'type', 'press', 'check', 'uncheck', 'selectOption'])
+      : undefined;
+
+  // Use a Proxy to intercept page method calls: capture debug screenshots for `screenshot()` and
+  // auto-traced actions without mutating the original page object.
+  tracedPage = new Proxy(page, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function' || typeof prop !== 'string') {
+        return value;
+      }
+
+      if (prop === 'screenshot') {
+        return (options?: PageScreenshotOptions) => captureDebugScreenshot(target, 'page.screenshot()', options);
+      }
+
+      if (autoTraceActions?.has(prop)) {
+        const original = value as (...args: unknown[]) => Promise<unknown>;
+        return async (...args: unknown[]) => {
+          const result = await original.apply(target, args);
+          try {
+            await captureDebugScreenshot(target, `after ${prop}: ${typeof args[0] === 'string' ? args[0] : ''}`, {
+              fullPage: false,
+            });
+          } catch {
+            // Never break the action if the auto-screenshot fails.
+          }
+          return result;
+        };
+      }
+
+      return value;
+    },
+  });
+} else {
+  tracedPage = page;
+}
+
 try {
   parentPort?.postMessage({
     type: WorkerMessageType.RESULT,
     content: await extractorModule.execute(
-      page,
+      tracedPage,
       extractorParams ? { params: extractorParams, tags, previousContent } : { tags, previousContent },
     ),
   });
 } catch (err) {
-  // Capture screenshots.
-  if (screenshotsPath) {
-    const pages = browser?.contexts().flatMap((context) => context.pages()) ?? [];
-    for (const page of pages) {
-      const screenshotPath = `${screenshotsPath}/screenshot_${Date.now()}.png`;
+  if (isDebug || screenshotsPath) {
+    const pages = browser?.contexts().flatMap((ctx) => ctx.pages()) ?? [];
+    for (const p of pages) {
       try {
-        await page.screenshot({ fullPage: true, path: screenshotPath });
-        log.error(`Captured page screenshot for ${page.url()}: ${screenshotPath}`);
-      } catch (err) {
+        if (isDebug) {
+          await captureDebugScreenshot(p, `auto: error (${p.url()})`, { fullPage: true });
+        } else {
+          const screenshotPath = `${screenshotsPath}/screenshot_${Date.now()}.png`;
+          await p.screenshot({ fullPage: true, path: screenshotPath });
+          log.error(`Captured page screenshot for ${p.url()}: ${screenshotPath}`);
+        }
+      } catch (screenshotErr) {
         log.error(
-          `Failed to capture browser screenshot for ${page.url()} (protocol: ${browserConfig.protocol}): ${Diagnostics.errorMessage(err)}.`,
+          `Failed to capture ${isDebug ? 'debug' : 'browser'} screenshot for ${p.url()} (protocol: ${browserConfig.protocol}): ${Diagnostics.errorMessage(screenshotErr)}.`,
         );
       }
     }

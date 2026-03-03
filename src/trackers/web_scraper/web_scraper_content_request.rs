@@ -1,8 +1,20 @@
-use retrack_types::trackers::TrackerDataValue;
+use byte_unit::Byte;
+use retrack_types::{trackers::TrackerDataValue, utils::serialize_opt_byte_as_u64};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use serde_with::{DurationMilliSeconds, serde_as, skip_serializing_none};
 use std::time::Duration;
+
+/// Structured debug options sent to the web scraper to control screenshot capture.
+#[skip_serializing_none]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebScraperDebugOptions {
+    pub enabled: bool,
+    #[serde(serialize_with = "serialize_opt_byte_as_u64")]
+    pub max_screenshots_total_size: Option<Byte>,
+    pub auto_screenshots: Option<bool>,
+}
 
 /// Represents request to scrap web page content.
 #[serde_as]
@@ -36,9 +48,8 @@ pub struct WebScraperContentRequest<'a> {
     /// Optional content of the web page that has been extracted previously.
     pub previous_content: Option<&'a TrackerDataValue>,
 
-    /// When true, the web scraper returns a structured debug response with logs.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub debug: bool,
+    /// Debug options controlling screenshot capture and structured response format.
+    pub debug: Option<WebScraperDebugOptions>,
 }
 
 /// Represents engines supported by the Web Scraper component.
@@ -51,8 +62,9 @@ pub enum WebScraperBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{WebScraperBackend, WebScraperContentRequest};
+    use super::{WebScraperBackend, WebScraperContentRequest, WebScraperDebugOptions};
     use crate::tests::MockTrackerBuilder;
+    use byte_unit::Byte;
     use insta::assert_json_snapshot;
     use retrack_types::trackers::{ExtractorEngine, PageTarget, TrackerDataValue, TrackerTarget};
     use serde_json::json;
@@ -70,7 +82,7 @@ mod tests {
             previous_content: Some(&TrackerDataValue::new(json!("some content"))),
             user_agent: Some("Retrack/1.0.0"),
             accept_invalid_certificates: true,
-            debug: false,
+            debug: None,
         }, @r###"
         {
           "extractor": "export async function execute(p) { await p.goto('http://localhost:1234/my/app?q=2'); return await p.content(); }",
@@ -87,6 +99,37 @@ mod tests {
           "timeout": 100,
           "previousContent": {
             "original": "some content"
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[test]
+    fn serialization_with_debug() -> anyhow::Result<()> {
+        assert_json_snapshot!(WebScraperContentRequest {
+            extractor: "script",
+            extractor_params: None,
+            extractor_backend: None,
+            tags: &vec![],
+            timeout: None,
+            previous_content: None,
+            user_agent: None,
+            accept_invalid_certificates: false,
+            debug: Some(WebScraperDebugOptions {
+                enabled: true,
+                max_screenshots_total_size: Some(Byte::from_u64(5242880)),
+                auto_screenshots: Some(true),
+            }),
+        }, @r###"
+        {
+          "extractor": "script",
+          "tags": [],
+          "debug": {
+            "enabled": true,
+            "maxScreenshotsTotalSize": 5242880,
+            "autoScreenshots": true
           }
         }
         "###);
@@ -130,6 +173,7 @@ mod tests {
         assert_eq!(request.timeout, Some(Duration::from_millis(2500)));
 
         assert!(request.previous_content.is_none());
+        assert!(request.debug.is_none());
 
         // Explicit engines.
         for (engine, expected_backend) in [

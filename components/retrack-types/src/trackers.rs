@@ -23,12 +23,12 @@ pub use self::{
     tracker_data_revision::TrackerDataRevision,
     tracker_data_value::TrackerDataValue,
     tracker_debug_existing_params::TrackerDebugExistingParams,
-    tracker_debug_params::TrackerDebugParams,
+    tracker_debug_params::{DebugOptions, TrackerDebugParams},
     tracker_debug_result::{
         ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTrackerDebugResult,
-        AutoParseDebugInfo, EmailDestinationDebugInfo, PageLogEntry, PageTrackerDebugResult,
-        RenderedEmailDebugInfo, ScriptDebugInfo, TrackerDebugResult, TrackerDebugTargetResult,
-        WebhookDestinationDebugInfo,
+        AutoParseDebugInfo, EmailDestinationDebugInfo, PageLogEntry, PageScreenshotEntry,
+        PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo, TrackerDebugResult,
+        TrackerDebugTargetResult, WebhookDestinationDebugInfo,
     },
     tracker_list_revisions_params::{
         DEFAULT_DIFF_CONTEXT_RADIUS, MAX_DIFF_CONTEXT_RADIUS, TrackerListRevisionsParams,

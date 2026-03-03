@@ -1,6 +1,7 @@
+use byte_unit::Byte;
 use http::StatusCode;
 use http_serde::status_code;
-use serde::{Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
 
 /// Utility-wrapper around `StatusCode` to use with `serde_with` crate macros.
@@ -21,4 +22,20 @@ impl<'de> DeserializeAs<'de, StatusCode> for StatusCodeLocal {
     {
         status_code::deserialize(deserializer)
     }
+}
+
+pub fn serialize_opt_byte_as_u64<S: Serializer>(
+    value: &Option<Byte>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match value {
+        Some(b) => serializer.serialize_u64(b.as_u64()),
+        None => serializer.serialize_none(),
+    }
+}
+
+pub fn deserialize_opt_byte_from_u64<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Byte>, D::Error> {
+    Option::<u64>::deserialize(deserializer).map(|opt| opt.map(Byte::from_u64))
 }

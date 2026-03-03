@@ -3986,6 +3986,7 @@ name = "retrack-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "byte-unit",
  "http 1.4.0",
  "http-serde",
  "insta",

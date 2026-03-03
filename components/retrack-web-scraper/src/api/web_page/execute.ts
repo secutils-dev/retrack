@@ -4,9 +4,19 @@ import { Worker } from 'node:worker_threads';
 import type { BrowserConfig, RemoteBrowserConfig } from '../../config.js';
 import type { ApiRouteParams } from '../api_route_params.js';
 import { Diagnostics } from '../diagnostics.js';
-import type { WorkerData, WorkerLogMessage, WorkerResultMessage } from './constants.js';
-import { DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS } from './constants.js';
+import type { WorkerData, WorkerLogMessage, WorkerResultMessage, WorkerScreenshotMessage } from './constants.js';
+import { DEFAULT_EXTRACTOR_SCRIPT_TIMEOUT_MS, DEFAULT_MAX_DEBUG_SCREENSHOTS_TOTAL_SIZE } from './constants.js';
 import { WorkerMessageType } from './constants.js';
+
+/**
+ * Debug options that can be passed in the request body. Accepts either a boolean (backward
+ * compat) or a structured object with fine-grained controls.
+ */
+interface RequestDebugOptions {
+  enabled: boolean;
+  maxScreenshotsTotalSize?: number;
+  autoScreenshots?: boolean;
+}
 
 /**
  * Defines type of the input parameters.
@@ -57,17 +67,24 @@ interface RequestBodyType {
   acceptInvalidCertificates?: boolean;
 
   /**
-   * When true, the response is a JSON object `{ result, logs, error? }` instead of just the
-   * extracted content. Worker log messages are collected and returned alongside the result.
+   * Debug options. When enabled, the response includes logs and screenshots collected during
+   * extraction.
    */
-  debug?: boolean;
+  debug?: RequestDebugOptions;
+}
+
+interface DebugScreenshotEntry {
+  label: string;
+  data: string;
+  mimeType: string;
 }
 
 /**
- * Optional debug information attached to both success and error responses when `debug: true`.
+ * Optional debug information attached to both success and error responses when debug is enabled.
  */
 interface DebugInfo {
   logs: Array<{ level: string; message: string; args?: ReadonlyArray<object> }>;
+  screenshots: DebugScreenshotEntry[];
 }
 
 export function registerExecuteRoutes({ config, server, getLocalBrowserServer }: ApiRouteParams) {
@@ -86,7 +103,14 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
             timeout: { type: 'number' },
             userAgent: { type: 'string' },
             acceptInvalidCertificates: { type: 'boolean' },
-            debug: { type: 'boolean' },
+            debug: {
+              type: 'object',
+              properties: {
+                enabled: { type: 'boolean' },
+                maxScreenshotsTotalSize: { type: 'number' },
+                autoScreenshots: { type: 'boolean' },
+              },
+            },
           },
           required: ['extractor', 'tags'],
         },
@@ -144,10 +168,19 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         userAgent: request.body.userAgent,
         acceptInvalidCertificates: request.body.acceptInvalidCertificates,
         screenshotsPath: config.browser.screenshotsPath,
+        debug: request.body.debug?.enabled
+          ? {
+              enabled: request.body.debug.enabled,
+              maxScreenshotsTotalSize:
+                request.body.debug.maxScreenshotsTotalSize ?? DEFAULT_MAX_DEBUG_SCREENSHOTS_TOTAL_SIZE,
+              autoScreenshots: request.body.debug.autoScreenshots ?? true,
+            }
+          : undefined,
       };
 
-      const isDebug = request.body.debug === true;
+      const isDebug = request.body.debug?.enabled === true;
       const debugLogs: DebugInfo['logs'] = [];
+      const debugScreenshots: DebugScreenshotEntry[] = [];
 
       try {
         // The extractor script is executed in a separate thread to isolate it from the main thread. We filter the
@@ -170,7 +203,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
             void worker.terminate();
           }, timeout);
 
-          worker.on('message', (message: WorkerLogMessage | WorkerResultMessage) => {
+          worker.on('message', (message: WorkerLogMessage | WorkerResultMessage | WorkerScreenshotMessage) => {
             if (message.type === WorkerMessageType.LOG) {
               if (message.level === 'error') {
                 workerLog.error(`${message.message}: ${JSON.stringify(message.args)}`);
@@ -183,6 +216,14 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
                   level: message.level ?? 'info',
                   message: message.message,
                   args: message.args,
+                });
+              }
+            } else if (message.type === WorkerMessageType.SCREENSHOT) {
+              if (isDebug) {
+                debugScreenshots.push({
+                  label: message.label,
+                  data: message.data,
+                  mimeType: message.mimeType,
                 });
               }
             } else {
@@ -209,7 +250,10 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
           });
         });
 
-        return { result, ...(isDebug ? { debug: { logs: debugLogs } } : {}) } as { result: unknown; debug?: DebugInfo };
+        return {
+          result,
+          ...(isDebug ? { debug: { logs: debugLogs, screenshots: debugScreenshots } } : {}),
+        } as { result: unknown; debug?: DebugInfo };
       } catch (err) {
         const errorMessage = Diagnostics.errorMessage(err);
         logger.error(`Failed to execute extractor script: ${errorMessage}`);
@@ -217,7 +261,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         return reply.code(500).send({
           message: `Failed to execute extractor script: ${errorMessage}`,
           error: errorMessage,
-          ...(isDebug ? { debug: { logs: debugLogs } } : {}),
+          ...(isDebug ? { debug: { logs: debugLogs, screenshots: debugScreenshots } } : {}),
         } as { message: string; error: string; debug?: DebugInfo });
       }
     },

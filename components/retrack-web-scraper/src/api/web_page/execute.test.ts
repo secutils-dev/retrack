@@ -420,7 +420,7 @@ await test('[/api/web_page/execute] debug mode returns result with debug info on
     payload: {
       extractor: `export async function execute(page) { return 'debug-ok'; };`,
       tags: [],
-      debug: true,
+      debug: { enabled: true },
     },
   });
 
@@ -429,6 +429,7 @@ await test('[/api/web_page/execute] debug mode returns result with debug info on
   assert.strictEqual(body.result, 'debug-ok');
   assert.ok(body.debug, 'expected debug field to be present');
   assert.ok(Array.isArray(body.debug.logs), 'expected debug.logs to be an array');
+  assert.ok(Array.isArray(body.debug.screenshots), 'expected debug.screenshots to be an array');
 });
 
 await test('[/api/web_page/execute] debug mode returns error with debug info on failure', async (t) => {
@@ -440,7 +441,7 @@ await test('[/api/web_page/execute] debug mode returns error with debug info on 
     payload: {
       extractor: `export async function execute() { throw new Error('boom'); };`,
       tags: [],
-      debug: true,
+      debug: { enabled: true },
     },
   });
 
@@ -450,6 +451,7 @@ await test('[/api/web_page/execute] debug mode returns error with debug info on 
   assert.ok(body.error.includes('boom'), 'expected error field to contain "boom"');
   assert.ok(body.debug, 'expected debug field to be present');
   assert.ok(Array.isArray(body.debug.logs), 'expected debug.logs to be an array');
+  assert.ok(Array.isArray(body.debug.screenshots), 'expected debug.screenshots to be an array');
 });
 
 await test('[/api/web_page/execute] non-debug mode does not include debug field', async (t) => {
@@ -487,4 +489,23 @@ await test('[/api/web_page/execute] non-debug error does not include debug field
   assert.ok(body.message);
   assert.ok(body.error);
   assert.strictEqual(body.debug, undefined, 'expected no debug field in non-debug mode');
+});
+
+await test('[/api/web_page/execute] debug: { enabled: false } does not include debug field', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: {
+      extractor: `export async function execute(page) { return 'no-debug'; };`,
+      tags: [],
+      debug: { enabled: false },
+    },
+  });
+
+  assert.strictEqual(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.strictEqual(body.result, 'no-debug');
+  assert.strictEqual(body.debug, undefined, 'expected no debug field when debug.enabled is false');
 });

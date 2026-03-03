@@ -12,8 +12,8 @@ use crate::{
         parsers::{CsvParser, XlsParser},
         tracker_data_revisions_diff::tracker_data_revisions_diff,
         web_scraper::{
-            WebScraperBackend, WebScraperContentRequest, WebScraperErrorResponse,
-            WebScraperSuccessResponse,
+            WebScraperBackend, WebScraperContentRequest, WebScraperDebugOptions,
+            WebScraperErrorResponse, WebScraperSuccessResponse,
         },
     },
 };
@@ -31,14 +31,14 @@ use retrack_types::{
     trackers::{
         ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTarget,
         ApiTrackerDebugResult, AutoParseDebugInfo, ConfiguratorScriptArgs,
-        ConfiguratorScriptResult, EmailDestinationDebugInfo, ExtractorEngine, ExtractorScriptArgs,
-        ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult, PageLogEntry,
-        PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
-        ServerLogAction, TargetRequest, TargetResponse, Tracker, TrackerAction,
-        TrackerCreateParams, TrackerDataRevision, TrackerDataValue, TrackerDebugExistingParams,
-        TrackerDebugParams, TrackerDebugResult, TrackerDebugTargetResult,
-        TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
-        WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
+        ConfiguratorScriptResult, DebugOptions, EmailDestinationDebugInfo, ExtractorEngine,
+        ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
+        PageLogEntry, PageScreenshotEntry, PageTarget, PageTrackerDebugResult,
+        RenderedEmailDebugInfo, ScriptDebugInfo, ServerLogAction, TargetRequest, TargetResponse,
+        Tracker, TrackerAction, TrackerCreateParams, TrackerDataRevision, TrackerDataValue,
+        TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
+        TrackerDebugTargetResult, TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams,
+        TrackersListParams, WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
         WebhookDestinationDebugInfo,
     },
 };
@@ -919,7 +919,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             accept_invalid_certificates: target.accept_invalid_certificates,
             timeout: tracker.config.timeout,
             previous_content: previous_revision.as_ref().map(|rev| &rev.data),
-            debug: false,
+            debug: None,
         };
 
         let scraper_response = self
@@ -1290,7 +1290,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
         self.validate_debug_tracker(&tracker).await?;
 
-        self.run_debug(&tracker, params.previous_content).await
+        self.run_debug(&tracker, params.previous_content, params.debug)
+            .await
     }
 
     /// Runs the full tracker pipeline against a stored tracker, with optional overrides.
@@ -1330,7 +1331,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 .map(|rev| rev.data)
         };
 
-        self.run_debug(&tracker, previous_content).await
+        self.run_debug(&tracker, previous_content, params.debug)
+            .await
     }
 
     /// Validates tracker fields relevant to a debug run (target + timeout), skipping
@@ -1363,6 +1365,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         &self,
         tracker: &Tracker,
         previous_content: Option<TrackerDataValue>,
+        debug_options: Option<DebugOptions>,
     ) -> anyhow::Result<TrackerDebugResult> {
         let overall_start = Instant::now();
 
@@ -1382,7 +1385,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
 
         // Run extraction pipeline (returns target debug info + optional revision + optional error).
         let (target_result, new_revision, extraction_error) = match tracker.target {
-            TrackerTarget::Page(_) => self.debug_tracker_page(tracker, &previous_revision).await,
+            TrackerTarget::Page(_) => {
+                self.debug_tracker_page(tracker, &previous_revision, debug_options)
+                    .await
+            }
             TrackerTarget::Api(_) => self.debug_tracker_api(tracker, &previous_revision).await,
         };
 
@@ -1416,6 +1422,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         &self,
         tracker: &Tracker,
         previous_revision: &Option<TrackerDataRevision>,
+        debug_options: Option<DebugOptions>,
     ) -> (
         TrackerDebugTargetResult,
         Option<TrackerDataRevision>,
@@ -1428,6 +1435,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     engine: None,
                     extractor_source: String::new(),
                     logs: vec![],
+                    screenshots: vec![],
                     duration_ms: Duration::ZERO,
                     error: Some("Tracker target is not `Page`.".to_string()),
                 }),
@@ -1447,6 +1455,7 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         engine: target.engine,
                         extractor_source: target.extractor.clone(),
                         logs: vec![],
+                        screenshots: vec![],
                         duration_ms: extractor_start.elapsed(),
                         error: Some(error_msg.clone()),
                     }),
@@ -1468,7 +1477,13 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             accept_invalid_certificates: target.accept_invalid_certificates,
             timeout: tracker.config.timeout,
             previous_content: previous_revision.as_ref().map(|rev| &rev.data),
-            debug: true,
+            debug: Some(WebScraperDebugOptions {
+                enabled: true,
+                max_screenshots_total_size: debug_options
+                    .as_ref()
+                    .and_then(|d| d.max_screenshots_total_size),
+                auto_screenshots: debug_options.as_ref().and_then(|d| d.auto_screenshots),
+            }),
         };
 
         let scraper_result = self
@@ -1516,20 +1531,24 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             ),
         };
 
+        let (logs, screenshots) = match debug_info {
+            Some(info) => (
+                info.logs.into_iter().map(PageLogEntry::from).collect(),
+                info.screenshots
+                    .into_iter()
+                    .map(PageScreenshotEntry::from)
+                    .collect(),
+            ),
+            None => (vec![], vec![]),
+        };
+
         (
             TrackerDebugTargetResult::Page(PageTrackerDebugResult {
                 params: target.params.clone(),
                 engine: target.engine,
                 extractor_source,
-                logs: debug_info
-                    .into_iter()
-                    .flat_map(|d| d.logs)
-                    .map(|l| PageLogEntry {
-                        level: l.level,
-                        message: l.message,
-                        args: l.args,
-                    })
-                    .collect::<Vec<_>>(),
+                logs,
+                screenshots,
                 duration_ms,
                 error: error_msg.clone(),
             }),
@@ -7512,6 +7531,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -7588,6 +7608,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -7779,6 +7800,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![TrackerAction::ServerLog(Default::default())],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -7875,6 +7897,7 @@ mod tests {
                     ),
                 })],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -7977,6 +8000,7 @@ mod tests {
                     formatter: Some("(async () => ({ content: null }))();".to_string()),
                 })],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8078,6 +8102,7 @@ mod tests {
                     formatter: None,
                 })],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8165,6 +8190,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![TrackerAction::ServerLog(Default::default())],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8239,6 +8265,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8340,6 +8367,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8435,6 +8463,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8524,6 +8553,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8650,6 +8680,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8760,6 +8791,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8818,6 +8850,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8890,6 +8923,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -8962,6 +8996,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -9019,6 +9054,7 @@ mod tests {
                 tags: vec![],
                 actions: vec![],
                 previous_content: None,
+                debug: None,
             })
             .await?;
 
@@ -9094,6 +9130,7 @@ mod tests {
                 tags: vec![],
                 actions: actions.clone(),
                 previous_content: None,
+                debug: None,
             })
             .await?;
 

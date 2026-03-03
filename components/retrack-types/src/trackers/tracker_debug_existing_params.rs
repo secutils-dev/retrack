@@ -1,4 +1,6 @@
-use crate::trackers::{TrackerAction, TrackerConfig, TrackerDataValue, TrackerTarget};
+use crate::trackers::{
+    DebugOptions, TrackerAction, TrackerConfig, TrackerDataValue, TrackerTarget,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use utoipa::ToSchema;
@@ -22,6 +24,8 @@ pub struct TrackerDebugExistingParams {
     pub actions: Option<Vec<TrackerAction>>,
     /// Supply previous content instead of using the latest stored revision.
     pub previous_content: Option<TrackerDataValue>,
+    /// Optional debug options controlling screenshot capture.
+    pub debug: Option<DebugOptions>,
 }
 
 #[cfg(test)]
@@ -75,6 +79,7 @@ mod tests {
             tags: Some(vec!["t".to_string()]),
             actions: None,
             previous_content: Some(TrackerDataValue::new(json!("prev"))),
+            debug: None,
         };
 
         assert_json_snapshot!(params, @r###"

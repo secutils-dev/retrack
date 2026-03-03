@@ -70,6 +70,9 @@ pub struct PageTrackerDebugResult {
     /// Log messages collected from the Playwright worker during extraction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub logs: Vec<PageLogEntry>,
+    /// Screenshots captured during extraction (manual, auto-trace, or on-error).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<PageScreenshotEntry>,
     /// Duration of the extraction in milliseconds.
     #[serde_as(as = "DurationMilliSeconds<u64>")]
     pub duration_ms: Duration,
@@ -88,6 +91,18 @@ pub struct PageLogEntry {
     pub message: String,
     /// Optional structured arguments.
     pub args: Option<JsonValue>,
+}
+
+/// A single screenshot captured during page extraction debug.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PageScreenshotEntry {
+    /// Descriptive label (e.g., "after goto: https://example.com" or "page.screenshot()").
+    pub label: String,
+    /// Base64-encoded image data.
+    pub data: String,
+    /// MIME type of the image (e.g., "image/png").
+    pub mime_type: String,
 }
 
 /// Debug information about a script execution stage.
@@ -343,6 +358,7 @@ mod tests {
                     message: "Connecting to browser...".to_string(),
                     args: None,
                 }],
+                screenshots: vec![],
                 duration_ms: Duration::from_millis(2800),
                 error: None,
             }),
@@ -369,6 +385,50 @@ mod tests {
               }
             ],
             "durationMs": 2800
+          }
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[test]
+    fn page_target_result_serialization_with_screenshots() -> anyhow::Result<()> {
+        let result = TrackerDebugResult {
+            duration_ms: Duration::from_millis(1500),
+            result: Some(json!("ok")),
+            error: None,
+            target: TrackerDebugTargetResult::Page(PageTrackerDebugResult {
+                params: None,
+                engine: None,
+                extractor_source: "script".to_string(),
+                logs: vec![],
+                screenshots: vec![PageScreenshotEntry {
+                    label: "after goto: https://example.com".to_string(),
+                    data: "iVBORw0KGgo=".to_string(),
+                    mime_type: "image/png".to_string(),
+                }],
+                duration_ms: Duration::from_millis(1200),
+                error: None,
+            }),
+            actions: vec![],
+        };
+
+        assert_json_snapshot!(result, @r###"
+        {
+          "durationMs": 1500,
+          "result": "ok",
+          "target": {
+            "type": "page",
+            "extractorSource": "script",
+            "screenshots": [
+              {
+                "label": "after goto: https://example.com",
+                "data": "iVBORw0KGgo=",
+                "mimeType": "image/png"
+              }
+            ],
+            "durationMs": 1200
           }
         }
         "###);

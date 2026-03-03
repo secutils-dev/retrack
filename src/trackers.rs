@@ -124,7 +124,7 @@ pub mod tests {
                 timeout: tracker.config.timeout,
                 // Non-tracker properties.
                 previous_content: None,
-                debug: false,
+                debug: None,
             })
         }
     }
