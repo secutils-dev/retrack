@@ -31,26 +31,30 @@ use retrack_types::{
     trackers::{
         ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTarget,
         ApiTrackerDebugResult, AutoParseDebugInfo, ConfiguratorScriptArgs,
-        ConfiguratorScriptResult, DebugOptions, EmailDestinationDebugInfo, ExtractorEngine,
+        ConfiguratorScriptResult, DEFAULT_EXECUTION_LOGS_BATCH_SIZE,
+        DEFAULT_EXECUTION_LOGS_PAGE_SIZE, DebugOptions, EmailDestinationDebugInfo, ExtractorEngine,
         ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
         PageLogEntry, PageScreenshotEntry, PageTarget, PageTrackerDebugResult,
         RenderedEmailDebugInfo, ScriptDebugInfo, ServerLogAction, TargetRequest, TargetResponse,
         Tracker, TrackerAction, TrackerCreateParams, TrackerDataRevision, TrackerDataValue,
         TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
-        TrackerDebugTargetResult, TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams,
-        TrackersListParams, WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
-        WebhookDestinationDebugInfo,
+        TrackerDebugTargetResult, TrackerExecutionLog, TrackerExecutionLogPhase,
+        TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
+        TrackerListExecutionLogsParams, TrackerListRevisionsParams, TrackerTarget,
+        TrackerUpdateParams, TrackersListParams, WebhookAction, WebhookActionPayload,
+        WebhookActionPayloadResult, WebhookDestinationDebugInfo,
     },
 };
 use serde_json::{Value as JsonValue, json};
 use std::{
     borrow::Cow,
     cmp::min,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     str::FromStr,
     time::{Duration, Instant},
 };
-use tracing::{debug, error, info};
+use time::OffsetDateTime;
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -93,6 +97,26 @@ const DEBUG_TRACKER_ID: Uuid = Uuid::nil();
 const DEBUG_TRACKER_NAME: &str = "_debug";
 /// Maximum raw response body bytes included in debug output.
 const DEBUG_MAX_RAW_BODY_BYTES: usize = 64 * 1024;
+
+/// Retry state for a tracker execution.
+#[derive(Debug, Clone)]
+pub struct TrackerExecutionRetry {
+    /// Current attempt number (0 = initial attempt).
+    pub attempt: u32,
+    /// Maximum number of retry attempts configured.
+    pub max_attempts: u16,
+}
+
+/// Context passed to [`TrackersApiExt::create_tracker_data_revision`] describing the
+/// execution environment. The struct is intentionally minimal - values that can be derived
+/// are computed automatically (e.g. `job_id.is_some()` implies a scheduled run).
+#[derive(Debug, Clone, Default)]
+pub struct TrackerExecutionContext {
+    /// Scheduler job ID. `None` means this is a manual (ad-hoc) run.
+    pub job_id: Option<Uuid>,
+    /// Retry state. `None` when no retry strategy is configured for the tracker.
+    pub retry: Option<TrackerExecutionRetry>,
+}
 
 pub struct TrackersApiExt<'a, DR: DnsResolver> {
     api: &'a Api<DR>,
@@ -249,22 +273,66 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
     }
 
     /// Tries to fetch a new data revision for the specified tracker and persists it if allowed by
-    /// config and if the data has changed. Executes actions regardless of the result.
+    /// config and if the data has changed. Records an execution log entry on both success and
+    /// failure. The execution log is fire-and-forget - a logging failure never prevents the
+    /// result from being returned to the caller.
     pub async fn create_tracker_data_revision(
         &self,
         tracker_id: Uuid,
+        context: TrackerExecutionContext,
     ) -> anyhow::Result<TrackerDataRevision> {
-        self.create_tracker_data_revision_with_retry(tracker_id, None)
-            .await
+        let started_at = Database::utc_now().unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let execution_start = Instant::now();
+        let mut phases = Vec::new();
+
+        let result = self
+            .create_tracker_data_revision_inner(tracker_id, &context, &mut phases)
+            .await;
+
+        let duration_ms = execution_start.elapsed().as_millis() as u64;
+        let finished_at = Database::utc_now().unwrap_or_else(|_| OffsetDateTime::now_utc());
+        let has_changes = phases
+            .iter()
+            .find(|p| p.phase == "compare")
+            .and_then(|p| p.meta.as_ref())
+            .and_then(|m| m.get("changed"))
+            .and_then(|v| v.as_bool());
+        self.log_tracker_execution(&TrackerExecutionLog {
+            id: Uuid::now_v7(),
+            tracker_id,
+            job_id: context.job_id,
+            started_at,
+            finished_at,
+            status: if result.is_ok() {
+                TrackerExecutionLogStatus::Success
+            } else {
+                TrackerExecutionLogStatus::Failure
+            },
+            error: result.as_ref().err().map(|e| format!("{e}")),
+            is_manual: context.job_id.is_none(),
+            retry_attempt: context.retry.as_ref().map(|r| r.attempt as u16),
+            max_retry_attempts: context.retry.as_ref().map(|r| r.max_attempts),
+            revision_size: result.as_ref().ok().map(|r| r.data.size() as i64),
+            has_changes,
+            duration_ms,
+            phases: if phases.is_empty() {
+                None
+            } else {
+                Some(phases)
+            },
+        })
+        .await;
+
+        result
     }
 
-    /// Tries to fetch a new data revision for the specified tracker and persists it if allowed by
-    /// config and if the data has changed. When `retry_attempt` is specified, it suppresses error
-    /// actions in failure scenarios if there are still retry attempts remaining.
-    pub async fn create_tracker_data_revision_with_retry(
+    /// Inner implementation that does the actual work of fetching, comparing, executing actions,
+    /// and persisting a tracker data revision.
+    async fn create_tracker_data_revision_inner(
         &self,
         tracker_id: Uuid,
-        retry_attempt: Option<u32>,
+        context: &TrackerExecutionContext,
+        phases: &mut Vec<TrackerExecutionLogPhase>,
     ) -> anyhow::Result<TrackerDataRevision> {
         let Some(tracker) = self.get_tracker(tracker_id).await? else {
             bail!(RetrackError::client(format!(
@@ -278,6 +346,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             .get_tracker_data_revisions(tracker.id, 1)
             .await?
             .pop();
+
+        let fetch_start = Instant::now();
         let new_revision = match tracker.target {
             TrackerTarget::Page(_) => self
                 .create_tracker_page_data_revision(&tracker, &last_revision)
@@ -288,6 +358,18 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                 .await
                 .map_err(RetrackError::client_with_root_cause),
         };
+        let fetch_elapsed = fetch_start.elapsed();
+
+        phases.push(TrackerExecutionLogPhase {
+            phase: "fetch_data".to_string(),
+            duration_ms: fetch_elapsed.as_millis() as u64,
+            status: if new_revision.is_ok() {
+                TrackerExecutionLogStatus::Success
+            } else {
+                TrackerExecutionLogStatus::Failure
+            },
+            meta: None,
+        });
 
         // Iterate through all tracker actions, including default ones, and execute them.
         let actions = tracker
@@ -298,11 +380,10 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             Ok(new_revision) => new_revision,
             Err(err) => {
                 // Don't execute actions if retries aren't exhausted yet.
-                let has_retries_left = retry_attempt
-                    .and_then(|attempt| {
-                        Some(attempt < tracker.config.job.as_ref()?.retry_strategy?.max_attempts())
-                    })
-                    .unwrap_or_default();
+                let has_retries_left = context
+                    .retry
+                    .as_ref()
+                    .is_some_and(|r| r.attempt < r.max_attempts as u32);
                 if !has_retries_left {
                     for action in actions {
                         self.execute_tracker_action(&tracker, action, Err(err.to_string()))
@@ -315,8 +396,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         };
 
         // If the last revision has the same original data value, drop a newly fetched revision.
+        let compare_start = Instant::now();
         let last_revision = if let Some(last_revision) = last_revision {
-            // Return the last revision without re-running actions if data hasn't changed.
             if last_revision.data.original() == new_revision.data.original() {
                 debug!(
                     tracker.id = %tracker.id,
@@ -324,13 +405,26 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                     tracker.tags = ?tracker.tags,
                     "Skipping actions for a new data revision since content hasn't changed."
                 );
+                phases.push(TrackerExecutionLogPhase {
+                    phase: "compare".to_string(),
+                    duration_ms: compare_start.elapsed().as_millis() as u64,
+                    status: TrackerExecutionLogStatus::Success,
+                    meta: Some(json!({"changed": false})),
+                });
                 return Ok(last_revision);
             }
             Some(last_revision)
         } else {
             None
         };
+        phases.push(TrackerExecutionLogPhase {
+            phase: "compare".to_string(),
+            duration_ms: compare_start.elapsed().as_millis() as u64,
+            status: TrackerExecutionLogStatus::Success,
+            meta: Some(json!({"changed": true})),
+        });
 
+        let actions_start = Instant::now();
         for (action_index, action) in actions.enumerate() {
             match self
                 .get_action_payload(action, &new_revision, last_revision.as_ref())
@@ -357,12 +451,25 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
                         tracker.tags = ?tracker.tags,
                         "Failed to retrieve payload for action ({action_index}): {err}"
                     );
+                    phases.push(TrackerExecutionLogPhase {
+                        phase: format!("action:{}", action.type_tag()),
+                        duration_ms: actions_start.elapsed().as_millis() as u64,
+                        status: TrackerExecutionLogStatus::Failure,
+                        meta: None,
+                    });
                     bail!(RetrackError::client_with_root_cause(err));
                 }
             }
         }
+        phases.push(TrackerExecutionLogPhase {
+            phase: "actions".to_string(),
+            duration_ms: actions_start.elapsed().as_millis() as u64,
+            status: TrackerExecutionLogStatus::Success,
+            meta: None,
+        });
 
         // Insert a new revision if allowed by the config.
+        let persist_start = Instant::now();
         let max_revisions = min(
             tracker.config.revisions,
             self.api.config.trackers.max_revisions,
@@ -377,6 +484,12 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         self.trackers
             .enforce_tracker_data_revisions_limit(tracker.id, max_revisions)
             .await?;
+        phases.push(TrackerExecutionLogPhase {
+            phase: "persist".to_string(),
+            duration_ms: persist_start.elapsed().as_millis() as u64,
+            status: TrackerExecutionLogStatus::Success,
+            meta: None,
+        });
 
         Ok(new_revision)
     }
@@ -428,6 +541,80 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             )));
         }
         self.trackers.clear_tracker_data_revisions(tracker_id).await
+    }
+
+    /// Returns execution logs for a tracker, ordered by start time descending.
+    pub async fn get_tracker_execution_logs(
+        &self,
+        tracker_id: Uuid,
+        params: TrackerListExecutionLogsParams,
+    ) -> anyhow::Result<Vec<TrackerExecutionLog>> {
+        if self.get_tracker(tracker_id).await?.is_none() {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{tracker_id}') is not found."
+            )));
+        }
+
+        let size = params
+            .size
+            .map(|s| s.get())
+            .unwrap_or(DEFAULT_EXECUTION_LOGS_PAGE_SIZE);
+        self.trackers
+            .get_tracker_execution_logs(tracker_id, size)
+            .await
+    }
+
+    /// Returns execution logs for multiple trackers as a map keyed by tracker ID.
+    pub async fn get_tracker_execution_logs_batch(
+        &self,
+        params: TrackerListExecutionLogsBatchParams,
+    ) -> anyhow::Result<HashMap<Uuid, Vec<TrackerExecutionLog>>> {
+        let size = params.size.unwrap_or(DEFAULT_EXECUTION_LOGS_BATCH_SIZE);
+        let logs = self
+            .trackers
+            .get_tracker_execution_logs_batch(&params.tracker_ids, size)
+            .await?;
+
+        let mut map: HashMap<Uuid, Vec<TrackerExecutionLog>> = HashMap::new();
+        for log in logs {
+            map.entry(log.tracker_id).or_default().push(log);
+        }
+        Ok(map)
+    }
+
+    /// Clears all execution logs for a specific tracker.
+    pub async fn clear_tracker_execution_logs(&self, tracker_id: Uuid) -> anyhow::Result<()> {
+        if self.get_tracker(tracker_id).await?.is_none() {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{tracker_id}') is not found."
+            )));
+        }
+        self.trackers.clear_tracker_execution_logs(tracker_id).await
+    }
+
+    /// Clears all execution logs for all trackers.
+    pub async fn clear_all_tracker_execution_logs(&self) -> anyhow::Result<()> {
+        self.trackers.clear_all_tracker_execution_logs().await
+    }
+
+    /// Persists a tracker execution log entry. This is a fire-and-forget operation: failures
+    /// are logged via tracing but never propagated to the caller.
+    pub async fn log_tracker_execution(&self, log: &TrackerExecutionLog) {
+        if let Err(err) = self.trackers.insert_tracker_execution_log(log).await {
+            warn!(
+                tracker.id = %log.tracker_id,
+                "Failed to persist tracker execution log: {err:?}"
+            );
+        }
+    }
+
+    /// Removes execution logs older than the specified cutoff time. Returns the number of
+    /// removed entries.
+    pub async fn cleanup_tracker_execution_logs(
+        &self,
+        cutoff: OffsetDateTime,
+    ) -> anyhow::Result<u64> {
+        self.trackers.cleanup_tracker_execution_logs(cutoff).await
     }
 
     /// Returns all tracker job references that have jobs that need to be scheduled.
@@ -2297,6 +2484,7 @@ impl<'a, DR: DnsResolver> Api<DR> {
 
 #[cfg(test)]
 mod tests {
+    use super::{TrackerExecutionContext, TrackerExecutionRetry};
     use crate::{
         config::{Config, TrackersConfig},
         error::Error as RetrackError,
@@ -2321,6 +2509,7 @@ mod tests {
             ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
             Tracker, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
             TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugTargetResult,
+            TrackerExecutionLog, TrackerExecutionLogStatus, TrackerListExecutionLogsParams,
             TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
             WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
         },
@@ -2334,7 +2523,7 @@ mod tests {
         proto::rr::{RData, Record, rdata::A},
     };
     use url::Url;
-    use uuid::uuid;
+    use uuid::{Uuid, uuid};
 
     #[sqlx::test]
     async fn properly_creates_new_tracker(pool: PgPool) -> anyhow::Result<()> {
@@ -4503,7 +4692,7 @@ mod tests {
         });
 
         trackers
-            .create_tracker_data_revision(tracker_one.id)
+            .create_tracker_data_revision(tracker_one.id, Default::default())
             .await?;
         let tracker_one_data = trackers
             .get_tracker_data_revisions(tracker_one.id, Default::default())
@@ -4537,7 +4726,7 @@ mod tests {
         });
 
         let revision = trackers
-            .create_tracker_data_revision(tracker_one.id)
+            .create_tracker_data_revision(tracker_one.id, Default::default())
             .await?;
         assert_eq!(revision.data.value(), "\"rev_2\"");
         content_mock.assert();
@@ -4565,7 +4754,7 @@ mod tests {
                 .json_body(json!({ "result": content_two.value() }));
         });
         let revision = trackers
-            .create_tracker_data_revision(tracker_two.id)
+            .create_tracker_data_revision(tracker_two.id, Default::default())
             .await?;
         assert_eq!(revision.data.value(), "\"rev_3\"");
         content_mock.assert();
@@ -4673,7 +4862,9 @@ mod tests {
                 .json_body(json!({ "result": "\"rev_1\"" }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         content_mock.assert();
         content_mock.delete();
 
@@ -4704,7 +4895,9 @@ mod tests {
                 .json_body(json!({ "result": "\"rev_2\"" }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         content_mock.assert();
         content_mock.delete();
 
@@ -4734,7 +4927,9 @@ mod tests {
                 .json_body(json!({ "result": "\"rev_3\"" }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         content_mock.assert();
 
         Ok(())
@@ -4811,7 +5006,7 @@ mod tests {
         });
 
         let revision_one = trackers
-            .create_tracker_data_revision(tracker_one.id)
+            .create_tracker_data_revision(tracker_one.id, Default::default())
             .await?;
         let tracker_one_data = trackers
             .get_tracker_data_revisions(tracker_one.id, Default::default())
@@ -4836,7 +5031,7 @@ mod tests {
         });
 
         let revision_two = trackers
-            .create_tracker_data_revision(tracker_one.id)
+            .create_tracker_data_revision(tracker_one.id, Default::default())
             .await?;
         assert_eq!(revision_two.data.value(), "\"rev_2\"");
         assert_ne!(revision_one, revision_two);
@@ -4865,7 +5060,7 @@ mod tests {
         });
 
         let revision = trackers
-            .create_tracker_data_revision(tracker_two.id)
+            .create_tracker_data_revision(tracker_two.id, Default::default())
             .await?;
         assert_eq!(revision.data.value(), "\"rev_3\"");
 
@@ -4986,7 +5181,9 @@ mod tests {
                 .json_body_obj(content.value());
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5008,7 +5205,9 @@ mod tests {
                 .json_body_obj(content_two.value());
         });
 
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         assert_eq!(
             revision.data.value(),
             &json!({ "name": "\"rev_2\"_modified_{\"original\":{\"name\":\"\\\"rev_1\\\"_modified_undefined\",\"value\":1}}", "value": 1 })
@@ -5096,7 +5295,9 @@ mod tests {
                 .json_body_obj(content.value());
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5188,7 +5389,9 @@ mod tests {
                 .json_body_obj(&json!({ "error": "Uh oh" }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5257,7 +5460,9 @@ mod tests {
             )
             .await?;
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5268,7 +5473,9 @@ mod tests {
             TrackerDataValue::new(json!({ "name": "rev_1_modified_undefined", "value": 1 }))
         );
 
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         assert_eq!(
             revision.data.value(),
             &json!({ "name": "rev_1_modified_{\"original\":{\"name\":\"rev_1_modified_undefined\",\"value\":1}}", "value": 1 })
@@ -5354,7 +5561,9 @@ mod tests {
                 .body(load_fixture("xlsx_fixture.xlsx").unwrap());
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         content_mock.assert();
 
         let revs = trackers
@@ -5470,7 +5679,9 @@ mod tests {
                 .body(load_fixture("csv_fixture.csv").unwrap());
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         content_mock.assert();
 
         let revs = trackers
@@ -5592,7 +5803,9 @@ mod tests {
                 .json_body_obj(&json!({ "key": "json-value" }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         csv_mock.assert();
         json_mock.assert();
 
@@ -5691,7 +5904,9 @@ mod tests {
                 );
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5791,7 +6006,9 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5880,7 +6097,9 @@ mod tests {
                 .json_body(json!({ "result": content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -5911,7 +6130,9 @@ mod tests {
                 .json_body(json!({ "result": new_content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6043,7 +6264,7 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
-        assert_debug_snapshot!(trackers.create_tracker_data_revision(tracker.id).await.unwrap_err(), @r###""Uh oh""###);
+        assert_debug_snapshot!(trackers.create_tracker_data_revision(tracker.id, Default::default()).await.unwrap_err(), @r###""Uh oh""###);
 
         server_mock.assert();
 
@@ -6180,7 +6401,10 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
-        assert_debug_snapshot!(trackers.create_tracker_data_revision_with_retry(tracker.id, Some(0)).await.unwrap_err(), @r###""Uh oh""###);
+        assert_debug_snapshot!(trackers.create_tracker_data_revision(tracker.id, TrackerExecutionContext {
+            job_id: None,
+            retry: Some(TrackerExecutionRetry { attempt: 0, max_attempts: 3 }),
+        }).await.unwrap_err(), @r###""Uh oh""###);
 
         server_mock.assert();
 
@@ -6253,7 +6477,9 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6342,7 +6568,9 @@ mod tests {
                 .json_body(json!({ "result": content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6373,7 +6601,9 @@ mod tests {
                 .json_body(json!({ "result": new_content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6493,7 +6723,9 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6557,7 +6789,9 @@ mod tests {
                 .json_body(json!({ "result": content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6588,7 +6822,9 @@ mod tests {
                 .json_body(json!({ "result": new_content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6697,7 +6933,9 @@ mod tests {
             .await;
         assert!(tasks_ids.is_empty());
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6784,7 +7022,9 @@ mod tests {
                 .json_body(json!({ "result": content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6815,7 +7055,9 @@ mod tests {
                 .json_body(json!({ "result": new_content.value() }));
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6913,7 +7155,9 @@ mod tests {
                 .body("(() => ({ content: `${context.newContent}_${context.action}` }))();");
         });
 
-        trackers.create_tracker_data_revision(tracker.id).await?;
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_data = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -6982,7 +7226,7 @@ mod tests {
         });
 
         let scraper_error = trackers
-            .create_tracker_data_revision(tracker.id)
+            .create_tracker_data_revision(tracker.id, Default::default())
             .await
             .unwrap_err()
             .downcast::<RetrackError>()?;
@@ -7036,7 +7280,9 @@ mod tests {
                 .json_body(json!({ "result": content_one.value() }));
         });
 
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         assert_eq!(revision.data.value(), "\"rev_1\"");
         content_mock.assert();
         content_mock.delete();
@@ -7058,7 +7304,9 @@ mod tests {
                 .json_body(json!({ "result": content_two }));
         });
 
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         content_mock.assert();
 
         let tracker_content = trackers
@@ -7105,7 +7353,9 @@ mod tests {
                 .json_body(json!({ "result": content }));
         });
 
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_content = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -7160,7 +7410,9 @@ mod tests {
                 .json_body(json!({ "result": content }));
         });
 
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
         let tracker_content = trackers
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
@@ -8804,7 +9056,9 @@ mod tests {
                     .build(),
             )
             .await?;
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
 
         api_mock.assert_calls(2);
         assert_eq!(
@@ -8863,7 +9117,9 @@ mod tests {
                     .build(),
             )
             .await?;
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
 
         api_mock.assert_calls(2);
         assert_eq!(
@@ -8936,7 +9192,9 @@ mod tests {
                     .build(),
             )
             .await?;
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
 
         redirect_mock.assert_calls(2);
         assert_eq!(
@@ -9009,7 +9267,9 @@ mod tests {
                     .build(),
             )
             .await?;
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
 
         cfg_mock.assert_calls(2);
         assert_eq!(
@@ -9067,7 +9327,9 @@ mod tests {
                     .build(),
             )
             .await?;
-        let revision = trackers.create_tracker_data_revision(tracker.id).await?;
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
 
         assert_eq!(
             debug_result.result.as_ref(),
@@ -9155,6 +9417,800 @@ mod tests {
             debug_result.actions[1].payload,
             Some(json!("action-test-data"))
         );
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Execution log CRUD tests
+    // -----------------------------------------------------------------------
+
+    fn mock_execution_log(
+        tracker_id: Uuid,
+        started_at: OffsetDateTime,
+        status: TrackerExecutionLogStatus,
+    ) -> TrackerExecutionLog {
+        TrackerExecutionLog {
+            id: Uuid::now_v7(),
+            tracker_id,
+            job_id: None,
+            started_at,
+            finished_at: started_at + time::Duration::seconds(1),
+            status,
+            error: if status == TrackerExecutionLogStatus::Failure {
+                Some("test error".to_string())
+            } else {
+                None
+            },
+            is_manual: true,
+            retry_attempt: None,
+            max_retry_attempts: None,
+            revision_size: Some(100),
+            has_changes: None,
+            duration_ms: 1000,
+            phases: None,
+        }
+    }
+
+    #[sqlx::test]
+    async fn can_get_tracker_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        let logs = trackers
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert!(logs.is_empty());
+
+        // Insert two logs and verify they come back in descending order by start time.
+        let older = OffsetDateTime::from_unix_timestamp(1_700_000_000)?;
+        let newer = OffsetDateTime::from_unix_timestamp(1_700_001_000)?;
+
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                older,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                newer,
+                TrackerExecutionLogStatus::Failure,
+            ))
+            .await;
+
+        let logs = trackers
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].started_at, newer);
+        assert_eq!(logs[0].status, TrackerExecutionLogStatus::Failure);
+        assert_eq!(logs[1].started_at, older);
+        assert_eq!(logs[1].status, TrackerExecutionLogStatus::Success);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn get_tracker_execution_logs_respects_size(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        for i in 0..5 {
+            trackers
+                .log_tracker_execution(&mock_execution_log(
+                    tracker.id,
+                    OffsetDateTime::from_unix_timestamp(1_700_000_000 + i * 100)?,
+                    TrackerExecutionLogStatus::Success,
+                ))
+                .await;
+        }
+
+        let logs = trackers
+            .get_tracker_execution_logs(
+                tracker.id,
+                TrackerListExecutionLogsParams {
+                    size: Some(2.try_into()?),
+                },
+            )
+            .await?;
+        assert_eq!(logs.len(), 2);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn get_tracker_execution_logs_fails_for_unknown_tracker(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let unknown_id = uuid!("00000000-0000-0000-0000-000000000099");
+        assert_debug_snapshot!(
+            trackers.get_tracker_execution_logs(unknown_id, Default::default()).await.unwrap_err(),
+            @r###""Tracker ('00000000-0000-0000-0000-000000000099') is not found.""###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_clear_tracker_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker_a = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("a").build())
+            .await?;
+        let tracker_b = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("b").build())
+            .await?;
+
+        let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000)?;
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker_a.id,
+                ts,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker_b.id,
+                ts,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+
+        trackers.clear_tracker_execution_logs(tracker_a.id).await?;
+
+        let logs_a = trackers
+            .get_tracker_execution_logs(tracker_a.id, Default::default())
+            .await?;
+        let logs_b = trackers
+            .get_tracker_execution_logs(tracker_b.id, Default::default())
+            .await?;
+        assert!(logs_a.is_empty());
+        assert_eq!(logs_b.len(), 1);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn clear_tracker_execution_logs_fails_for_unknown_tracker(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let unknown_id = uuid!("00000000-0000-0000-0000-000000000099");
+        assert_debug_snapshot!(
+            trackers.clear_tracker_execution_logs(unknown_id).await.unwrap_err(),
+            @r###""Tracker ('00000000-0000-0000-0000-000000000099') is not found.""###
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_clear_all_tracker_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker_a = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("a").build())
+            .await?;
+        let tracker_b = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("b").build())
+            .await?;
+
+        let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000)?;
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker_a.id,
+                ts,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker_b.id,
+                ts,
+                TrackerExecutionLogStatus::Failure,
+            ))
+            .await;
+
+        trackers.clear_all_tracker_execution_logs().await?;
+
+        let logs_a = trackers
+            .get_tracker_execution_logs(tracker_a.id, Default::default())
+            .await?;
+        let logs_b = trackers
+            .get_tracker_execution_logs(tracker_b.id, Default::default())
+            .await?;
+        assert!(logs_a.is_empty());
+        assert!(logs_b.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_cleanup_old_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        let old = OffsetDateTime::from_unix_timestamp(946_720_800)?;
+        let recent = OffsetDateTime::now_utc();
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                old,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                recent,
+                TrackerExecutionLogStatus::Failure,
+            ))
+            .await;
+
+        let cutoff = OffsetDateTime::now_utc() - time::Duration::days(1);
+        let deleted = trackers.cleanup_tracker_execution_logs(cutoff).await?;
+        assert_eq!(deleted, 1);
+
+        let logs = trackers
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, TrackerExecutionLogStatus::Failure);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn execution_logs_cascade_on_tracker_delete(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        trackers
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                OffsetDateTime::from_unix_timestamp(1_700_000_000)?,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+
+        let logs = trackers
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+
+        trackers.remove_tracker(tracker.id).await?;
+
+        // After deletion, the tracker doesn't exist so querying logs should fail.
+        assert!(
+            trackers
+                .get_tracker_execution_logs(tracker.id, Default::default())
+                .await
+                .is_err()
+        );
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // create_tracker_data_revision - execution log recording tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: asserts that a single execution log exists for the given tracker and returns it.
+    async fn get_single_execution_log(
+        trackers: &super::TrackersApiExt<'_, impl crate::network::DnsResolver>,
+        tracker_id: Uuid,
+    ) -> TrackerExecutionLog {
+        let logs = trackers
+            .get_tracker_execution_logs(tracker_id, Default::default())
+            .await
+            .expect("failed to fetch execution logs");
+        assert_eq!(logs.len(), 1, "expected exactly one execution log");
+        logs.into_iter().next().unwrap()
+    }
+
+    #[sqlx::test]
+    async fn revision_records_success_log_with_all_phases(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("api-tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(server.url("/api/data").parse()?)],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("first-content"));
+        });
+
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+
+        let log = get_single_execution_log(&trackers, tracker.id).await;
+
+        assert_eq!(log.tracker_id, tracker.id);
+        assert_eq!(log.status, TrackerExecutionLogStatus::Success);
+        assert!(log.error.is_none());
+        assert!(log.is_manual);
+        assert!(log.job_id.is_none());
+        assert!(log.retry_attempt.is_none());
+        assert!(log.max_retry_attempts.is_none());
+        assert!(log.revision_size.is_some());
+        assert_eq!(log.has_changes, Some(true));
+        assert!(log.duration_ms > 0);
+        assert!(log.started_at <= log.finished_at);
+
+        let phases = log.phases.expect("phases should be recorded");
+        assert_eq!(phases.len(), 4);
+
+        assert_eq!(phases[0].phase, "fetch_data");
+        assert_eq!(phases[0].status, TrackerExecutionLogStatus::Success);
+
+        assert_eq!(phases[1].phase, "compare");
+        assert_eq!(phases[1].status, TrackerExecutionLogStatus::Success);
+        assert_eq!(phases[1].meta, Some(json!({"changed": true})));
+
+        assert_eq!(phases[2].phase, "actions");
+        assert_eq!(phases[2].status, TrackerExecutionLogStatus::Success);
+
+        assert_eq!(phases[3].phase, "persist");
+        assert_eq!(phases[3].status, TrackerExecutionLogStatus::Success);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_records_failure_log_on_fetch_error(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("api-tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(server.url("/api/fail").parse()?)],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/fail");
+            then.status(500)
+                .header("Content-Type", "application/json")
+                .body("Internal error");
+        });
+
+        let result = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await;
+        assert!(result.is_err());
+
+        let log = get_single_execution_log(&trackers, tracker.id).await;
+
+        assert_eq!(log.tracker_id, tracker.id);
+        assert_eq!(log.status, TrackerExecutionLogStatus::Failure);
+        assert!(log.error.is_some());
+        assert!(log.is_manual);
+        assert!(log.revision_size.is_none());
+        assert!(log.has_changes.is_none());
+
+        let phases = log.phases.expect("phases should be recorded");
+        assert!(!phases.is_empty());
+        assert_eq!(phases[0].phase, "fetch_data");
+        assert_eq!(phases[0].status, TrackerExecutionLogStatus::Failure);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_returns_error_for_unknown_tracker(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let unknown_id = uuid!("00000000-0000-0000-0000-000000000099");
+        assert_debug_snapshot!(
+            trackers.create_tracker_data_revision(unknown_id, Default::default()).await.unwrap_err(),
+            @r###""Tracker ('00000000-0000-0000-0000-000000000099') is not found.""###
+        );
+
+        // The execution log cannot be persisted because the FK constraint requires a
+        // valid tracker_id. The fire-and-forget logger silently absorbs the DB error,
+        // so no log entry exists.
+        let logs = api
+            .db
+            .trackers()
+            .get_tracker_execution_logs(unknown_id, 10)
+            .await?;
+        assert!(logs.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_records_compare_unchanged_phase(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_schedule("0 0 * * * *")
+                    .build(),
+            )
+            .await?;
+
+        let content = json!("\"same-content\"");
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({ "result": content }));
+        });
+
+        // First call: creates the initial revision.
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+        content_mock.assert();
+        content_mock.delete();
+
+        // Second call with the same content: should hit the "no diff" path.
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(
+                        WebScraperContentRequest::try_from(&tracker)
+                            .unwrap()
+                            .set_previous_content(&TrackerDataValue::new(json!(
+                                "\"same-content\""
+                            ))),
+                    )
+                    .unwrap(),
+                );
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({ "result": content }));
+        });
+
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+
+        let logs = trackers
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        // Two runs → two logs (newest first).
+        assert_eq!(logs.len(), 2);
+
+        let no_diff_log = &logs[0];
+        assert_eq!(no_diff_log.status, TrackerExecutionLogStatus::Success);
+        assert_eq!(no_diff_log.has_changes, Some(false));
+        let phases = no_diff_log.phases.as_ref().expect("phases should exist");
+
+        assert_eq!(phases[0].phase, "fetch_data");
+        assert_eq!(phases[0].status, TrackerExecutionLogStatus::Success);
+
+        assert_eq!(phases[1].phase, "compare");
+        assert_eq!(phases[1].status, TrackerExecutionLogStatus::Success);
+        assert_eq!(phases[1].meta, Some(json!({"changed": false})));
+
+        // When content hasn't changed, actions and persist phases should NOT appear.
+        assert_eq!(phases.len(), 2);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_records_scheduled_context(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("api-tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(server.url("/api/data").parse()?)],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("scheduled-content"));
+        });
+
+        let job_id = uuid!("00000000-0000-0000-0000-000000000042");
+        trackers
+            .create_tracker_data_revision(
+                tracker.id,
+                TrackerExecutionContext {
+                    job_id: Some(job_id),
+                    retry: None,
+                },
+            )
+            .await?;
+
+        let log = get_single_execution_log(&trackers, tracker.id).await;
+
+        assert_eq!(log.job_id, Some(job_id));
+        assert!(!log.is_manual);
+        assert!(log.retry_attempt.is_none());
+        assert!(log.max_retry_attempts.is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_records_retry_context(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("api-tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(server.url("/api/data").parse()?)],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("retry-content"));
+        });
+
+        let job_id = uuid!("00000000-0000-0000-0000-000000000042");
+        trackers
+            .create_tracker_data_revision(
+                tracker.id,
+                TrackerExecutionContext {
+                    job_id: Some(job_id),
+                    retry: Some(TrackerExecutionRetry {
+                        attempt: 2,
+                        max_attempts: 5,
+                    }),
+                },
+            )
+            .await?;
+
+        let log = get_single_execution_log(&trackers, tracker.id).await;
+
+        assert_eq!(log.job_id, Some(job_id));
+        assert!(!log.is_manual);
+        assert_eq!(log.retry_attempt, Some(2));
+        assert_eq!(log.max_retry_attempts, Some(5));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_records_revision_size_on_success(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("api-tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(server.url("/api/data").parse()?)],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("some-content-to-measure"));
+        });
+
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+
+        let log = get_single_execution_log(&trackers, tracker.id).await;
+
+        assert_eq!(log.revision_size, Some(revision.data.size() as i64),);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn revision_records_action_failure_phase(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let mut config = mock_config()?;
+        config.components.web_scraper_url = Url::parse(&server.base_url())?;
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("tracker")
+                    .with_actions(vec![TrackerAction::Webhook(WebhookAction {
+                        url: format!("{}/webhook", server.base_url()).parse()?,
+                        method: None,
+                        headers: None,
+                        formatter: Some(
+                            "(() => { throw new Error('formatter-boom'); })();".to_string(),
+                        ),
+                    })])
+                    .build(),
+            )
+            .await?;
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::POST)
+                .path("/api/web_page/execute")
+                .json_body(
+                    serde_json::to_value(WebScraperContentRequest::try_from(&tracker).unwrap())
+                        .unwrap(),
+                );
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!({ "result": "action-test" }));
+        });
+
+        let result = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await;
+        assert!(result.is_err());
+
+        let log = get_single_execution_log(&trackers, tracker.id).await;
+
+        assert_eq!(log.status, TrackerExecutionLogStatus::Failure);
+        assert!(log.error.is_some());
+
+        let phases = log.phases.expect("phases should be recorded");
+        // fetch_data succeeds, compare succeeds (changed: true), then action fails.
+        assert!(phases.len() >= 3);
+
+        assert_eq!(phases[0].phase, "fetch_data");
+        assert_eq!(phases[0].status, TrackerExecutionLogStatus::Success);
+
+        assert_eq!(phases[1].phase, "compare");
+        assert_eq!(phases[1].status, TrackerExecutionLogStatus::Success);
+        assert_eq!(phases[1].meta, Some(json!({"changed": true})));
+
+        let action_phase = &phases[2];
+        assert!(
+            action_phase.phase.starts_with("action:"),
+            "expected action phase, got: {}",
+            action_phase.phase
+        );
+        assert_eq!(action_phase.status, TrackerExecutionLogStatus::Failure);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn multiple_revisions_produce_multiple_logs(pool: PgPool) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("api-tracker")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest::new(server.url("/api/data").parse()?)],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let mut content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("content-1"));
+        });
+
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+        content_mock.assert();
+        content_mock.delete();
+
+        server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/data");
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .json_body(json!("content-2"));
+        });
+
+        trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+
+        let logs = trackers
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 2);
+
+        // Both should be successful.
+        assert!(
+            logs.iter()
+                .all(|l| l.status == TrackerExecutionLogStatus::Success)
+        );
+
+        // Newest first.
+        assert!(logs[0].started_at >= logs[1].started_at);
 
         Ok(())
     }

@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT l.id, l.tracker_id, l.job_id, l.started_at, l.finished_at, l.status, l.error,\n       l.is_manual, l.retry_attempt, l.max_retry_attempts, l.revision_size, l.has_changes, l.duration_ms, l.phases\nFROM unnest($1::uuid[]) AS t(tracker_id)\nCROSS JOIN LATERAL (\n    SELECT *\n    FROM tracker_execution_logs el\n    WHERE el.tracker_id = t.tracker_id\n    ORDER BY el.started_at DESC\n    LIMIT $2\n) l\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tracker_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_manual",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "retry_attempt",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 9,
+        "name": "max_retry_attempts",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 10,
+        "name": "revision_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "has_changes",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "duration_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "phases",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "b557ba2f5b97f4d009bb6391748a490345d18c130b854bd839af866e76dc1af8"
+}

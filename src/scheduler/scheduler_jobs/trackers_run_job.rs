@@ -6,7 +6,7 @@ use crate::{
         scheduler_job::SchedulerJob,
     },
     tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
-    trackers::TrackersApiExt,
+    trackers::{TrackerExecutionContext, TrackerExecutionRetry, TrackersApiExt},
 };
 use anyhow::Context;
 use croner::Cron;
@@ -250,10 +250,18 @@ impl TrackersRunJob {
             .set_job_meta(job_id, job_meta.set_running())
             .await?;
 
+        let context = TrackerExecutionContext {
+            job_id: Some(job_id),
+            retry: job_config.retry_strategy.map(|s| TrackerExecutionRetry {
+                attempt: job_meta.retry_attempt,
+                max_attempts: s.max_attempts() as u16,
+            }),
+        };
+
         // Try to create a new revision. If a revision is returned, that means that the tracker
         // detected changes.
         match trackers
-            .create_tracker_data_revision_with_retry(tracker.id, Some(job_meta.retry_attempt))
+            .create_tracker_data_revision(tracker.id, context)
             .await
         {
             Ok(new_revision) => {

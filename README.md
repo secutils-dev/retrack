@@ -5,14 +5,15 @@ and triggers actions (server log, email, webhook) when content changes.
 
 ## Features
 
-* **Page tracking** — render pages in a headless browser (Chromium or Camoufox/Firefox) and extract content with custom
+* **Page tracking** - render pages in a headless browser (Chromium or Camoufox/Firefox) and extract content with custom
   JavaScript scripts
-* **API tracking** — monitor HTTP/REST API responses with optional configurator and extractor scripts
-* **File tracking** — parse and monitor CSV and XLS/XLSX files for changes
-* **Change detection** — unified diffs between revisions with configurable revision limits
-* **Scheduled checks** — cron-based scheduling with retry strategies
-* **Notifications** — email and webhook notifications on detected changes or check failures
-* **OpenAPI docs** — auto-generated specification served via RapiDoc at `/api-docs`
+* **API tracking** - monitor HTTP/REST API responses with optional configurator and extractor scripts
+* **File tracking** - parse and monitor CSV and XLS/XLSX files for changes
+* **Change detection** - unified diffs between revisions with configurable revision limits
+* **Scheduled checks** - cron-based scheduling with retry strategies
+* **Execution logs** - per-run execution history with structured timing phases, accessible via API
+* **Notifications** - email and webhook notifications on detected changes or check failures
+* **OpenAPI docs** - auto-generated specification served via RapiDoc at `/api-docs`
 
 ## Prerequisites
 
@@ -115,6 +116,8 @@ password = "xxx"
 max_revisions = 10
 min_schedule_interval = 600_000
 schedules = ["@", "@hourly", "@daily", "@weekly", "@monthly", "@@"]
+# Retention period for execution logs in milliseconds (default: 90 days).
+execution_log_retention = 7_776_000_000
 ```
 
 Start the server with a custom config:
@@ -162,10 +165,10 @@ Build images with the following commands:
 # Retrack API (distroless, port 7676)
 make docker-api
 
-# Web Scraper — Chromium backend (Alpine + Xvfb, port 7272)
+# Web Scraper - Chromium backend (Alpine + Xvfb, port 7272)
 make docker-scraper
 
-# Web Scraper — Camoufox/Firefox backend (port 7777)
+# Web Scraper - Camoufox/Firefox backend (port 7777)
 make docker-scraper-camoufox
 ```
 

@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    INSERT INTO tracker_execution_logs (id, tracker_id, job_id, started_at, finished_at, status,\n                                        error, is_manual, retry_attempt, max_retry_attempts,\n                                        revision_size, has_changes, duration_ms, phases)\n    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Int2",
+        "Text",
+        "Bool",
+        "Int2",
+        "Int2",
+        "Int8",
+        "Bool",
+        "Int8",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "00268747a4b482f226389f4638f2d574b83f05bf132eb8f569066e0e2c6e5da1"
+}

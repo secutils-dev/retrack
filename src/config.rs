@@ -196,6 +196,7 @@ pub mod tests {
                     4096,
                 ),
                 default_actions: None,
+                execution_log_retention: 7776000s,
             },
             js_runtime: JsRuntimeConfig {
                 max_heap_size: 10485760,

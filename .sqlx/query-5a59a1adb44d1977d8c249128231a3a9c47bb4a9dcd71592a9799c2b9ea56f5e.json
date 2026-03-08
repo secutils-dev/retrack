@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT id, tracker_id, job_id, started_at, finished_at, status, error, is_manual,\n       retry_attempt, max_retry_attempts, revision_size, has_changes, duration_ms, phases\nFROM tracker_execution_logs\nWHERE tracker_id = $1\nORDER BY started_at DESC\nLIMIT $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tracker_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "finished_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_manual",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "retry_attempt",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 9,
+        "name": "max_retry_attempts",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 10,
+        "name": "revision_size",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "has_changes",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "duration_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "phases",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "5a59a1adb44d1977d8c249128231a3a9c47bb4a9dcd71592a9799c2b9ea56f5e"
+}

@@ -27,6 +27,10 @@ pub struct TrackersConfig {
     /// The default actions to be applied to all trackers. Always applied after the tracker-specific
     /// actions.
     pub default_actions: Option<Vec<TrackerAction>>,
+    /// Retention period for tracker execution logs. Logs older than this are deleted
+    /// automatically. Default is 90 days.
+    #[serde_as(as = "DurationMilliSeconds<u64>")]
+    pub execution_log_retention: Duration,
 }
 
 impl Default for TrackersConfig {
@@ -46,6 +50,8 @@ impl Default for TrackersConfig {
             max_script_size: Byte::from_u64(4096),
             // Don't add any default actions by default.
             default_actions: None,
+            // Default to 90 days.
+            execution_log_retention: Duration::from_secs(90 * 24 * 3600),
         }
     }
 }
@@ -68,6 +74,7 @@ mod tests {
         min_retry_interval = 60000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
+        execution_log_retention = 7776000000
         "###);
 
         let config = TrackersConfig {
@@ -88,6 +95,7 @@ mod tests {
                     ),
                 }),
             ]),
+            execution_log_retention: Duration::from_secs(90 * 24 * 3600),
         };
         assert_toml_snapshot!(config, @r###"
         max_revisions = 10
@@ -97,6 +105,7 @@ mod tests {
         min_retry_interval = 3000
         restrict_to_public_urls = false
         max_script_size = '8 KiB'
+        execution_log_retention = 7776000000
 
         [[default_actions]]
         type = 'log'
@@ -118,6 +127,7 @@ mod tests {
         min_retry_interval = 60_000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
+        execution_log_retention = 7_776_000_000
     "#,
         )
         .unwrap();
@@ -132,6 +142,7 @@ mod tests {
         schedules = ['@', '@hourly']
         restrict_to_public_urls = false
         max_script_size = '8 KiB'
+        execution_log_retention = 604_800_000
         default_actions = [{ type = 'log' }, { type = 'email', to = ['dev@retrack.dev'], formatter = '''(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();''' }]
     "#,
         )
@@ -160,6 +171,7 @@ mod tests {
                         ),
                     }),
                 ]),
+                execution_log_retention: Duration::from_secs(7 * 24 * 3600),
             }
         );
     }

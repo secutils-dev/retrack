@@ -7,6 +7,11 @@ mod tracker_data_value;
 mod tracker_debug_existing_params;
 mod tracker_debug_params;
 mod tracker_debug_result;
+mod tracker_execution_log;
+mod tracker_execution_log_phase;
+mod tracker_execution_log_status;
+mod tracker_list_execution_logs_batch_params;
+mod tracker_list_execution_logs_params;
 mod tracker_list_revisions_params;
 mod tracker_target;
 mod tracker_update_params;
@@ -29,6 +34,15 @@ pub use self::{
         AutoParseDebugInfo, EmailDestinationDebugInfo, PageLogEntry, PageScreenshotEntry,
         PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo, TrackerDebugResult,
         TrackerDebugTargetResult, WebhookDestinationDebugInfo,
+    },
+    tracker_execution_log::TrackerExecutionLog,
+    tracker_execution_log_phase::TrackerExecutionLogPhase,
+    tracker_execution_log_status::TrackerExecutionLogStatus,
+    tracker_list_execution_logs_batch_params::{
+        DEFAULT_EXECUTION_LOGS_BATCH_SIZE, TrackerListExecutionLogsBatchParams,
+    },
+    tracker_list_execution_logs_params::{
+        DEFAULT_EXECUTION_LOGS_PAGE_SIZE, TrackerListExecutionLogsParams,
     },
     tracker_list_revisions_params::{
         DEFAULT_DIFF_CONTEXT_RADIUS, MAX_DIFF_CONTEXT_RADIUS, TrackerListRevisionsParams,

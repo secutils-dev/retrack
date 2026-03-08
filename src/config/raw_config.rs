@@ -111,6 +111,7 @@ mod tests {
         min_retry_interval = 60000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
+        execution_log_retention = 7776000000
 
         [js_runtime]
         max_heap_size = 10485760
@@ -174,6 +175,7 @@ mod tests {
         min_retry_interval = 60_000
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
+        execution_log_retention = 7776000000
 
         [[trackers.default_actions]]
         type = 'log'
@@ -281,6 +283,7 @@ mod tests {
                         ),
                     ],
                 ),
+                execution_log_retention: 7776000s,
             },
             smtp: None,
             js_runtime: JsRuntimeConfig {

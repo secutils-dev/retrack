@@ -129,6 +129,9 @@ retrack/
 | `GET`    | `/api/trackers/{id}/revisions/{rev_id}`   | Get a specific revision         |
 | `DELETE` | `/api/trackers/{id}/revisions/{rev_id}`   | Remove a specific revision      |
 | `DELETE` | `/api/trackers/{id}/revisions`            | Clear all revisions             |
+| `GET`    | `/api/trackers/{id}/execution-logs`       | List execution logs for tracker |
+| `DELETE` | `/api/trackers/{id}/execution-logs`       | Clear execution logs for tracker|
+| `DELETE` | `/api/trackers/execution-logs`            | Clear all execution logs        |
 
 OpenAPI documentation is served at `/api-docs` via RapiDoc.
 

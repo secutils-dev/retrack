@@ -5,7 +5,7 @@ mod parsers;
 mod tracker_data_revisions_diff;
 mod web_scraper;
 
-pub use api_ext::TrackersApiExt;
+pub use api_ext::{TrackerExecutionContext, TrackerExecutionRetry, TrackersApiExt};
 
 #[cfg(test)]
 pub mod tests {

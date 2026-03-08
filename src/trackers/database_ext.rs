@@ -1,14 +1,20 @@
 mod raw_tracker;
 mod raw_tracker_data_revision;
+mod raw_tracker_execution_log;
 
 use crate::{
-    database::Database, error::Error as RetrackError,
-    trackers::database_ext::raw_tracker_data_revision::RawTrackerDataRevision,
+    database::Database,
+    error::Error as RetrackError,
+    trackers::database_ext::{
+        raw_tracker_data_revision::RawTrackerDataRevision,
+        raw_tracker_execution_log::RawTrackerExecutionLog,
+    },
 };
 use anyhow::{anyhow, bail};
 use raw_tracker::RawTracker;
-use retrack_types::trackers::{Tracker, TrackerDataRevision};
+use retrack_types::trackers::{Tracker, TrackerDataRevision, TrackerExecutionLog};
 use sqlx::{Pool, Postgres, error::ErrorKind as SqlxErrorKind, query, query_as};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// A database extension for the trackers-related operations.
@@ -382,6 +388,141 @@ ORDER BY t.updated_at
         .transpose()
     }
 
+    /// Inserts a tracker execution log entry.
+    pub async fn insert_tracker_execution_log(
+        &self,
+        log: &TrackerExecutionLog,
+    ) -> anyhow::Result<()> {
+        let raw = RawTrackerExecutionLog::try_from(log)?;
+        query!(
+            r#"
+    INSERT INTO tracker_execution_logs (id, tracker_id, job_id, started_at, finished_at, status,
+                                        error, is_manual, retry_attempt, max_retry_attempts,
+                                        revision_size, has_changes, duration_ms, phases)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            "#,
+            raw.id,
+            raw.tracker_id,
+            raw.job_id,
+            raw.started_at,
+            raw.finished_at,
+            raw.status,
+            raw.error,
+            raw.is_manual,
+            raw.retry_attempt,
+            raw.max_retry_attempts,
+            raw.revision_size,
+            raw.has_changes,
+            raw.duration_ms,
+            raw.phases,
+        )
+        .execute(self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Retrieves execution logs for a tracker, ordered by start time descending.
+    pub async fn get_tracker_execution_logs(
+        &self,
+        tracker_id: Uuid,
+        size: usize,
+    ) -> anyhow::Result<Vec<TrackerExecutionLog>> {
+        let raw_logs = query_as!(
+            RawTrackerExecutionLog,
+            r#"
+SELECT id, tracker_id, job_id, started_at, finished_at, status, error, is_manual,
+       retry_attempt, max_retry_attempts, revision_size, has_changes, duration_ms, phases
+FROM tracker_execution_logs
+WHERE tracker_id = $1
+ORDER BY started_at DESC
+LIMIT $2
+            "#,
+            tracker_id,
+            size as i64
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        raw_logs
+            .into_iter()
+            .map(TrackerExecutionLog::try_from)
+            .collect()
+    }
+
+    /// Retrieves execution logs for multiple trackers in a single query, returning up to `size`
+    /// entries per tracker ordered by start time descending.
+    pub async fn get_tracker_execution_logs_batch(
+        &self,
+        tracker_ids: &[Uuid],
+        size: usize,
+    ) -> anyhow::Result<Vec<TrackerExecutionLog>> {
+        if tracker_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let raw_logs = query_as!(
+            RawTrackerExecutionLog,
+            r#"
+SELECT l.id, l.tracker_id, l.job_id, l.started_at, l.finished_at, l.status, l.error,
+       l.is_manual, l.retry_attempt, l.max_retry_attempts, l.revision_size, l.has_changes, l.duration_ms, l.phases
+FROM unnest($1::uuid[]) AS t(tracker_id)
+CROSS JOIN LATERAL (
+    SELECT *
+    FROM tracker_execution_logs el
+    WHERE el.tracker_id = t.tracker_id
+    ORDER BY el.started_at DESC
+    LIMIT $2
+) l
+            "#,
+            tracker_ids,
+            size as i64
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        raw_logs
+            .into_iter()
+            .map(TrackerExecutionLog::try_from)
+            .collect()
+    }
+
+    /// Removes all execution logs for a specific tracker.
+    pub async fn clear_tracker_execution_logs(&self, tracker_id: Uuid) -> anyhow::Result<()> {
+        query!(
+            r#"DELETE FROM tracker_execution_logs WHERE tracker_id = $1"#,
+            tracker_id
+        )
+        .execute(self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Removes all execution logs for all trackers.
+    pub async fn clear_all_tracker_execution_logs(&self) -> anyhow::Result<()> {
+        query!(r#"DELETE FROM tracker_execution_logs"#)
+            .execute(self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Removes execution logs older than the specified cutoff time.
+    pub async fn cleanup_tracker_execution_logs(
+        &self,
+        cutoff: OffsetDateTime,
+    ) -> anyhow::Result<u64> {
+        let result = query!(
+            r#"DELETE FROM tracker_execution_logs WHERE started_at < $1"#,
+            cutoff
+        )
+        .execute(self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
     /// Updates tracker's job.
     pub async fn update_tracker_job(&self, id: Uuid, job_id: Option<Uuid>) -> anyhow::Result<()> {
         let result = query!(
@@ -424,7 +565,10 @@ mod tests {
         },
     };
     use insta::assert_debug_snapshot;
-    use retrack_types::trackers::{Tracker, TrackerDataRevision, TrackerDataValue};
+    use retrack_types::trackers::{
+        Tracker, TrackerDataRevision, TrackerDataValue, TrackerExecutionLog,
+        TrackerExecutionLogPhase, TrackerExecutionLogStatus,
+    };
     use serde_json::json;
     use sqlx::PgPool;
     use std::time::Duration;
@@ -1664,6 +1808,314 @@ mod tests {
             update_result.to_string(),
             format!("Tracker ('{}') doesn't exist.", tracker.id)
         );
+
+        Ok(())
+    }
+
+    fn create_mock_execution_log(
+        id: Uuid,
+        tracker_id: Uuid,
+        time_shift: i64,
+    ) -> anyhow::Result<TrackerExecutionLog> {
+        Ok(TrackerExecutionLog {
+            id,
+            tracker_id,
+            job_id: None,
+            started_at: OffsetDateTime::from_unix_timestamp(946720800 + time_shift)?,
+            finished_at: OffsetDateTime::from_unix_timestamp(946720803 + time_shift)?,
+            status: TrackerExecutionLogStatus::Success,
+            error: None,
+            is_manual: true,
+            retry_attempt: None,
+            max_retry_attempts: None,
+            revision_size: None,
+            has_changes: None,
+            duration_ms: 3000,
+            phases: None,
+        })
+    }
+
+    #[sqlx::test]
+    async fn can_insert_and_retrieve_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        let log = TrackerExecutionLog {
+            id: uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker_id: tracker.id,
+            job_id: Some(uuid!("00000000-0000-0000-0000-000000000099")),
+            started_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+            finished_at: OffsetDateTime::from_unix_timestamp(946720803)?,
+            status: TrackerExecutionLogStatus::Success,
+            error: None,
+            is_manual: false,
+            retry_attempt: Some(0),
+            max_retry_attempts: Some(3),
+            revision_size: Some(4521),
+            has_changes: Some(true),
+            duration_ms: 2340,
+            phases: Some(vec![TrackerExecutionLogPhase {
+                phase: "fetch_data".to_string(),
+                duration_ms: 2340,
+                status: TrackerExecutionLogStatus::Success,
+                meta: Some(json!({"statusCode": 200})),
+            }]),
+        };
+        db.trackers().insert_tracker_execution_log(&log).await?;
+
+        let logs = db
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, 50)
+            .await?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0], log);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn retrieves_execution_logs_in_desc_order(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        let log_older = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker.id,
+            0,
+        )?;
+        let log_newer = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000011"),
+            tracker.id,
+            100,
+        )?;
+
+        db.trackers()
+            .insert_tracker_execution_log(&log_older)
+            .await?;
+        db.trackers()
+            .insert_tracker_execution_log(&log_newer)
+            .await?;
+
+        let logs = db
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, 50)
+            .await?;
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].id, log_newer.id);
+        assert_eq!(logs[1].id, log_older.id);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn respects_size_limit_for_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        for i in 0..5 {
+            let log =
+                create_mock_execution_log(Uuid::from_u128(0x10 + i), tracker.id, i as i64 * 10)?;
+            db.trackers().insert_tracker_execution_log(&log).await?;
+        }
+
+        let logs = db
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, 2)
+            .await?;
+        assert_eq!(logs.len(), 2);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_clear_execution_logs_for_tracker(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker1 =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test-1", 3)?
+                .build();
+        let tracker2 =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000002"), "test-2", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker1).await?;
+        db.trackers().insert_tracker(&tracker2).await?;
+
+        let log1 = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker1.id,
+            0,
+        )?;
+        let log2 = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000020"),
+            tracker2.id,
+            10,
+        )?;
+        db.trackers().insert_tracker_execution_log(&log1).await?;
+        db.trackers().insert_tracker_execution_log(&log2).await?;
+
+        db.trackers()
+            .clear_tracker_execution_logs(tracker1.id)
+            .await?;
+
+        let logs1 = db
+            .trackers()
+            .get_tracker_execution_logs(tracker1.id, 50)
+            .await?;
+        let logs2 = db
+            .trackers()
+            .get_tracker_execution_logs(tracker2.id, 50)
+            .await?;
+        assert!(logs1.is_empty());
+        assert_eq!(logs2.len(), 1);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_clear_all_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker1 =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test-1", 3)?
+                .build();
+        let tracker2 =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000002"), "test-2", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker1).await?;
+        db.trackers().insert_tracker(&tracker2).await?;
+
+        for (i, tid) in [tracker1.id, tracker2.id].iter().enumerate() {
+            let log =
+                create_mock_execution_log(Uuid::from_u128(0x10 + i as u128), *tid, i as i64 * 10)?;
+            db.trackers().insert_tracker_execution_log(&log).await?;
+        }
+
+        db.trackers().clear_all_tracker_execution_logs().await?;
+
+        let logs1 = db
+            .trackers()
+            .get_tracker_execution_logs(tracker1.id, 50)
+            .await?;
+        let logs2 = db
+            .trackers()
+            .get_tracker_execution_logs(tracker2.id, 50)
+            .await?;
+        assert!(logs1.is_empty());
+        assert!(logs2.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_cleanup_old_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        // Old log (before cutoff).
+        let old_log = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker.id,
+            0,
+        )?;
+        // Recent log (after cutoff).
+        let new_log = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000011"),
+            tracker.id,
+            200,
+        )?;
+        db.trackers().insert_tracker_execution_log(&old_log).await?;
+        db.trackers().insert_tracker_execution_log(&new_log).await?;
+
+        let cutoff = OffsetDateTime::from_unix_timestamp(946720800 + 100)?;
+        let deleted = db.trackers().cleanup_tracker_execution_logs(cutoff).await?;
+        assert_eq!(deleted, 1);
+
+        let logs = db
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, 50)
+            .await?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].id, new_log.id);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn execution_logs_deleted_on_tracker_delete(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        let log = create_mock_execution_log(
+            uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker.id,
+            0,
+        )?;
+        db.trackers().insert_tracker_execution_log(&log).await?;
+
+        assert_eq!(
+            db.trackers()
+                .get_tracker_execution_logs(tracker.id, 50)
+                .await?
+                .len(),
+            1
+        );
+
+        db.trackers().remove_tracker(tracker.id).await?;
+
+        let logs = db
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, 50)
+            .await?;
+        assert!(logs.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_insert_execution_log_with_failure_status(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let tracker =
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "test", 3)?
+                .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        let log = TrackerExecutionLog {
+            id: uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker_id: tracker.id,
+            job_id: None,
+            started_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+            finished_at: OffsetDateTime::from_unix_timestamp(946720801)?,
+            status: TrackerExecutionLogStatus::Failure,
+            error: Some("Connection timeout".to_string()),
+            is_manual: true,
+            retry_attempt: Some(2),
+            max_retry_attempts: Some(3),
+            revision_size: None,
+            has_changes: None,
+            duration_ms: 1000,
+            phases: None,
+        };
+        db.trackers().insert_tracker_execution_log(&log).await?;
+
+        let logs = db
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, 50)
+            .await?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0], log);
 
         Ok(())
     }

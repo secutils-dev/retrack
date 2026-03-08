@@ -21,7 +21,10 @@ pub async fn trackers_create_revision(
     tracker_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, RetrackError> {
     let trackers = state.api.trackers();
-    match trackers.create_tracker_data_revision(*tracker_id).await {
+    match trackers
+        .create_tracker_data_revision(*tracker_id, Default::default())
+        .await
+    {
         Ok(revision) => Ok(HttpResponse::Created().json(revision)),
         Err(err) => {
             error!(tracker.id = %tracker_id, "Failed to create tracker data revision: {err:?}");

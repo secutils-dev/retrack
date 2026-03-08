@@ -1,5 +1,7 @@
 pub mod status_get;
 pub mod trackers_bulk_remove;
+pub mod trackers_clear_all_execution_logs;
+pub mod trackers_clear_execution_logs;
 pub mod trackers_clear_revisions;
 pub mod trackers_create;
 pub mod trackers_create_revision;
@@ -8,6 +10,8 @@ pub mod trackers_debug_existing;
 pub mod trackers_get;
 pub mod trackers_get_revision;
 pub mod trackers_list;
+pub mod trackers_list_execution_logs;
+pub mod trackers_list_execution_logs_batch;
 pub mod trackers_list_revisions;
 pub mod trackers_remove;
 pub mod trackers_remove_revision;
@@ -22,8 +26,9 @@ use retrack_types::{
         PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
         ServerLogAction, TargetRequest, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
         TrackerDataRevision, TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams,
-        TrackerDebugResult, TrackerDebugTargetResult, TrackerTarget, TrackerUpdateParams,
-        WebhookAction, WebhookDestinationDebugInfo,
+        TrackerDebugResult, TrackerDebugTargetResult, TrackerExecutionLog,
+        TrackerExecutionLogPhase, TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
+        TrackerTarget, TrackerUpdateParams, WebhookAction, WebhookDestinationDebugInfo,
     },
 };
 use utoipa::OpenApi;
@@ -50,6 +55,10 @@ use utoipa::OpenApi;
         trackers_clear_revisions::trackers_clear_revisions,
         trackers_get_revision::trackers_get_revision,
         trackers_remove_revision::trackers_remove_revision,
+        trackers_list_execution_logs::trackers_list_execution_logs,
+        trackers_list_execution_logs_batch::trackers_list_execution_logs_batch,
+        trackers_clear_execution_logs::trackers_clear_execution_logs,
+        trackers_clear_all_execution_logs::trackers_clear_all_execution_logs,
         trackers_debug::trackers_debug,
         trackers_debug_existing::trackers_debug_existing
     ),
@@ -82,6 +91,10 @@ use utoipa::OpenApi;
         TrackerDebugParams,
         TrackerDebugResult,
         TrackerDebugTargetResult,
+        TrackerExecutionLog,
+        TrackerExecutionLogPhase,
+        TrackerExecutionLogStatus,
+        TrackerListExecutionLogsBatchParams,
         TrackerTarget,
         TrackerUpdateParams,
         WebhookAction,

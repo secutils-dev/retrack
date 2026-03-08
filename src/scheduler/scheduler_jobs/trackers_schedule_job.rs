@@ -9,9 +9,19 @@ use crate::{
 use anyhow::Context;
 use croner::Cron;
 use retrack_types::trackers::Tracker;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicI64, Ordering},
+};
+use time::OffsetDateTime;
 use tokio_cron_scheduler::{Job, JobScheduler};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
+
+/// Minimum interval between execution log cleanup runs (1 hour).
+const CLEANUP_INTERVAL_SECS: i64 = 3600;
+
+/// Tracks the last time execution log cleanup was performed (Unix timestamp in seconds).
+static LAST_CLEANUP_TIMESTAMP: AtomicI64 = AtomicI64::new(0);
 
 /// The job executes every minute by default to check if there are any trackers to schedule jobs for.
 pub(crate) struct TrackersScheduleJob;
@@ -74,7 +84,34 @@ impl TrackersScheduleJob {
         )
         .await?;
 
+        Self::maybe_cleanup_execution_logs(&api).await;
+
         Ok(())
+    }
+
+    /// Runs execution log cleanup if enough time has elapsed since the last cleanup.
+    async fn maybe_cleanup_execution_logs<DR: DnsResolver>(api: &Api<DR>) {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let last = LAST_CLEANUP_TIMESTAMP.load(Ordering::Relaxed);
+        if now - last < CLEANUP_INTERVAL_SECS {
+            return;
+        }
+
+        let retention = api.config.trackers.execution_log_retention;
+        let cutoff =
+            OffsetDateTime::now_utc() - time::Duration::seconds(retention.as_secs() as i64);
+
+        match api.trackers().cleanup_tracker_execution_logs(cutoff).await {
+            Ok(deleted) => {
+                LAST_CLEANUP_TIMESTAMP.store(now, Ordering::Relaxed);
+                if deleted > 0 {
+                    info!("Cleaned up {deleted} expired tracker execution log entries.");
+                }
+            }
+            Err(err) => {
+                error!("Failed to clean up tracker execution logs: {err:?}");
+            }
+        }
     }
 
     async fn schedule_trackers<DR: DnsResolver>(
@@ -117,7 +154,7 @@ impl TrackersScheduleJob {
 
 #[cfg(test)]
 mod tests {
-    use super::TrackersScheduleJob;
+    use super::{LAST_CLEANUP_TIMESTAMP, TrackersScheduleJob};
     use crate::{
         scheduler::{SchedulerJobMetadata, scheduler_job::SchedulerJob},
         tests::{
@@ -127,10 +164,14 @@ mod tests {
     };
     use futures::StreamExt;
     use insta::assert_debug_snapshot;
-    use retrack_types::trackers::TrackerConfig;
+    use retrack_types::trackers::{TrackerConfig, TrackerExecutionLog, TrackerExecutionLogStatus};
     use sqlx::PgPool;
-    use std::{sync::Arc, time::Duration};
-    use uuid::uuid;
+    use std::{
+        sync::{Arc, atomic::Ordering},
+        time::Duration,
+    };
+    use time::OffsetDateTime;
+    use uuid::{Uuid, uuid};
 
     #[sqlx::test]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
@@ -440,6 +481,193 @@ mod tests {
         let mut jobs = api.db.get_scheduler_jobs(10).collect::<Vec<_>>().await;
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs.remove(0)?.id, schedule_job_id);
+
+        Ok(())
+    }
+
+    fn mock_execution_log(
+        tracker_id: Uuid,
+        started_at: OffsetDateTime,
+        status: TrackerExecutionLogStatus,
+    ) -> TrackerExecutionLog {
+        TrackerExecutionLog {
+            id: Uuid::now_v7(),
+            tracker_id,
+            job_id: None,
+            started_at,
+            finished_at: started_at + time::Duration::seconds(1),
+            status,
+            error: if status == TrackerExecutionLogStatus::Failure {
+                Some("test error".to_string())
+            } else {
+                None
+            },
+            is_manual: true,
+            retry_attempt: None,
+            max_retry_attempts: None,
+            revision_size: Some(100),
+            has_changes: None,
+            duration_ms: 1000,
+            phases: None,
+        }
+    }
+
+    #[sqlx::test]
+    async fn cleanup_deletes_expired_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+
+        let tracker = api
+            .trackers()
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        // Insert a log far beyond the 90-day default retention.
+        let old_time = OffsetDateTime::from_unix_timestamp(946720800)?;
+        api.trackers()
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                old_time,
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+
+        LAST_CLEANUP_TIMESTAMP.store(0, Ordering::Relaxed);
+        TrackersScheduleJob::maybe_cleanup_execution_logs(&api).await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert!(logs.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn cleanup_preserves_recent_execution_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+
+        let tracker = api
+            .trackers()
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        // Insert a recent log (within retention window).
+        api.trackers()
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                OffsetDateTime::now_utc(),
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+
+        LAST_CLEANUP_TIMESTAMP.store(0, Ordering::Relaxed);
+        TrackersScheduleJob::maybe_cleanup_execution_logs(&api).await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn cleanup_skips_when_interval_not_elapsed(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+
+        let tracker = api
+            .trackers()
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        // Insert a log far beyond retention.
+        let old_time = OffsetDateTime::from_unix_timestamp(946720800)?;
+        api.trackers()
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                old_time,
+                TrackerExecutionLogStatus::Failure,
+            ))
+            .await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+
+        // Pretend cleanup just ran by setting the timestamp to now.
+        LAST_CLEANUP_TIMESTAMP.store(
+            OffsetDateTime::now_utc().unix_timestamp(),
+            Ordering::Relaxed,
+        );
+        TrackersScheduleJob::maybe_cleanup_execution_logs(&api).await;
+
+        // The old log should still be present because cleanup was skipped.
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn cleanup_deletes_only_expired_logs(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api_with_config(pool, mock_config()?).await?;
+
+        let tracker = api
+            .trackers()
+            .create_tracker(TrackerCreateParamsBuilder::new("tracker").build())
+            .await?;
+
+        // Insert an expired log and a recent log.
+        let old_time = OffsetDateTime::from_unix_timestamp(946720800)?;
+        api.trackers()
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                old_time,
+                TrackerExecutionLogStatus::Failure,
+            ))
+            .await;
+        api.trackers()
+            .log_tracker_execution(&mock_execution_log(
+                tracker.id,
+                OffsetDateTime::now_utc(),
+                TrackerExecutionLogStatus::Success,
+            ))
+            .await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 2);
+
+        LAST_CLEANUP_TIMESTAMP.store(0, Ordering::Relaxed);
+        TrackersScheduleJob::maybe_cleanup_execution_logs(&api).await;
+
+        let logs = api
+            .trackers()
+            .get_tracker_execution_logs(tracker.id, Default::default())
+            .await?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, TrackerExecutionLogStatus::Success);
 
         Ok(())
     }
