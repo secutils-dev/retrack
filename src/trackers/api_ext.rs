@@ -164,6 +164,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             job_id: None,
             created_at,
             updated_at: created_at,
+            scheduled_at: None,
+            last_ran_at: None,
         };
 
         self.validate_tracker(&tracker).await?;
@@ -233,6 +235,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             actions: params.actions.unwrap_or(existing_tracker.actions),
             updated_at: Database::utc_now()?,
             job_id,
+            scheduled_at: None,
+            last_ran_at: None,
             ..existing_tracker
         };
 
@@ -1473,6 +1477,8 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             job_id: None,
             created_at: Database::utc_now()?,
             updated_at: Database::utc_now()?,
+            scheduled_at: None,
+            last_ran_at: None,
         };
 
         self.validate_debug_tracker(&tracker).await?;
@@ -7723,6 +7729,7 @@ mod tests {
             scheduled_tracker,
             Some(Tracker {
                 job_id: Some(uuid!("11e55044-10b1-426f-9247-bb680e5fe0c9")),
+                scheduled_at: Some(OffsetDateTime::from_unix_timestamp(12)?),
                 ..tracker.clone()
             })
         );

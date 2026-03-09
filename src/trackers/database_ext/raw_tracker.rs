@@ -34,6 +34,8 @@ pub(super) struct RawTracker {
     pub updated_at: OffsetDateTime,
     pub job_id: Option<Uuid>,
     pub job_needed: bool,
+    pub scheduled_at: Option<OffsetDateTime>,
+    pub last_ran_at: Option<OffsetDateTime>,
 }
 
 #[serde_as]
@@ -188,6 +190,8 @@ impl TryFrom<RawTracker> for Tracker {
             tags: raw.tags,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
+            scheduled_at: raw.scheduled_at,
+            last_ran_at: raw.last_ran_at,
         })
     }
 }
@@ -422,6 +426,8 @@ impl TryFrom<&Tracker> for RawTracker {
             updated_at: item.updated_at,
             job_id: item.job_id,
             job_needed: item.config.job.is_some() && item.config.revisions > 0 && item.enabled,
+            scheduled_at: None,
+            last_ran_at: None,
         })
     }
 }
@@ -686,6 +692,8 @@ mod tests {
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
             job_id: None,
+            scheduled_at: None,
+            last_ran_at: None,
         };
         assert_eq!(Tracker::try_from(RawTracker::try_from(&tracker)?)?, tracker);
 
@@ -803,6 +811,52 @@ mod tests {
     }
 
     #[test]
+    fn raw_tracker_with_schedule_timestamps_converts_to_tracker() -> anyhow::Result<()> {
+        let raw = RawTracker {
+            id: uuid!("00000000-0000-0000-0000-000000000001"),
+            name: "tk".to_string(),
+            enabled: true,
+            config: postcard::to_stdvec(&super::RawTrackerConfig {
+                revisions: 1,
+                timeout: None,
+                target: super::RawTrackerTarget::Page(super::RawPageTarget {
+                    extractor: "return document.title;".into(),
+                    extractor_params: None,
+                    extractor_engine: None,
+                    user_agent: None,
+                    accept_invalid_certificates: None,
+                }),
+                actions: vec![],
+                job: None,
+            })?,
+            tags: vec![],
+            created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+            updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
+            job_id: None,
+            job_needed: false,
+            scheduled_at: Some(OffsetDateTime::from_unix_timestamp(946720900)?),
+            last_ran_at: Some(OffsetDateTime::from_unix_timestamp(946720700)?),
+        };
+
+        let tracker = Tracker::try_from(raw)?;
+        assert_eq!(
+            tracker.scheduled_at,
+            Some(OffsetDateTime::from_unix_timestamp(946720900)?)
+        );
+        assert_eq!(
+            tracker.last_ran_at,
+            Some(OffsetDateTime::from_unix_timestamp(946720700)?)
+        );
+
+        // Reverse conversion always produces None (derived fields are not persisted).
+        let raw_back = RawTracker::try_from(&tracker)?;
+        assert_eq!(raw_back.scheduled_at, None);
+        assert_eq!(raw_back.last_ran_at, None);
+
+        Ok(())
+    }
+
+    #[test]
     fn can_deserialize_v2_api_tracker_without_params() -> anyhow::Result<()> {
         use super::v2;
 
@@ -826,6 +880,8 @@ mod tests {
             created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
             updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
             job_id: None,
+            scheduled_at: None,
+            last_ran_at: None,
         };
 
         let raw = RawTracker::try_from(&base_tracker)?;

@@ -34,9 +34,13 @@ impl<'pool> TrackersDatabaseExt<'pool> {
             query_as!(
                 RawTracker,
                 r#"
-SELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed
-FROM trackers
-ORDER BY updated_at
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_id, t.job_needed,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
+FROM trackers t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+ORDER BY t.updated_at, t.id
                 "#
             )
             .fetch_all(self.pool)
@@ -45,10 +49,14 @@ ORDER BY updated_at
             query_as!(
                 RawTracker,
                 r#"
-SELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed
-FROM trackers
-WHERE tags @> $1
-ORDER BY updated_at
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_id, t.job_needed,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
+FROM trackers t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+WHERE t.tags @> $1
+ORDER BY t.updated_at, t.id
                 "#,
                 tags
             )
@@ -69,10 +77,14 @@ ORDER BY updated_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed
-    FROM trackers
-    WHERE id = $1
-                    "#,
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_id, t.job_needed,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
+FROM trackers t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+WHERE t.id = $1
+            "#,
             id
         )
         .fetch_optional(self.pool)
@@ -355,11 +367,14 @@ LIMIT 1
         let raw_trackers = query_as!(
             RawTracker,
             r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, t.job_needed, t.job_id
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_needed, t.job_id,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
 FROM trackers as t
 LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
 WHERE t.job_needed = TRUE AND t.enabled = TRUE AND (t.job_id IS NULL OR sj.id IS NULL)
-ORDER BY t.updated_at
+ORDER BY t.updated_at, t.id
                 "#
         )
         .fetch_all(self.pool)
@@ -376,10 +391,14 @@ ORDER BY t.updated_at
         query_as!(
             RawTracker,
             r#"
-    SELECT id, name, enabled, config, tags, created_at, updated_at, job_needed, job_id
-    FROM trackers
-    WHERE job_id = $1
-                    "#,
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_needed, t.job_id,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
+FROM trackers t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+WHERE t.job_id = $1
+            "#,
             job_id
         )
         .fetch_optional(self.pool)
@@ -2116,6 +2135,135 @@ mod tests {
             .await?;
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0], log);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn get_tracker_returns_schedule_timestamps_from_scheduler_job(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "scheduled",
+            3,
+        )?
+        .with_schedule("0 0 * * *")
+        .with_job_id(uuid!("00000000-0000-0000-0000-000000000011"))
+        .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        // Before inserting the scheduler job, both fields should be None.
+        let fetched = db.trackers().get_tracker(tracker.id).await?.unwrap();
+        assert_eq!(fetched.scheduled_at, None);
+        assert_eq!(fetched.last_ran_at, None);
+
+        // Insert a scheduler job with next_tick and last_tick.
+        let mut job = mock_scheduler_job(
+            uuid!("00000000-0000-0000-0000-000000000011"),
+            SchedulerJob::TrackersRun,
+            "0 0 * * *",
+        );
+        job.next_tick = Some(946720900);
+        job.last_tick = Some(946720700);
+        mock_upsert_scheduler_job(&db, &job).await?;
+
+        let fetched = db.trackers().get_tracker(tracker.id).await?.unwrap();
+        let expected = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "scheduled",
+            3,
+        )?
+        .with_schedule("0 0 * * *")
+        .with_job_id(uuid!("00000000-0000-0000-0000-000000000011"))
+        .with_scheduled_at(OffsetDateTime::from_unix_timestamp(946720900)?)
+        .with_last_ran_at(OffsetDateTime::from_unix_timestamp(946720700)?)
+        .build();
+        assert_eq!(fetched, expected);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn get_tracker_returns_none_schedule_timestamps_without_job(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "no-schedule",
+            3,
+        )?
+        .build();
+        db.trackers().insert_tracker(&tracker).await?;
+
+        let fetched = db.trackers().get_tracker(tracker.id).await?.unwrap();
+        assert_eq!(fetched.scheduled_at, None);
+        assert_eq!(fetched.last_ran_at, None);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn get_trackers_returns_correct_schedule_timestamps_for_mixed_trackers(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker_with_job = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "with-job",
+            3,
+        )?
+        .with_schedule("0 0 * * *")
+        .with_job_id(uuid!("00000000-0000-0000-0000-000000000011"))
+        .build();
+
+        let tracker_without_job = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000002"),
+            "without-job",
+            3,
+        )?
+        .build();
+
+        let trackers = db.trackers();
+        trackers.insert_tracker(&tracker_with_job).await?;
+        trackers.insert_tracker(&tracker_without_job).await?;
+
+        let mut job = mock_scheduler_job(
+            uuid!("00000000-0000-0000-0000-000000000011"),
+            SchedulerJob::TrackersRun,
+            "0 0 * * *",
+        );
+        job.next_tick = Some(946720900);
+        job.last_tick = Some(946720700);
+        mock_upsert_scheduler_job(&db, &job).await?;
+
+        let all_trackers = trackers.get_trackers(&[]).await?;
+        assert_eq!(all_trackers.len(), 2);
+
+        let fetched_with_job = all_trackers
+            .iter()
+            .find(|t| t.id == tracker_with_job.id)
+            .unwrap();
+        assert_eq!(
+            fetched_with_job.scheduled_at,
+            Some(OffsetDateTime::from_unix_timestamp(946720900)?)
+        );
+        assert_eq!(
+            fetched_with_job.last_ran_at,
+            Some(OffsetDateTime::from_unix_timestamp(946720700)?)
+        );
+
+        let fetched_without_job = all_trackers
+            .iter()
+            .find(|t| t.id == tracker_without_job.id)
+            .unwrap();
+        assert_eq!(fetched_without_job.scheduled_at, None);
+        assert_eq!(fetched_without_job.last_ran_at, None);
 
         Ok(())
     }

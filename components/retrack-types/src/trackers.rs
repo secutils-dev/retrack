@@ -98,6 +98,8 @@ pub mod tests {
                     actions: vec![TrackerAction::ServerLog(Default::default())],
                     created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
                     updated_at: OffsetDateTime::from_unix_timestamp(946720810)?,
+                    scheduled_at: None,
+                    last_ran_at: None,
                 },
             })
         }
@@ -137,6 +139,16 @@ pub mod tests {
 
         pub fn with_actions(mut self, actions: Vec<TrackerAction>) -> Self {
             self.tracker.actions = actions;
+            self
+        }
+
+        pub fn with_scheduled_at(mut self, scheduled_at: OffsetDateTime) -> Self {
+            self.tracker.scheduled_at = Some(scheduled_at);
+            self
+        }
+
+        pub fn with_last_ran_at(mut self, last_ran_at: OffsetDateTime) -> Self {
+            self.tracker.last_ran_at = Some(last_ran_at);
             self
         }
 

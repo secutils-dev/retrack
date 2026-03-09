@@ -31,6 +31,20 @@ pub struct Tracker {
     /// Date and time when the tracker was last updated.
     #[serde(with = "time::serde::timestamp")]
     pub updated_at: OffsetDateTime,
+    /// Date and time when the tracker is next scheduled to run (derived from the scheduler).
+    #[serde(
+        default,
+        with = "time::serde::timestamp::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub scheduled_at: Option<OffsetDateTime>,
+    /// Date and time when the tracker last ran on schedule (derived from the scheduler).
+    #[serde(
+        default,
+        with = "time::serde::timestamp::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_ran_at: Option<OffsetDateTime>,
 }
 
 #[cfg(test)]
@@ -297,6 +311,83 @@ mod tests {
                 "content-type": "application/json"
               },
               "formatter": "(async () => Deno.core.encode(JSON.stringify({ key: 'value' })))();"
+            }
+          ],
+          "createdAt": 946720800,
+          "updatedAt": 946720810
+        }
+        "###);
+
+        Ok(())
+    }
+
+    #[test]
+    fn serialization_with_schedule_timestamps() -> anyhow::Result<()> {
+        use time::OffsetDateTime;
+
+        let tracker = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "scheduled-tracker",
+            3,
+        )?
+        .with_schedule("0 0 * * *")
+        .with_scheduled_at(OffsetDateTime::from_unix_timestamp(946720900)?)
+        .with_last_ran_at(OffsetDateTime::from_unix_timestamp(946720800)?)
+        .build();
+        assert_json_snapshot!(tracker, @r###"
+        {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "name": "scheduled-tracker",
+          "enabled": true,
+          "target": {
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "userAgent": "Retrack/1.0.0"
+          },
+          "config": {
+            "revisions": 3,
+            "timeout": 2000,
+            "job": {
+              "schedule": "0 0 * * *"
+            }
+          },
+          "tags": [],
+          "actions": [
+            {
+              "type": "log"
+            }
+          ],
+          "createdAt": 946720800,
+          "updatedAt": 946720810,
+          "scheduledAt": 946720900,
+          "lastRanAt": 946720800
+        }
+        "###);
+
+        let tracker = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000002"),
+            "unscheduled-tracker",
+            3,
+        )?
+        .build();
+        assert_json_snapshot!(tracker, @r###"
+        {
+          "id": "00000000-0000-0000-0000-000000000002",
+          "name": "unscheduled-tracker",
+          "enabled": true,
+          "target": {
+            "type": "page",
+            "extractor": "export async function execute(p) { await p.goto('https://retrack.dev/'); return await p.content(); }",
+            "userAgent": "Retrack/1.0.0"
+          },
+          "config": {
+            "revisions": 3,
+            "timeout": 2000
+          },
+          "tags": [],
+          "actions": [
+            {
+              "type": "log"
             }
           ],
           "createdAt": 946720800,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT id, name, enabled, config, tags, created_at, updated_at, job_id, job_needed\nFROM trackers\nWHERE tags @> $1\nORDER BY updated_at\n                ",
+  "query": "\nSELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,\n       t.job_needed, t.job_id,\n       to_timestamp(sj.next_tick) as scheduled_at,\n       to_timestamp(sj.last_tick) as last_ran_at\nFROM trackers t\nLEFT JOIN scheduler_jobs sj ON t.job_id = sj.id\nWHERE t.job_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -40,18 +40,28 @@
       },
       {
         "ordinal": 7,
+        "name": "job_needed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "job_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 8,
-        "name": "job_needed",
-        "type_info": "Bool"
+        "ordinal": 9,
+        "name": "scheduled_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_ran_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "TextArray"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -62,9 +72,11 @@
       false,
       false,
       false,
+      false,
       true,
-      false
+      null,
+      null
     ]
   },
-  "hash": "a67783278d44e45d719e60e4e3525c8ccaa4b67144fd9344d383722ffe05e8ab"
+  "hash": "9729c8a1293e62e6ba19e37509a46a32da2c77266b8eb256b52396139d655308"
 }
