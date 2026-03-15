@@ -219,11 +219,29 @@ impl JsRuntime {
             .map(|script_result| runtime.resolve(script_result))
             .map_err(|err| handle_error(anyhow!(err)))?;
 
-        // Wait for the promise to resolve.
-        let script_result = runtime
-            .with_event_loop_promise(script_result_promise, Default::default())
-            .await
-            .map_err(|err| handle_error(anyhow!(err)))?;
+        // Wait for the promise to resolve. Wrap in a tokio timeout to handle
+        // async operations (e.g. timers) that keep the event loop idle beyond
+        // the time limit. The watchdog thread above handles synchronous loops
+        // that block V8.
+        let script_result = match tokio::time::timeout(
+            config.max_execution_time,
+            runtime.with_event_loop_promise(script_result_promise, Default::default()),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(err)) => return Err(handle_error(anyhow!(err))),
+            Err(_elapsed) => {
+                script_status.store(
+                    ScriptExecutionStatus::ReachedTimeLimit as usize,
+                    Ordering::Relaxed,
+                );
+                runtime.v8_isolate().cancel_terminate_execution();
+                return Err(
+                    anyhow!("Script execution timed out").context("Script exceeded time limit.")
+                );
+            }
+        };
 
         // Abort termination thread, if the script managed to complete.
         script_status.store(
@@ -639,6 +657,13 @@ pub mod tests {
           "Deno.core.BadResource()",
           "Deno.core.Interrupted()",
           "Deno.core.NotCapable()",
+          "Deno.core.__drainNextTickAndMacrotasks()",
+          "Deno.core.__handleRejections()",
+          "Deno.core.__reportException()",
+          "Deno.core.__resolveOps()",
+          "Deno.core.__setImmediateInfo()",
+          "Deno.core.__setTickInfo()",
+          "Deno.core.__setTimerDepth()",
           "Deno.core.abortWasmStreaming()",
           "Deno.core.addMainModuleHandler()",
           "Deno.core.build.arch=unknown",
@@ -650,7 +675,9 @@ pub mod tests {
           "Deno.core.byteLength()",
           "Deno.core.callConsole()",
           "Deno.core.cancelTimer()",
+          "Deno.core.clearImmediate()",
           "Deno.core.close()",
+          "Deno.core.compileFunction()",
           "Deno.core.console.assert()",
           "Deno.core.console.clear()",
           "Deno.core.console.context()",
@@ -685,7 +712,6 @@ pub mod tests {
           "Deno.core.encodeBinaryString()",
           "Deno.core.evalContext()",
           "Deno.core.eventLoopHasMoreWork()",
-          "Deno.core.eventLoopTick()",
           "Deno.core.getAllLeakTraces()",
           "Deno.core.getAsyncContext()",
           "Deno.core.getLeakTraceForPromise()",
@@ -696,6 +722,9 @@ pub mod tests {
           "Deno.core.hasPromise()",
           "Deno.core.hasTickScheduled()",
           "Deno.core.hostObjectBrand=symbol",
+          "Deno.core.immediateQueue.head=null",
+          "Deno.core.immediateQueue.tail=null",
+          "Deno.core.immediateRefCount()",
           "Deno.core.internalFdSymbol=symbol",
           "Deno.core.internalRidSymbol=symbol",
           "Deno.core.isAnyArrayBuffer()",
@@ -728,6 +757,7 @@ pub mod tests {
           "Deno.core.isTypedArray()",
           "Deno.core.isWeakMap()",
           "Deno.core.isWeakSet()",
+          "Deno.core.kRefed=symbol",
           "Deno.core.memoryUsage()",
           "Deno.core.opNames()",
           "Deno.core.ops.op_abort_wasm_streaming()",
@@ -736,11 +766,13 @@ pub mod tests {
           "Deno.core.ops.op_add_main_module_handler()",
           "Deno.core.ops.op_cancel_handle()",
           "Deno.core.ops.op_close()",
+          "Deno.core.ops.op_compile_function()",
           "Deno.core.ops.op_current_user_call_site()",
           "Deno.core.ops.op_decode()",
           "Deno.core.ops.op_deserialize()",
           "Deno.core.ops.op_destructure_error()",
           "Deno.core.ops.op_dispatch_exception()",
+          "Deno.core.ops.op_drain_pending_rejections()",
           "Deno.core.ops.op_encode()",
           "Deno.core.ops.op_encode_binary_string()",
           "Deno.core.ops.op_error_async()",
@@ -753,11 +785,6 @@ pub mod tests {
           "Deno.core.ops.op_get_non_index_property_names()",
           "Deno.core.ops.op_get_promise_details()",
           "Deno.core.ops.op_get_proxy_details()",
-          "Deno.core.ops.op_has_tick_scheduled()",
-          "Deno.core.ops.op_immediate_count()",
-          "Deno.core.ops.op_immediate_has_ref_count()",
-          "Deno.core.ops.op_immediate_ref_count()",
-          "Deno.core.ops.op_immediate_set_has_outstanding()",
           "Deno.core.ops.op_import_sync()",
           "Deno.core.ops.op_is_any_array_buffer()",
           "Deno.core.ops.op_is_arguments_object()",
@@ -807,7 +834,6 @@ pub mod tests {
           "Deno.core.ops.op_serialize()",
           "Deno.core.ops.op_set_format_exception_callback()",
           "Deno.core.ops.op_set_handled_promise_rejection_handler()",
-          "Deno.core.ops.op_set_has_tick_scheduled()",
           "Deno.core.ops.op_set_promise_hooks()",
           "Deno.core.ops.op_set_wasm_streaming_callback()",
           "Deno.core.ops.op_shutdown()",
@@ -831,6 +857,7 @@ pub mod tests {
           "Deno.core.ops.op_write_sync()",
           "Deno.core.ops.op_write_type_error()",
           "Deno.core.print()",
+          "Deno.core.processTicksAndRejections()",
           "Deno.core.promiseIdSymbol=symbol",
           "Deno.core.propGetterOnly()",
           "Deno.core.propNonEnumerable()",
@@ -838,6 +865,8 @@ pub mod tests {
           "Deno.core.propReadOnly()",
           "Deno.core.propWritable()",
           "Deno.core.propWritableLazyLoaded()",
+          "Deno.core.queueImmediate()",
+          "Deno.core.queueNextTick()",
           "Deno.core.queueSystemTimer()",
           "Deno.core.queueUserTimer()",
           "Deno.core.read()",
@@ -852,17 +881,17 @@ pub mod tests {
           "Deno.core.reportUnhandledPromiseRejection()",
           "Deno.core.resources()",
           "Deno.core.runImmediateCallbacks()",
+          "Deno.core.runImmediates()",
           "Deno.core.runMicrotasks()",
+          "Deno.core.runNextTicks()",
           "Deno.core.scopeAsyncContext()",
           "Deno.core.serialize()",
           "Deno.core.setAsyncContext()",
+          "Deno.core.setAsyncHooksEmit()",
           "Deno.core.setBuildInfo()",
           "Deno.core.setHandledPromiseRejectionHandler()",
           "Deno.core.setHasTickScheduled()",
-          "Deno.core.setImmediateCallback()",
           "Deno.core.setLeakTracingEnabled()",
-          "Deno.core.setMacrotaskCallback()",
-          "Deno.core.setNextTickCallback()",
           "Deno.core.setPromiseHooks()",
           "Deno.core.setReportExceptionCallback()",
           "Deno.core.setUnhandledPromiseRejectionHandler()",

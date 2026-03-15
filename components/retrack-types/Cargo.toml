@@ -11,14 +11,14 @@ mediatype = "0.21"
 serde = "1"
 serde_bytes = "0.11"
 serde_json = "1"
-serde_with = "3.16"
+serde_with = "3.18"
 time = "0.3"
 url = "2.5"
 utoipa = "5.4"
-uuid = "1.20"
+uuid = "1.22"
 
 [dev-dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 insta = "1.46.3"
 
 [features]
