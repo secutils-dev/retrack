@@ -3,6 +3,7 @@ mod tracker_action;
 mod tracker_config;
 mod tracker_create_params;
 mod tracker_data_revision;
+mod tracker_data_revision_import_params;
 mod tracker_data_value;
 mod tracker_debug_existing_params;
 mod tracker_debug_params;
@@ -12,9 +13,11 @@ mod tracker_execution_log_phase;
 mod tracker_execution_log_status;
 mod tracker_list_execution_logs_batch_params;
 mod tracker_list_execution_logs_params;
+mod tracker_list_revisions_batch_params;
 mod tracker_list_revisions_params;
 mod tracker_target;
 mod tracker_update_params;
+mod trackers_bulk_get_params;
 mod trackers_list_params;
 
 pub use self::{
@@ -26,6 +29,9 @@ pub use self::{
     tracker_config::TrackerConfig,
     tracker_create_params::TrackerCreateParams,
     tracker_data_revision::TrackerDataRevision,
+    tracker_data_revision_import_params::{
+        TrackerDataRevisionImportParams, TrackerDataRevisionImportResult,
+    },
     tracker_data_value::TrackerDataValue,
     tracker_debug_existing_params::TrackerDebugExistingParams,
     tracker_debug_params::{DebugOptions, TrackerDebugParams},
@@ -44,6 +50,9 @@ pub use self::{
     tracker_list_execution_logs_params::{
         DEFAULT_EXECUTION_LOGS_PAGE_SIZE, TrackerListExecutionLogsParams,
     },
+    tracker_list_revisions_batch_params::{
+        DEFAULT_REVISIONS_BATCH_SIZE, TrackerListRevisionsBatchParams,
+    },
     tracker_list_revisions_params::{
         DEFAULT_DIFF_CONTEXT_RADIUS, MAX_DIFF_CONTEXT_RADIUS, TrackerListRevisionsParams,
     },
@@ -53,6 +62,7 @@ pub use self::{
         TargetResponse, TrackerTarget,
     },
     tracker_update_params::TrackerUpdateParams,
+    trackers_bulk_get_params::TrackersBulkGetParams,
     trackers_list_params::TrackersListParams,
 };
 

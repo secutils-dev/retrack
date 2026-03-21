@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT d.id, d.tracker_id, d.data, d.created_at\nFROM unnest($1::uuid[]) AS t(tracker_id)\nCROSS JOIN LATERAL (\n    SELECT *\n    FROM trackers_data td\n    WHERE td.tracker_id = t.tracker_id\n    ORDER BY td.created_at DESC\n    LIMIT $2\n) d\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tracker_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "data",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4c3226ec70bc9cc628d2b998534472983c70272390770c90a7f7111cf28e0f7a"
+}

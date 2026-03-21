@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,\n       t.job_id, t.job_needed,\n       to_timestamp(sj.next_tick) as scheduled_at,\n       to_timestamp(sj.last_tick) as last_ran_at\nFROM trackers t\nLEFT JOIN scheduler_jobs sj ON t.job_id = sj.id\nWHERE t.id = ANY($1)\nORDER BY t.updated_at, t.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "config",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "tags",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "job_needed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "scheduled_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "last_ran_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "9be0c578af783aab4db98c3e5db613fe6974358713bf8fe4593db3d406fed464"
+}

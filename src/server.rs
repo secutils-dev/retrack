@@ -60,6 +60,7 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             ))
             .service(handlers::status_get::status_get)
             .service(handlers::trackers_list::trackers_list)
+            .service(handlers::trackers_bulk_get::trackers_bulk_get)
             .service(handlers::trackers_get::trackers_get)
             .service(handlers::trackers_create::trackers_create)
             .service(handlers::trackers_debug::trackers_debug)
@@ -67,11 +68,13 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             .service(handlers::trackers_update::trackers_update)
             .service(handlers::trackers_remove::trackers_remove)
             .service(handlers::trackers_bulk_remove::trackers_bulk_remove)
+            .service(handlers::trackers_list_revisions_batch::trackers_list_revisions_batch)
             .service(handlers::trackers_list_revisions::trackers_list_revisions)
             .service(handlers::trackers_create_revision::trackers_create_revision)
             .service(handlers::trackers_clear_revisions::trackers_clear_revisions)
             .service(handlers::trackers_get_revision::trackers_get_revision)
             .service(handlers::trackers_remove_revision::trackers_remove_revision)
+            .service(handlers::trackers_import_revisions::trackers_import_revisions)
             .service(handlers::trackers_clear_all_execution_logs::trackers_clear_all_execution_logs)
             .service(
                 handlers::trackers_list_execution_logs_batch::trackers_list_execution_logs_batch,

@@ -1,4 +1,5 @@
 pub mod status_get;
+pub mod trackers_bulk_get;
 pub mod trackers_bulk_remove;
 pub mod trackers_clear_all_execution_logs;
 pub mod trackers_clear_execution_logs;
@@ -9,10 +10,12 @@ pub mod trackers_debug;
 pub mod trackers_debug_existing;
 pub mod trackers_get;
 pub mod trackers_get_revision;
+pub mod trackers_import_revisions;
 pub mod trackers_list;
 pub mod trackers_list_execution_logs;
 pub mod trackers_list_execution_logs_batch;
 pub mod trackers_list_revisions;
+pub mod trackers_list_revisions_batch;
 pub mod trackers_remove;
 pub mod trackers_remove_revision;
 pub mod trackers_update;
@@ -25,10 +28,12 @@ use retrack_types::{
         ApiTrackerDebugResult, AutoParseDebugInfo, EmailAction, ExtractorEngine, PageLogEntry,
         PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
         ServerLogAction, TargetRequest, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
-        TrackerDataRevision, TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams,
-        TrackerDebugResult, TrackerDebugTargetResult, TrackerExecutionLog,
-        TrackerExecutionLogPhase, TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
-        TrackerTarget, TrackerUpdateParams, WebhookAction, WebhookDestinationDebugInfo,
+        TrackerDataRevision, TrackerDataRevisionImportParams, TrackerDataRevisionImportResult,
+        TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
+        TrackerDebugTargetResult, TrackerExecutionLog, TrackerExecutionLogPhase,
+        TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
+        TrackerListRevisionsBatchParams, TrackerTarget, TrackerUpdateParams, TrackersBulkGetParams,
+        WebhookAction, WebhookDestinationDebugInfo,
     },
 };
 use utoipa::OpenApi;
@@ -45,11 +50,13 @@ use utoipa::OpenApi;
     paths(
         status_get::status_get,
         trackers_list::trackers_list,
+        trackers_bulk_get::trackers_bulk_get,
         trackers_get::trackers_get,
         trackers_create::trackers_create,
         trackers_update::trackers_update,
         trackers_remove::trackers_remove,
         trackers_bulk_remove::trackers_bulk_remove,
+        trackers_list_revisions_batch::trackers_list_revisions_batch,
         trackers_list_revisions::trackers_list_revisions,
         trackers_create_revision::trackers_create_revision,
         trackers_clear_revisions::trackers_clear_revisions,
@@ -59,6 +66,7 @@ use utoipa::OpenApi;
         trackers_list_execution_logs_batch::trackers_list_execution_logs_batch,
         trackers_clear_execution_logs::trackers_clear_execution_logs,
         trackers_clear_all_execution_logs::trackers_clear_all_execution_logs,
+        trackers_import_revisions::trackers_import_revisions,
         trackers_debug::trackers_debug,
         trackers_debug_existing::trackers_debug_existing
     ),
@@ -86,6 +94,8 @@ use utoipa::OpenApi;
         TrackerConfig,
         TrackerCreateParams,
         TrackerDataRevision,
+        TrackerDataRevisionImportParams,
+        TrackerDataRevisionImportResult,
         TrackerDataValue,
         TrackerDebugExistingParams,
         TrackerDebugParams,
@@ -95,8 +105,10 @@ use utoipa::OpenApi;
         TrackerExecutionLogPhase,
         TrackerExecutionLogStatus,
         TrackerListExecutionLogsBatchParams,
+        TrackerListRevisionsBatchParams,
         TrackerTarget,
         TrackerUpdateParams,
+        TrackersBulkGetParams,
         WebhookAction,
         WebhookDestinationDebugInfo
     ))

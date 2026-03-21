@@ -32,17 +32,19 @@ use retrack_types::{
         ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTarget,
         ApiTrackerDebugResult, AutoParseDebugInfo, ConfiguratorScriptArgs,
         ConfiguratorScriptResult, DEFAULT_EXECUTION_LOGS_BATCH_SIZE,
-        DEFAULT_EXECUTION_LOGS_PAGE_SIZE, DebugOptions, EmailDestinationDebugInfo, ExtractorEngine,
-        ExtractorScriptArgs, ExtractorScriptResult, FormatterScriptArgs, FormatterScriptResult,
-        PageLogEntry, PageScreenshotEntry, PageTarget, PageTrackerDebugResult,
-        RenderedEmailDebugInfo, ScriptDebugInfo, ServerLogAction, TargetRequest, TargetResponse,
-        Tracker, TrackerAction, TrackerCreateParams, TrackerDataRevision, TrackerDataValue,
-        TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
+        DEFAULT_EXECUTION_LOGS_PAGE_SIZE, DEFAULT_REVISIONS_BATCH_SIZE, DebugOptions,
+        EmailDestinationDebugInfo, ExtractorEngine, ExtractorScriptArgs, ExtractorScriptResult,
+        FormatterScriptArgs, FormatterScriptResult, PageLogEntry, PageScreenshotEntry, PageTarget,
+        PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo, ServerLogAction,
+        TargetRequest, TargetResponse, Tracker, TrackerAction, TrackerCreateParams,
+        TrackerDataRevision, TrackerDataRevisionImportParams, TrackerDataRevisionImportResult,
+        TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
         TrackerDebugTargetResult, TrackerExecutionLog, TrackerExecutionLogPhase,
         TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
-        TrackerListExecutionLogsParams, TrackerListRevisionsParams, TrackerTarget,
-        TrackerUpdateParams, TrackersListParams, WebhookAction, WebhookActionPayload,
-        WebhookActionPayloadResult, WebhookDestinationDebugInfo,
+        TrackerListExecutionLogsParams, TrackerListRevisionsBatchParams,
+        TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
+        WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
+        WebhookDestinationDebugInfo,
     },
 };
 use serde_json::{Value as JsonValue, json};
@@ -148,6 +150,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
     /// Returns tracker by its ID.
     pub async fn get_tracker(&self, id: Uuid) -> anyhow::Result<Option<Tracker>> {
         self.trackers.get_tracker(id).await
+    }
+
+    /// Returns trackers with the specified IDs.
+    pub async fn bulk_get_trackers(&self, ids: &[Uuid]) -> anyhow::Result<Vec<Tracker>> {
+        self.trackers.bulk_get_trackers(ids).await
     }
 
     /// Creates a new web page content tracker.
@@ -547,6 +554,50 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         self.trackers.clear_tracker_data_revisions(tracker_id).await
     }
 
+    /// Imports multiple tracker data revisions in bulk. Skips revisions with
+    /// duplicate timestamps and enforces the max revisions limit afterward.
+    pub async fn import_tracker_data_revisions(
+        &self,
+        tracker_id: Uuid,
+        params: Vec<TrackerDataRevisionImportParams>,
+    ) -> anyhow::Result<TrackerDataRevisionImportResult> {
+        let Some(tracker) = self.get_tracker(tracker_id).await? else {
+            bail!(RetrackError::client(format!(
+                "Tracker ('{tracker_id}') is not found."
+            )));
+        };
+
+        let revisions = params
+            .into_iter()
+            .map(|p| TrackerDataRevision {
+                id: Uuid::now_v7(),
+                tracker_id,
+                data: p.data,
+                created_at: p.created_at,
+            })
+            .collect::<Vec<_>>();
+
+        let total = revisions.len();
+        let imported = self
+            .trackers
+            .import_tracker_data_revisions(&revisions)
+            .await?;
+
+        // Enforce revision limit after bulk insert.
+        let max_revisions = min(
+            tracker.config.revisions,
+            self.api.config.trackers.max_revisions,
+        );
+        self.trackers
+            .enforce_tracker_data_revisions_limit(tracker_id, max_revisions)
+            .await?;
+
+        Ok(TrackerDataRevisionImportResult {
+            imported,
+            skipped: total - imported,
+        })
+    }
+
     /// Returns execution logs for a tracker, ordered by start time descending.
     pub async fn get_tracker_execution_logs(
         &self,
@@ -582,6 +633,24 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         let mut map: HashMap<Uuid, Vec<TrackerExecutionLog>> = HashMap::new();
         for log in logs {
             map.entry(log.tracker_id).or_default().push(log);
+        }
+        Ok(map)
+    }
+
+    /// Returns data revisions for multiple trackers as a map keyed by tracker ID.
+    pub async fn get_tracker_data_revisions_batch(
+        &self,
+        params: TrackerListRevisionsBatchParams,
+    ) -> anyhow::Result<HashMap<Uuid, Vec<TrackerDataRevision>>> {
+        let size = params.size.unwrap_or(DEFAULT_REVISIONS_BATCH_SIZE);
+        let revisions = self
+            .trackers
+            .get_tracker_data_revisions_batch(&params.tracker_ids, size)
+            .await?;
+
+        let mut map: HashMap<Uuid, Vec<TrackerDataRevision>> = HashMap::new();
+        for revision in revisions {
+            map.entry(revision.tracker_id).or_default().push(revision);
         }
         Ok(map)
     }
@@ -2513,11 +2582,12 @@ mod tests {
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
             ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
-            Tracker, TrackerAction, TrackerConfig, TrackerCreateParams, TrackerDataValue,
-            TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugTargetResult,
-            TrackerExecutionLog, TrackerExecutionLogStatus, TrackerListExecutionLogsParams,
-            TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
-            WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
+            Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
+            TrackerDataRevisionImportParams, TrackerDataValue, TrackerDebugExistingParams,
+            TrackerDebugParams, TrackerDebugTargetResult, TrackerExecutionLog,
+            TrackerExecutionLogStatus, TrackerListExecutionLogsParams, TrackerListRevisionsParams,
+            TrackerTarget, TrackerUpdateParams, TrackersListParams, WebhookAction,
+            WebhookActionPayload, WebhookActionPayloadResult,
         },
     };
     use serde_json::json;
@@ -10218,6 +10288,205 @@ mod tests {
 
         // Newest first.
         assert!(logs[0].started_at >= logs[1].started_at);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_imports_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_config(TrackerConfig {
+                        revisions: 3,
+                        ..Default::default()
+                    })
+                    .build(),
+            )
+            .await?;
+
+        // Import into non-existent tracker fails.
+        let err = trackers
+            .import_tracker_data_revisions(
+                uuid!("00000000-0000-0000-0000-999999999999"),
+                vec![TrackerDataRevisionImportParams {
+                    data: TrackerDataValue::new(json!("data-1")),
+                    created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                }],
+            )
+            .await;
+        assert!(err.is_err());
+
+        // Import two revisions.
+        let result = trackers
+            .import_tracker_data_revisions(
+                tracker.id,
+                vec![
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-1")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-2")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720801)?,
+                    },
+                ],
+            )
+            .await?;
+        assert_eq!(result.imported, 2);
+        assert_eq!(result.skipped, 0);
+
+        let revisions = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(revisions.len(), 2);
+
+        // Import with duplicate timestamp - skipped.
+        let result = trackers
+            .import_tracker_data_revisions(
+                tracker.id,
+                vec![TrackerDataRevisionImportParams {
+                    data: TrackerDataValue::new(json!("data-dup")),
+                    created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                }],
+            )
+            .await?;
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.skipped, 1);
+
+        // Still 2 revisions.
+        let revisions = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(revisions.len(), 2);
+
+        // Import empty list.
+        let result = trackers
+            .import_tracker_data_revisions(tracker.id, vec![])
+            .await?;
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.skipped, 0);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_enforces_max_revisions_on_import(pool: PgPool) -> anyhow::Result<()> {
+        let mut config = mock_config()?;
+        config.trackers.max_revisions = 5;
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        // Create tracker with revisions limit of 2.
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_config(TrackerConfig {
+                        revisions: 2,
+                        ..Default::default()
+                    })
+                    .build(),
+            )
+            .await?;
+
+        // Import 5 revisions - should import all, then enforce limit to 2.
+        let result = trackers
+            .import_tracker_data_revisions(
+                tracker.id,
+                vec![
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-1")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-2")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720801)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-3")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720802)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-4")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720803)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("data-5")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720804)?,
+                    },
+                ],
+            )
+            .await?;
+        assert_eq!(result.imported, 5);
+        assert_eq!(result.skipped, 0);
+
+        // Only 2 most recent revisions should remain after enforce.
+        let revisions = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(revisions.len(), 2);
+        // Newest first.
+        assert_eq!(revisions[0].data, TrackerDataValue::new(json!("data-5")));
+        assert_eq!(revisions[1].data, TrackerDataValue::new(json!("data-4")));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_enforces_global_max_revisions_on_import(pool: PgPool) -> anyhow::Result<()> {
+        let mut config = mock_config()?;
+        // Global max is 2, tracker config also set to 2 (must be <= global).
+        config.trackers.max_revisions = 2;
+        let api = mock_api_with_config(pool, config).await?;
+        let trackers = api.trackers();
+
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_config(TrackerConfig {
+                        revisions: 2,
+                        ..Default::default()
+                    })
+                    .build(),
+            )
+            .await?;
+
+        // Import 4 revisions - all inserted, then trimmed to 2.
+        let result = trackers
+            .import_tracker_data_revisions(
+                tracker.id,
+                vec![
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("a")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720800)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("b")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720801)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("c")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720802)?,
+                    },
+                    TrackerDataRevisionImportParams {
+                        data: TrackerDataValue::new(json!("d")),
+                        created_at: OffsetDateTime::from_unix_timestamp(946720803)?,
+                    },
+                ],
+            )
+            .await?;
+        assert_eq!(result.imported, 4);
+
+        // Only 2 most recent revisions should remain.
+        let revisions = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(revisions.len(), 2);
+        assert_eq!(revisions[0].data, TrackerDataValue::new(json!("d")));
+        assert_eq!(revisions[1].data, TrackerDataValue::new(json!("c")));
 
         Ok(())
     }

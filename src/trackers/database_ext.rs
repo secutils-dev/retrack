@@ -10,7 +10,7 @@ use crate::{
         raw_tracker_execution_log::RawTrackerExecutionLog,
     },
 };
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use raw_tracker::RawTracker;
 use retrack_types::trackers::{Tracker, TrackerDataRevision, TrackerExecutionLog};
 use sqlx::{Pool, Postgres, error::ErrorKind as SqlxErrorKind, query, query_as};
@@ -63,6 +63,37 @@ ORDER BY t.updated_at, t.id
             .fetch_all(self.pool)
             .await?
         };
+
+        let mut trackers = vec![];
+        for raw_tracker in raw_trackers {
+            trackers.push(Tracker::try_from(raw_tracker)?);
+        }
+
+        Ok(trackers)
+    }
+
+    /// Retrieves trackers with the specified IDs.
+    pub async fn bulk_get_trackers(&self, ids: &[Uuid]) -> anyhow::Result<Vec<Tracker>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let raw_trackers = query_as!(
+            RawTracker,
+            r#"
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_id, t.job_needed,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
+FROM trackers t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+WHERE t.id = ANY($1)
+ORDER BY t.updated_at, t.id
+            "#,
+            ids
+        )
+        .fetch_all(self.pool)
+        .await?;
 
         let mut trackers = vec![];
         for raw_tracker in raw_trackers {
@@ -233,6 +264,44 @@ LIMIT $2
         Ok(revisions)
     }
 
+    /// Retrieves tracked data for multiple trackers in a single query, returning up to `size`
+    /// entries per tracker ordered by creation date descending.
+    pub async fn get_tracker_data_revisions_batch(
+        &self,
+        tracker_ids: &[Uuid],
+        size: usize,
+    ) -> anyhow::Result<Vec<TrackerDataRevision>> {
+        if tracker_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let raw_revisions = query_as!(
+            RawTrackerDataRevision,
+            r#"
+SELECT d.id, d.tracker_id, d.data, d.created_at
+FROM unnest($1::uuid[]) AS t(tracker_id)
+CROSS JOIN LATERAL (
+    SELECT *
+    FROM trackers_data td
+    WHERE td.tracker_id = t.tracker_id
+    ORDER BY td.created_at DESC
+    LIMIT $2
+) d
+            "#,
+            tracker_ids,
+            size as i64
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        let mut revisions = vec![];
+        for raw_revision in raw_revisions {
+            revisions.push(TrackerDataRevision::try_from(raw_revision)?);
+        }
+
+        Ok(revisions)
+    }
+
     /// Retrieves tracker data revision with the specified ID.
     pub async fn get_tracker_data_revision(
         &self,
@@ -296,6 +365,42 @@ LIMIT 1
         }
 
         Ok(())
+    }
+
+    /// Imports multiple tracker data revisions in bulk, skipping duplicates.
+    /// Returns the number of revisions actually inserted.
+    pub async fn import_tracker_data_revisions(
+        &self,
+        revisions: &[TrackerDataRevision],
+    ) -> anyhow::Result<usize> {
+        if revisions.is_empty() {
+            return Ok(0);
+        }
+
+        let mut imported = 0usize;
+        for revision in revisions {
+            let raw_revision = RawTrackerDataRevision::try_from(revision)?;
+            let result = query!(
+                r#"
+    INSERT INTO trackers_data (id, tracker_id, data, created_at)
+    VALUES ( $1, $2, $3, $4 )
+    ON CONFLICT (created_at, tracker_id) DO NOTHING
+                "#,
+                raw_revision.id,
+                raw_revision.tracker_id,
+                raw_revision.data,
+                raw_revision.created_at
+            )
+            .execute(self.pool)
+            .await
+            .with_context(|| format!("Couldn't import tracker revision ('{}').", revision.id))?;
+
+            if result.rows_affected() > 0 {
+                imported += 1;
+            }
+        }
+
+        Ok(imported)
     }
 
     /// Removes tracker data revision with the specified ID.
@@ -1583,6 +1688,73 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn can_import_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "some-name",
+            3,
+        )?
+        .build();
+
+        let trackers = db.trackers();
+        trackers.insert_tracker(&tracker).await?;
+
+        // Import empty list.
+        let imported = trackers.import_tracker_data_revisions(&[]).await?;
+        assert_eq!(imported, 0);
+
+        // Import two revisions.
+        let rev1 =
+            create_data_revision(uuid!("00000000-0000-0000-0000-000000000010"), tracker.id, 0)?;
+        let rev2 =
+            create_data_revision(uuid!("00000000-0000-0000-0000-000000000011"), tracker.id, 1)?;
+        let imported = trackers
+            .import_tracker_data_revisions(&[rev1.clone(), rev2.clone()])
+            .await?;
+        assert_eq!(imported, 2);
+
+        let stored = trackers.get_tracker_data_revisions(tracker.id, 100).await?;
+        assert_eq!(stored.len(), 2);
+        assert_eq!(stored[0].id, rev2.id);
+        assert_eq!(stored[1].id, rev1.id);
+
+        // Import with duplicate timestamp - should skip.
+        let rev_dup = TrackerDataRevision {
+            id: uuid!("00000000-0000-0000-0000-000000000012"),
+            tracker_id: tracker.id,
+            data: TrackerDataValue::new(json!("different-data")),
+            created_at: rev1.created_at,
+        };
+        let imported = trackers.import_tracker_data_revisions(&[rev_dup]).await?;
+        assert_eq!(imported, 0);
+
+        // Still only 2 revisions.
+        let stored = trackers.get_tracker_data_revisions(tracker.id, 100).await?;
+        assert_eq!(stored.len(), 2);
+
+        // Import mix of new and duplicate.
+        let rev3 =
+            create_data_revision(uuid!("00000000-0000-0000-0000-000000000013"), tracker.id, 2)?;
+        let rev_dup2 = TrackerDataRevision {
+            id: uuid!("00000000-0000-0000-0000-000000000014"),
+            tracker_id: tracker.id,
+            data: TrackerDataValue::new(json!("other-data")),
+            created_at: rev2.created_at,
+        };
+        let imported = trackers
+            .import_tracker_data_revisions(&[rev3, rev_dup2])
+            .await?;
+        assert_eq!(imported, 1);
+
+        let stored = trackers.get_tracker_data_revisions(tracker.id, 100).await?;
+        assert_eq!(stored.len(), 3);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn can_retrieve_all_unscheduled_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2208,6 +2380,62 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn bulk_get_trackers_returns_empty_for_empty_ids(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        assert!(db.trackers().bulk_get_trackers(&[]).await?.is_empty());
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn bulk_get_trackers_returns_only_requested(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker_one = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "tracker-one",
+            3,
+        )?
+        .build();
+        let tracker_two = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000002"),
+            "tracker-two",
+            3,
+        )?
+        .build();
+        let tracker_three = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000003"),
+            "tracker-three",
+            3,
+        )?
+        .build();
+        db.trackers().insert_tracker(&tracker_one).await?;
+        db.trackers().insert_tracker(&tracker_two).await?;
+        db.trackers().insert_tracker(&tracker_three).await?;
+
+        // Fetch only one and three - two is excluded.
+        let fetched = db
+            .trackers()
+            .bulk_get_trackers(&[tracker_one.id, tracker_three.id])
+            .await?;
+        assert_eq!(fetched.len(), 2);
+        assert!(fetched.iter().any(|t| t.id == tracker_one.id));
+        assert!(fetched.iter().any(|t| t.id == tracker_three.id));
+
+        // Unknown IDs are silently ignored.
+        let fetched = db
+            .trackers()
+            .bulk_get_trackers(&[
+                tracker_two.id,
+                uuid!("00000000-0000-0000-0000-000000000099"),
+            ])
+            .await?;
+        assert_eq!(fetched.len(), 1);
+        assert_eq!(fetched[0].id, tracker_two.id);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
     async fn get_trackers_returns_correct_schedule_timestamps_for_mixed_trackers(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -2264,6 +2492,106 @@ mod tests {
             .unwrap();
         assert_eq!(fetched_without_job.scheduled_at, None);
         assert_eq!(fetched_without_job.last_ran_at, None);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_get_tracker_data_revisions_batch_empty(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let revisions = db
+            .trackers()
+            .get_tracker_data_revisions_batch(&[], 10)
+            .await?;
+        assert!(revisions.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_get_tracker_data_revisions_batch_returns_grouped(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker_a = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "tracker-a",
+            3,
+        )?
+        .build();
+        let tracker_b = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000002"),
+            "tracker-b",
+            3,
+        )?
+        .build();
+
+        let trackers = db.trackers();
+        trackers.insert_tracker(&tracker_a).await?;
+        trackers.insert_tracker(&tracker_b).await?;
+
+        let rev_a1 = create_data_revision(
+            uuid!("00000000-0000-0000-0000-000000000010"),
+            tracker_a.id,
+            0,
+        )?;
+        let rev_a2 = create_data_revision(
+            uuid!("00000000-0000-0000-0000-000000000011"),
+            tracker_a.id,
+            1,
+        )?;
+        let rev_b1 = create_data_revision(
+            uuid!("00000000-0000-0000-0000-000000000020"),
+            tracker_b.id,
+            0,
+        )?;
+
+        trackers.insert_tracker_data_revision(&rev_a1).await?;
+        trackers.insert_tracker_data_revision(&rev_a2).await?;
+        trackers.insert_tracker_data_revision(&rev_b1).await?;
+
+        let revisions = trackers
+            .get_tracker_data_revisions_batch(&[tracker_a.id, tracker_b.id], 10)
+            .await?;
+        assert_eq!(revisions.len(), 3);
+        assert!(revisions.iter().any(|r| r.id == rev_a1.id));
+        assert!(revisions.iter().any(|r| r.id == rev_a2.id));
+        assert!(revisions.iter().any(|r| r.id == rev_b1.id));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_get_tracker_data_revisions_batch_respects_size(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+
+        let tracker = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000001"),
+            "tracker",
+            3,
+        )?
+        .build();
+
+        let trackers = db.trackers();
+        trackers.insert_tracker(&tracker).await?;
+
+        for i in 0..3i64 {
+            trackers
+                .insert_tracker_data_revision(&create_data_revision(
+                    uuid::Uuid::now_v7(),
+                    tracker.id,
+                    i,
+                )?)
+                .await?;
+        }
+
+        let revisions = trackers
+            .get_tracker_data_revisions_batch(&[tracker.id], 2)
+            .await?;
+        assert_eq!(revisions.len(), 2);
 
         Ok(())
     }
