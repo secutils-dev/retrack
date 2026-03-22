@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:22-alpine3.23 AS builder
+FROM --platform=$BUILDPLATFORM node:22-slim AS builder
 WORKDIR /app
 
 # Copy workspace root `package.json` and `package-lock.json` files,
@@ -12,16 +12,24 @@ COPY ["./components/retrack-web-scraper", "./components/retrack-web-scraper"]
 RUN set -x && npm test --ws
 RUN set -x && npm run build --ws
 
-FROM node:22-alpine3.23
+FROM node:22-slim
 ENV NODE_ENV=production \
-    RETRACK_WEB_SCRAPER_BROWSER_CHROMIUM_EXECUTABLE_PATH="/usr/bin/chromium-browser" \
-    DISPLAY=:99
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    RETRACK_WEB_SCRAPER_BROWSER_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium
 WORKDIR /app
 EXPOSE 7272
 
-RUN set -x && apk update --no-cache && \
-    apk upgrade --no-cache && \
-    apk add --no-cache dumb-init ttf-freefont font-noto-emoji font-wqy-zenhei xvfb-run chromium-swiftshader chromium
+# Install system dependencies: dumb-init, fonts, and the minimal set of shared
+# libraries that Chromium actually links against (instead of `playwright install
+# --with-deps` which pulls in ~350 MB of Mesa/LLVM/X11 packages).
+RUN set -x && apt-get update && \
+    apt-get install -y --no-install-recommends \
+        dumb-init fonts-freefont-ttf fonts-noto-color-emoji fonts-wqy-zenhei fontconfig \
+        libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 libdbus-1-3 \
+        libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 \
+        libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 \
+        libxrandr2 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY ./dev/docker/chromium_local.conf /etc/fonts/local.conf
 RUN set -x && fc-cache -fv
@@ -29,13 +37,24 @@ RUN set -x && fc-cache -fv
 COPY --from=builder ["/app/components/retrack-web-scraper/dist/", "./"]
 COPY --from=builder ["/app/components/retrack-web-scraper/package.json", "/app/package-lock.json", "./"]
 
-# Install production dependencies and clean up.
-RUN set -x && npm ci --production && npm cache clean --force && \
+# Install production dependencies, then use Playwright to install only the
+# Chromium binary (no --with-deps). Create a stable symlink so the app can
+# find the binary regardless of the Playwright revision number.
+# Post-install cleanup: remove headless-shell, ffmpeg, all but en-US locale.
+RUN set -x && npm ci --production && \
+    npx playwright install chromium && \
+    rm -rf /ms-playwright/chromium_headless_shell-* && \
+    rm -rf /ms-playwright/ffmpeg-* && \
+    find /ms-playwright -path '*/locales/*' ! -name 'en-US.pak' -delete && \
+    CHROMIUM_BIN=$(find /ms-playwright -name chrome -type f -path '*/chrome-linux/chrome' | head -1) && \
+    echo "Playwright installed Chromium at: $CHROMIUM_BIN" && \
+    ln -sf "$CHROMIUM_BIN" /usr/local/bin/chromium && \
+    npm cache clean --force && \
     rm -rf /usr/local/lib/node_modules && \
-    rm -rf /opt/yarn-* \
-    rm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn
+    rm -rf /opt/yarn-* && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn
 USER node
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["xvfb-run", "--auto-servernum", "--server-args", "-screen 0 1280x720x24", "node", "src/index.js"]
+CMD ["node", "src/index.js"]
 
