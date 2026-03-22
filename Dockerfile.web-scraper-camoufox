@@ -8,15 +8,24 @@ ENV CAMOUFOX_HEADLESS=true
 
 WORKDIR /app
 
-# Install dependencies required by the firefox and clean up cache.
+# Layer 1: OS deps
 RUN set -x \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        libgtk-3-0 libx11-xcb1 libasound2 dumb-init xvfb \
-    && apt-get install -y --no-install-recommends git curl \
-    && pip install --no-cache-dir git+https://github.com/azasypkin/camoufox.git@main#subdirectory=pythonlib \
-    && python -m camoufox fetch \
-    && apt-get purge -y --auto-remove git curl \
+        libgtk-3-0 libx11-xcb1 libasound2 dumb-init \
+        git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Layer 2: Camoufox install + patch + fetch
+RUN set -x \
+    && pip install cloverlabs-camoufox==0.5.5 \
+    && pip install "git+https://github.com/microsoft/playwright-python.git@release-1.58" \
+    && sed -i 's/fontconfigs/fontconfig/g' /usr/local/lib/python3.14/site-packages/camoufox/utils.py \
+    && python -m camoufox sync \
+    && echo y | python -m camoufox fetch official/146.0.1-alpha.25
+
+# Layer 3: Remove build-only packages
+RUN apt-get purge -y --auto-remove git curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the custom runner that allows specifying different options.

@@ -12,6 +12,7 @@ dist
 .husky
 Dockerfile
 Dockerfile.web-scraper
+Dockerfile.web-scraper-camoufox
 *.md
 *.dockerignore
 LICENSE
