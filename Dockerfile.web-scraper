@@ -46,7 +46,7 @@ RUN set -x && npm ci --production && \
     rm -rf /ms-playwright/chromium_headless_shell-* && \
     rm -rf /ms-playwright/ffmpeg-* && \
     find /ms-playwright -path '*/locales/*' ! -name 'en-US.pak' -delete && \
-    CHROMIUM_BIN=$(find /ms-playwright -name chrome -type f -path '*/chrome-linux/chrome' | head -1) && \
+    CHROMIUM_BIN=$(find /ms-playwright -name chrome -type f -path '*/chrome-linux*/chrome' | head -1) && \
     echo "Playwright installed Chromium at: $CHROMIUM_BIN" && \
     ln -sf "$CHROMIUM_BIN" /usr/local/bin/chromium && \
     npm cache clean --force && \
