@@ -87,10 +87,10 @@ mod tests {
         templates::create_templates,
     };
     use bytes::Bytes;
+    use hickory_resolver::proto::rr::Record;
     use lettre::transport::smtp::authentication::Credentials;
     use std::{fs, ops::Add, path::PathBuf, time::Duration};
     use time::OffsetDateTime;
-    use trust_dns_resolver::proto::rr::Record;
     use url::Url;
 
     pub use crate::{config::tests::*, network::tests::*, scheduler::tests::*, trackers::tests::*};

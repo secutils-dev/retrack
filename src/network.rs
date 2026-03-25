@@ -85,12 +85,11 @@ impl<DR: DnsResolver> Network<DR> {
 #[cfg(test)]
 pub mod tests {
     use super::Network;
-    use std::net::Ipv4Addr;
-    use trust_dns_resolver::{
-        Name,
-        error::{ResolveError, ResolveErrorKind},
+    use hickory_resolver::{
+        Name, ResolveError,
         proto::rr::{RData, Record, rdata::A},
     };
+    use std::net::Ipv4Addr;
     use url::Url;
 
     pub use super::{dns_resolver::tests::*, smtp::tests::*};
@@ -133,9 +132,7 @@ pub mod tests {
 
         // Hosts that fail to resolve aren't supported and gracefully handled.
         let broken_network = Network {
-            resolver: MockResolver::new_with_error(ResolveError::from(ResolveErrorKind::Message(
-                "can not lookup IPs",
-            ))),
+            resolver: MockResolver::new_with_error(ResolveError::from("can not lookup IPs")),
             smtp: None,
         };
         assert!(!broken_network.is_public_web_url(&url).await);

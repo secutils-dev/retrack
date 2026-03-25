@@ -527,7 +527,7 @@ pub mod tests {
         // Supports _empty_ configurator scripts.
         let configurator_result = js_runtime
             .execute_script::<ConfiguratorScriptArgs, ConfiguratorScriptResult>(
-                r#"(() => new Promise((resolve) => Deno.core.queueUserTimer(Deno.core.getTimerDepth() + 1, false, 1000, resolve)))();"#,
+                r#"(() => new Promise((resolve) => Deno.core.createTimer(resolve, 1000, undefined, false, true, false)))();"#,
                 ConfiguratorScriptArgs::default(),
                 config,
             )
@@ -659,11 +659,12 @@ pub mod tests {
           "Deno.core.NotCapable()",
           "Deno.core.__drainNextTickAndMacrotasks()",
           "Deno.core.__handleRejections()",
+          "Deno.core.__processTimers()",
           "Deno.core.__reportException()",
           "Deno.core.__resolveOps()",
           "Deno.core.__setImmediateInfo()",
           "Deno.core.__setTickInfo()",
-          "Deno.core.__setTimerDepth()",
+          "Deno.core.__setTimerInfo()",
           "Deno.core.abortWasmStreaming()",
           "Deno.core.addMainModuleHandler()",
           "Deno.core.build.arch=unknown",
@@ -704,6 +705,7 @@ pub mod tests {
           "Deno.core.consoleStringify()",
           "Deno.core.createCancelHandle()",
           "Deno.core.createLazyLoader()",
+          "Deno.core.createTimer()",
           "Deno.core.currentUserCallSite()",
           "Deno.core.decode()",
           "Deno.core.deserialize()",
@@ -714,10 +716,10 @@ pub mod tests {
           "Deno.core.eventLoopHasMoreWork()",
           "Deno.core.getAllLeakTraces()",
           "Deno.core.getAsyncContext()",
+          "Deno.core.getCloneableDeserializers()",
           "Deno.core.getLeakTraceForPromise()",
           "Deno.core.getPromiseDetails()",
           "Deno.core.getProxyDetails()",
-          "Deno.core.getTimerDepth()",
           "Deno.core.getTransferableResource()",
           "Deno.core.hasPromise()",
           "Deno.core.hasTickScheduled()",
@@ -785,6 +787,7 @@ pub mod tests {
           "Deno.core.ops.op_get_non_index_property_names()",
           "Deno.core.ops.op_get_promise_details()",
           "Deno.core.ops.op_get_proxy_details()",
+          "Deno.core.ops.op_immediate_check()",
           "Deno.core.ops.op_import_sync()",
           "Deno.core.ops.op_is_any_array_buffer()",
           "Deno.core.ops.op_is_arguments_object()",
@@ -839,11 +842,10 @@ pub mod tests {
           "Deno.core.ops.op_shutdown()",
           "Deno.core.ops.op_str_byte_length()",
           "Deno.core.ops.op_structured_clone()",
-          "Deno.core.ops.op_timer_cancel()",
-          "Deno.core.ops.op_timer_queue()",
-          "Deno.core.ops.op_timer_queue_system()",
-          "Deno.core.ops.op_timer_ref()",
-          "Deno.core.ops.op_timer_unref()",
+          "Deno.core.ops.op_timer_now()",
+          "Deno.core.ops.op_timer_schedule()",
+          "Deno.core.ops.op_timer_track()",
+          "Deno.core.ops.op_timer_untrack()",
           "Deno.core.ops.op_try_close()",
           "Deno.core.ops.op_unref_op()",
           "Deno.core.ops.op_void_async()",
@@ -867,13 +869,13 @@ pub mod tests {
           "Deno.core.propWritableLazyLoaded()",
           "Deno.core.queueImmediate()",
           "Deno.core.queueNextTick()",
-          "Deno.core.queueSystemTimer()",
-          "Deno.core.queueUserTimer()",
           "Deno.core.read()",
           "Deno.core.readAll()",
           "Deno.core.readSync()",
           "Deno.core.refOpPromise()",
           "Deno.core.refTimer()",
+          "Deno.core.refreshTimer()",
+          "Deno.core.registerCloneableResource()",
           "Deno.core.registerErrorBuilder()",
           "Deno.core.registerErrorClass()",
           "Deno.core.registerTransferableResource()",
@@ -1009,11 +1011,13 @@ pub mod tests {
                 r#"
         (async () => {{
             return new Promise((resolve) => {
-                Deno.core.queueUserTimer(
-                    Deno.core.getTimerDepth() + 1,
-                    false,
+                Deno.core.createTimer(
+                    () => resolve(Deno.core.encode("Done")),
                     10 * 1000,
-                    () => resolve(Deno.core.encode("Done"))
+                    undefined,
+                    false,
+                    true,
+                    false
                 );
             });
         }})();
