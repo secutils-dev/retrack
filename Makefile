@@ -2,7 +2,7 @@ COMPOSE_DB   := dev/docker/docker-compose.yml
 ENV_FILE     := .env
 CHROME_PATH  ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 
-.PHONY: dev-up dev-down api scraper-setup scraper scraper-debug db-reset db-migrate test test-api test-scraper fmt clippy check docker-api docker-scraper docker-scraper-camoufox clean help
+.PHONY: dev-up dev-down api scraper-setup scraper scraper-debug db-reset db-migrate test test-api test-scraper fmt clippy check docker-api docker-scraper docker-scraper-camoufox docker-pin-digests clean help
 
 ## ---------- Development ----------
 
@@ -78,6 +78,9 @@ docker-scraper: ## Build the Web Scraper (Chromium) Docker image.
 
 docker-scraper-camoufox: ## Build the Web Scraper (Camoufox/Firefox) Docker image.
 	docker build --tag retrack-web-scraper-camoufox:latest -f Dockerfile.web-scraper-camoufox .
+
+docker-pin-digests: ## Re-pin base images in Dockerfiles to current SHA256 digests.
+	./dev/scripts/docker-pin-digests.sh
 
 ## ---------- Misc ----------
 
