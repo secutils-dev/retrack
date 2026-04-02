@@ -1,9 +1,11 @@
+mod database_status;
 mod scheduler_status;
 mod status;
 mod status_get_params;
 
 pub use self::{
-    scheduler_status::SchedulerStatus, status::Status, status_get_params::GetStatusParams,
+    database_status::DatabaseStatus, scheduler_status::SchedulerStatus, status::Status,
+    status_get_params::GetStatusParams,
 };
 use crate::{
     api::Api,
@@ -34,6 +36,9 @@ impl<DR: DnsResolver> ServerState<DR> {
         Ok(Status {
             version: self.version.as_str(),
             scheduler: self.scheduler.write().await.status().await?,
+            db: DatabaseStatus {
+                operational: self.api.db.is_alive().await,
+            },
         })
     }
 }

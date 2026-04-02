@@ -1,4 +1,4 @@
-use crate::server::SchedulerStatus;
+use crate::server::{SchedulerStatus, server_state::DatabaseStatus};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -9,18 +9,20 @@ pub struct Status<'s> {
     pub version: &'s str,
     /// Status of the scheduler.
     pub scheduler: SchedulerStatus,
+    /// Status of the database connection.
+    pub db: DatabaseStatus,
 }
 
 impl Status<'_> {
     /// Checks if the API server and all its components are operational.
     pub fn is_operational(&self) -> bool {
-        self.scheduler.operational
+        self.scheduler.operational && self.db.operational
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::server::{SchedulerStatus, Status};
+    use crate::server::{SchedulerStatus, Status, server_state::DatabaseStatus};
     use insta::assert_json_snapshot;
     use std::time::Duration;
 
@@ -32,13 +34,17 @@ mod tests {
         };
         assert_json_snapshot!(Status {
             version: "1.0.0-alpha.4",
-            scheduler
+            scheduler,
+            db: DatabaseStatus { operational: true },
         }, @r###"
         {
           "version": "1.0.0-alpha.4",
           "scheduler": {
             "operational": true,
             "timeTillNextJob": 10000
+          },
+          "db": {
+            "operational": true
           }
         }
         "###);
@@ -54,6 +60,7 @@ mod tests {
                 operational: true,
                 time_till_next_job: Some(Duration::from_secs(10)),
             },
+            db: DatabaseStatus { operational: true },
         };
         assert!(status.is_operational());
 
@@ -63,6 +70,17 @@ mod tests {
                 operational: false,
                 time_till_next_job: None,
             },
+            db: DatabaseStatus { operational: true },
+        };
+        assert!(!status.is_operational());
+
+        let status = Status {
+            version: "1.0.0-alpha.4",
+            scheduler: SchedulerStatus {
+                operational: true,
+                time_till_next_job: Some(Duration::from_secs(10)),
+            },
+            db: DatabaseStatus { operational: false },
         };
         assert!(!status.is_operational());
     }

@@ -24,6 +24,7 @@ pub async fn status_get(
     if !status.is_operational() {
         error!(
             status.scheduler.operational = status.scheduler.operational,
+            status.db.operational = status.db.operational,
             "Server is not fully operational."
         );
 
@@ -65,7 +66,7 @@ mod tests {
         assert_eq!(response.status(), 200);
 
         let body = response.into_body().try_into_bytes().unwrap();
-        assert_snapshot!(from_utf8(&body)?, @r###"{"version":"0.0.1","scheduler":{"operational":true}}"###);
+        assert_snapshot!(from_utf8(&body)?, @r###"{"version":"0.0.1","scheduler":{"operational":true},"db":{"operational":true}}"###);
 
         Ok(())
     }

@@ -20,7 +20,7 @@ pub mod trackers_remove;
 pub mod trackers_remove_revision;
 pub mod trackers_update;
 
-use crate::server::Status;
+use crate::server::{DatabaseStatus, Status};
 use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
@@ -72,6 +72,7 @@ use utoipa::OpenApi;
     ),
     components(schemas(
         ActionDebugInfo,
+        DatabaseStatus,
         ActionDestinationDebugInfo,
         ApiRequestDebugInfo,
         ApiTarget,

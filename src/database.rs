@@ -20,6 +20,11 @@ impl Database {
         Ok(Database { pool })
     }
 
+    /// Returns `true` if the database is reachable.
+    pub async fn is_alive(&self) -> bool {
+        sqlx::query("SELECT 1").execute(&self.pool).await.is_ok()
+    }
+
     /// Returns current UTC time, truncated to microseconds to match the database precision.
     pub fn utc_now() -> anyhow::Result<OffsetDateTime> {
         let now = OffsetDateTime::now_utc();

@@ -81,6 +81,10 @@ mod tests {
         port = 5432
         username = 'postgres'
         max_connections = 100
+        min_connections = 5
+        acquire_timeout = 10
+        max_lifetime = 1800
+        idle_timeout = 600
 
         [cache]
 
@@ -212,6 +216,10 @@ mod tests {
                     "password",
                 ),
                 max_connections: 1000,
+                min_connections: 5,
+                acquire_timeout: 10s,
+                max_lifetime: 1800s,
+                idle_timeout: 600s,
             },
             cache: CacheConfig {
                 http_cache_path: Some(

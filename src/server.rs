@@ -9,8 +9,8 @@ use actix_cors::Cors;
 use actix_web::{App, HttpServer, Result, middleware, web};
 use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
-use tracing::info;
+use std::{sync::Arc, time::Duration};
+use tracing::{info, warn};
 use tracing_actix_web::TracingLogger;
 use utoipa::OpenApi;
 use utoipa_rapidoc::RapiDoc;
@@ -20,16 +20,43 @@ use crate::{
     js_runtime::JsRuntime,
     server::handlers::RetrackOpenApi,
 };
-pub use server_state::{GetStatusParams, SchedulerStatus, ServerState, Status};
+pub use server_state::{DatabaseStatus, GetStatusParams, SchedulerStatus, ServerState, Status};
 
 pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
-    let database = Database::create(
-        PgPoolOptions::new()
-            .max_connections(raw_config.db.max_connections)
-            .connect(&Database::connection_url(&raw_config.db))
-            .await?,
-    )
-    .await?;
+    let db_url = Database::connection_url(&raw_config.db);
+    let pool_options = PgPoolOptions::new()
+        .max_connections(raw_config.db.max_connections)
+        .min_connections(raw_config.db.min_connections)
+        .acquire_timeout(raw_config.db.acquire_timeout)
+        .max_lifetime(raw_config.db.max_lifetime)
+        .idle_timeout(raw_config.db.idle_timeout)
+        .test_before_acquire(true);
+
+    let pool = {
+        const MAX_RETRIES: u32 = 5;
+        let mut attempt = 0;
+        loop {
+            match pool_options.clone().connect(&db_url).await {
+                Ok(pool) => break pool,
+                Err(err) => {
+                    attempt += 1;
+                    if attempt >= MAX_RETRIES {
+                        return Err(err).context(format!(
+                            "Failed to connect to database after {MAX_RETRIES} attempts"
+                        ));
+                    }
+
+                    let delay = Duration::from_secs(1 << attempt.min(4));
+                    warn!(
+                        attempt,
+                        max_retries = MAX_RETRIES,
+                        "Failed to connect to database: {err}. Retrying in {delay:?}…"
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    };
 
     let http_port = raw_config.port;
     let js_runtime = JsRuntime::init_platform(&raw_config.js_runtime)?;
@@ -38,7 +65,7 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
 
     let api = Arc::new(Api::new(
         config,
-        database,
+        Database::create(pool).await?,
         network,
         create_templates()?,
         js_runtime,
