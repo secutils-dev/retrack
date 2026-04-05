@@ -19,6 +19,10 @@ use std::env;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     dotenvy::dotenv().ok();

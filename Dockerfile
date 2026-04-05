@@ -2,10 +2,10 @@ FROM rust:1.93-slim-trixie@sha256:c0a38f5662afdb298898da1d70b909af4bda4e0acff2dc
 WORKDIR /app
 
 ARG TARGETARCH
-ARG UPX_VERSION=5.1.0
+ARG UPX_VERSION=5.1.1
 
 # Install dependencies.
-RUN set -x && apt-get update && apt-get install -y protobuf-compiler curl xz-utils
+RUN set -x && apt-get update && apt-get install -y make protobuf-compiler curl xz-utils
 
 # Download and install UPX.
 RUN curl -LO https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz && \

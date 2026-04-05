@@ -67,6 +67,9 @@ utoipa = "5.4.0"
 utoipa-rapidoc = "6.0.0"
 uuid = "1.22.0"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = "0.6.1"
+
 [dev-dependencies]
 httpmock = "0.8.3"
 insta = "1.46.3"
