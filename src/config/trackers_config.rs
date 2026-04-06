@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DurationMilliSeconds, serde_as};
 use std::{collections::HashSet, time::Duration};
 
+fn default_max_import_body_size() -> Byte {
+    Byte::from_u64(20 * 1024 * 1024)
+}
+
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct TrackersConfig {
@@ -31,6 +35,9 @@ pub struct TrackersConfig {
     /// automatically. Default is 90 days.
     #[serde_as(as = "DurationMilliSeconds<u64>")]
     pub execution_log_retention: Duration,
+    /// Maximum allowed JSON body size for the bulk revision import endpoint.
+    #[serde(default = "default_max_import_body_size")]
+    pub max_import_body_size: Byte,
 }
 
 impl Default for TrackersConfig {
@@ -52,6 +59,7 @@ impl Default for TrackersConfig {
             default_actions: None,
             // Default to 90 days.
             execution_log_retention: Duration::from_secs(90 * 24 * 3600),
+            max_import_body_size: Byte::from_u64(20 * 1024 * 1024),
         }
     }
 }
@@ -75,6 +83,7 @@ mod tests {
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
         execution_log_retention = 7776000000
+        max_import_body_size = '20 MiB'
         "###);
 
         let config = TrackersConfig {
@@ -96,6 +105,7 @@ mod tests {
                 }),
             ]),
             execution_log_retention: Duration::from_secs(90 * 24 * 3600),
+            max_import_body_size: Byte::from_u64(10 * 1024 * 1024),
         };
         assert_toml_snapshot!(config, @r###"
         max_revisions = 10
@@ -106,6 +116,7 @@ mod tests {
         restrict_to_public_urls = false
         max_script_size = '8 KiB'
         execution_log_retention = 7776000000
+        max_import_body_size = '10 MiB'
 
         [[default_actions]]
         type = 'log'
@@ -172,6 +183,7 @@ mod tests {
                     }),
                 ]),
                 execution_log_retention: Duration::from_secs(7 * 24 * 3600),
+                max_import_body_size: Byte::from_u64(20 * 1024 * 1024),
             }
         );
     }

@@ -116,6 +116,7 @@ mod tests {
         restrict_to_public_urls = true
         max_script_size = '4 KiB'
         execution_log_retention = 7776000000
+        max_import_body_size = '20 MiB'
 
         [js_runtime]
         max_heap_size = 10485760
@@ -292,6 +293,9 @@ mod tests {
                     ],
                 ),
                 execution_log_retention: 7776000s,
+                max_import_body_size: Byte(
+                    20971520,
+                ),
             },
             smtp: None,
             js_runtime: JsRuntimeConfig {

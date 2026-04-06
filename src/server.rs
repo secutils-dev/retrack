@@ -75,8 +75,9 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
 
     let scheduler = Scheduler::start(api.clone()).await?;
     let state = web::Data::new(ServerState::new(api, scheduler));
-    let http_server = HttpServer::new(move || {
-        App::new()
+    let http_server =
+        HttpServer::new(move || {
+            App::new()
             .wrap(middleware::Compat::new(TracingLogger::default()))
             .wrap(middleware::Compat::new(middleware::Compress::default()))
             .wrap(middleware::NormalizePath::trim())
@@ -101,7 +102,7 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             .service(handlers::trackers_clear_revisions::trackers_clear_revisions)
             .service(handlers::trackers_get_revision::trackers_get_revision)
             .service(handlers::trackers_remove_revision::trackers_remove_revision)
-            .service(handlers::trackers_import_revisions::trackers_import_revisions)
+            .service(handlers::trackers_import_revisions::service(&state.api.config.trackers))
             .service(handlers::trackers_clear_all_execution_logs::trackers_clear_all_execution_logs)
             .service(
                 handlers::trackers_list_execution_logs_batch::trackers_list_execution_logs_batch,
@@ -109,7 +110,7 @@ pub async fn run(raw_config: RawConfig) -> Result<(), anyhow::Error> {
             .service(handlers::trackers_list_execution_logs::trackers_list_execution_logs)
             .service(handlers::trackers_clear_execution_logs::trackers_clear_execution_logs)
             .wrap(Cors::permissive())
-    });
+        });
 
     let http_server_url = format!("0.0.0.0:{http_port}");
     let http_server = http_server

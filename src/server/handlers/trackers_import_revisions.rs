@@ -1,8 +1,17 @@
-use crate::{error::Error as RetrackError, server::ServerState};
+use crate::{config::TrackersConfig, error::Error as RetrackError, server::ServerState};
 use actix_web::{HttpResponse, post, web};
 use retrack_types::trackers::{TrackerDataRevisionImportParams, TrackerDataRevisionImportResult};
 use tracing::error;
 use uuid::Uuid;
+
+pub fn service(trackers_config: &TrackersConfig) -> actix_web::Scope {
+    web::scope("")
+        .app_data(
+            web::JsonConfig::default()
+                .limit(trackers_config.max_import_body_size.as_u64() as usize),
+        )
+        .service(trackers_import_revisions)
+}
 
 /// Imports multiple data revisions for a tracker in bulk.
 #[utoipa::path(
