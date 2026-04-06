@@ -30,6 +30,7 @@ csv = "1.4.0"
 deno_core = "0.394.0"
 dotenvy = "0.15.7"
 figment = "0.10.19"
+flate2 = "1.1.9"
 futures = "0.3.32"
 handlebars = "6.4.0"
 http = "1.4.0"
@@ -96,6 +97,7 @@ default = [
     "lettre/tokio1-rustls",
     "mediatype/serde",
     "postcard/use-std",
+    "reqwest/gzip",
     "reqwest/http2",
     "reqwest/json",
     "reqwest-middleware/json",
