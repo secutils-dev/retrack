@@ -1,20 +1,22 @@
 use crate::{config::TrackersConfig, error::Error as RetrackError, server::ServerState};
-use actix_web::{HttpResponse, post, web};
+use actix_web::{HttpResponse, web};
 use retrack_types::trackers::{TrackerDataRevisionImportParams, TrackerDataRevisionImportResult};
 use tracing::error;
 use uuid::Uuid;
 
-pub fn service(trackers_config: &TrackersConfig) -> actix_web::Scope {
-    web::scope("")
+pub fn service(trackers_config: &TrackersConfig) -> actix_web::Resource {
+    web::resource("/api/trackers/{tracker_id}/revisions/_import")
         .app_data(
             web::JsonConfig::default()
                 .limit(trackers_config.max_import_body_size.as_u64() as usize),
         )
-        .service(trackers_import_revisions)
+        .route(web::post().to(trackers_import_revisions))
 }
 
 /// Imports multiple data revisions for a tracker in bulk.
 #[utoipa::path(
+    method(post),
+    path = "/api/trackers/{tracker_id}/revisions/_import",
     tags = ["trackers"],
     params(
         ("tracker_id" = Uuid, Path, description = "A unique tracker ID.")
@@ -24,7 +26,6 @@ pub fn service(trackers_config: &TrackersConfig) -> actix_web::Scope {
         (status = OK, description = "Import result with counts.", body = TrackerDataRevisionImportResult),
     )
 )]
-#[post("/api/trackers/{tracker_id}/revisions/_import")]
 pub async fn trackers_import_revisions(
     state: web::Data<ServerState>,
     tracker_id: web::Path<Uuid>,
@@ -47,10 +48,9 @@ pub async fn trackers_import_revisions(
 mod tests {
     use crate::{
         server::{
-            handlers::trackers_import_revisions::trackers_import_revisions,
-            server_state::tests::mock_server_state,
+            handlers::trackers_import_revisions::service, server_state::tests::mock_server_state,
         },
-        tests::TrackerCreateParamsBuilder,
+        tests::{TrackerCreateParamsBuilder, mock_config},
     };
     use actix_web::{
         App,
@@ -73,7 +73,7 @@ mod tests {
         let app = init_service(
             App::new()
                 .app_data(server_state.clone())
-                .service(trackers_import_revisions),
+                .service(service(&mock_config()?.trackers)),
         )
         .await;
 
@@ -130,7 +130,7 @@ mod tests {
         let app = init_service(
             App::new()
                 .app_data(server_state.clone())
-                .service(trackers_import_revisions),
+                .service(service(&mock_config()?.trackers)),
         )
         .await;
 
@@ -179,7 +179,7 @@ mod tests {
         let app = init_service(
             App::new()
                 .app_data(server_state.clone())
-                .service(trackers_import_revisions),
+                .service(service(&mock_config()?.trackers)),
         )
         .await;
 
@@ -210,7 +210,7 @@ mod tests {
         let app = init_service(
             App::new()
                 .app_data(server_state.clone())
-                .service(trackers_import_revisions),
+                .service(service(&mock_config()?.trackers)),
         )
         .await;
 
