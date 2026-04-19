@@ -42,7 +42,7 @@ impl Recorder {
         // Tracks 1 µs … 60 s at 3 significant digits (~0.1% resolution).
         let histogram = Histogram::<u64>::new_with_bounds(1, 60_000_000, 3)
             .context("failed to build hdrhistogram")?;
-        let rss_start_kb = peak_rss_kb();
+        let rss_start_kb = current_rss_kb();
 
         Ok(Self {
             histogram,
@@ -62,7 +62,7 @@ impl Recorder {
             .record(us.max(1))
             .context("histogram record failed")?;
         self.wall_clock += duration;
-        self.rss_peak_kb = self.rss_peak_kb.max(peak_rss_kb());
+        self.rss_peak_kb = self.rss_peak_kb.max(current_rss_kb());
         Ok(())
     }
 
@@ -93,34 +93,80 @@ pub fn now() -> Instant {
     Instant::now()
 }
 
-/// Reads the current peak resident set size in kilobytes via `getrusage`.
+/// Reads the process's *current* resident set size in kilobytes.
 ///
-/// macOS returns bytes in `ru_maxrss`; Linux returns kilobytes. Every other
-/// target falls back to zero, which is acceptable for the "warn-only"
-/// reporting mode - RSS just shows up as a constant 0 delta in the report.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn peak_rss_kb() -> i64 {
-    use std::mem::MaybeUninit;
+/// We deliberately avoid `getrusage(RUSAGE_SELF).ru_maxrss` here: that field is
+/// the process-lifetime high-water mark, so once the warmup loop has pushed RSS
+/// to its steady state the value stops moving and every scenario's
+/// `peak - start` delta collapses to zero. Sampling the current RSS and taking
+/// the max of those samples gives a real "growth during measurement" signal on
+/// every platform.
+///
+/// Platforms without a supported probe fall back to zero, which is acceptable
+/// for the "warn-only" reporting mode - RSS just shows up as a constant 0 delta
+/// in the report.
+#[cfg(target_os = "linux")]
+fn current_rss_kb() -> i64 {
+    // `/proc/self/statm` columns (all in page units): size, resident, shared,
+    // text, lib, data, dt. We only need the second column.
+    let statm = match std::fs::read_to_string("/proc/self/statm") {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let mut fields = statm.split_whitespace();
+    fields.next();
+    let resident_pages: i64 = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let page_size_kb = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } / 1024;
+    resident_pages.saturating_mul(page_size_kb.max(0))
+}
+
+#[cfg(target_os = "macos")]
+fn current_rss_kb() -> i64 {
+    // Mach `task_info(MACH_TASK_BASIC_INFO)` exposes the current `resident_size`
+    // in bytes. `libc` doesn't ship typed bindings on Darwin, so we wire them up
+    // by hand; the struct layout matches `<mach/task_info.h>`.
+    #[repr(C)]
+    struct MachTaskBasicInfo {
+        virtual_size: u64,
+        resident_size: u64,
+        resident_size_max: u64,
+        user_time: [i32; 2],
+        system_time: [i32; 2],
+        policy: i32,
+        suspend_count: i32,
+    }
+
+    unsafe extern "C" {
+        fn mach_task_self() -> u32;
+        fn task_info(
+            target_task: u32,
+            flavor: u32,
+            task_info_out: *mut i32,
+            task_info_count: *mut u32,
+        ) -> i32;
+    }
+
+    const MACH_TASK_BASIC_INFO: u32 = 20;
+    const KERN_SUCCESS: i32 = 0;
 
     unsafe {
-        let mut ru: MaybeUninit<libc::rusage> = MaybeUninit::uninit();
-        if libc::getrusage(libc::RUSAGE_SELF, ru.as_mut_ptr()) != 0 {
+        let mut info: MachTaskBasicInfo = std::mem::zeroed();
+        let mut count: u32 = (std::mem::size_of::<MachTaskBasicInfo>()
+            / std::mem::size_of::<i32>()) as u32;
+        let kr = task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            &mut info as *mut _ as *mut i32,
+            &mut count,
+        );
+        if kr != KERN_SUCCESS {
             return 0;
         }
-        let ru = ru.assume_init();
-        // `ru_maxrss` is `c_long`, which is `i64` on 64-bit targets but `i32`
-        // on 32-bit. The cast is a no-op on 64-bit platforms and portable.
-        #[allow(clippy::unnecessary_cast)]
-        let raw = ru.ru_maxrss as i64;
-        if cfg!(target_os = "macos") {
-            raw / 1024
-        } else {
-            raw
-        }
+        (info.resident_size / 1024) as i64
     }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn peak_rss_kb() -> i64 {
+fn current_rss_kb() -> i64 {
     0
 }
