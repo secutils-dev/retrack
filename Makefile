@@ -2,7 +2,7 @@ COMPOSE_DB   := dev/docker/docker-compose.yml
 ENV_FILE     := .env
 CHROME_PATH  ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 
-.PHONY: dev-up dev-down api scraper-setup scraper scraper-debug db-reset db-migrate test test-api test-scraper fmt clippy check docker-api docker-scraper docker-scraper-camoufox docker-pin-digests clean help
+.PHONY: dev-up dev-down api scraper-setup scraper scraper-debug db-reset db-migrate test test-api test-scraper fmt clippy check docker-api docker-scraper docker-scraper-camoufox docker-pin-digests clean help perf perf-analyze perf-report
 
 ## ---------- Development ----------
 
@@ -81,6 +81,31 @@ docker-scraper-camoufox: ## Build the Web Scraper (Camoufox/Firefox) Docker imag
 
 docker-pin-digests: ## Re-pin base images in Dockerfiles to current SHA256 digests.
 	./dev/scripts/docker-pin-digests.sh
+
+## ---------- JS Runtime Perf Harness ----------
+
+PERF_OUTPUT ?= /tmp/perf.json
+PERF_ITERATIONS ?= 500
+PERF_WARMUP ?= 50
+PERF_CONCURRENCY ?= 8
+PERF_SCENARIOS ?= all
+
+perf: ## Run the JS runtime perf harness. Use ANALYZE=1 to also print the comparison table and record to .perf/history.jsonl (ARGS='--scenarios cold_start_trivial --iterations 100').
+	cargo run --release -p js-runtime-perf -- \
+		--scenarios $(PERF_SCENARIOS) \
+		--iterations $(PERF_ITERATIONS) \
+		--warmup $(PERF_WARMUP) \
+		--concurrency $(PERF_CONCURRENCY) \
+		--output $(PERF_OUTPUT) $(ARGS) \
+		$(if $(ANALYZE),&& node scripts/analyze-perf.ts $(PERF_OUTPUT))
+
+perf-analyze: ## Analyze an existing $(PERF_OUTPUT) without rerunning the harness (equivalent to the ANALYZE=1 tail of `make perf`).
+	node scripts/analyze-perf.ts $(PERF_OUTPUT)
+
+perf-report: ## Open the HTML perf viewer. Load .perf/history.jsonl inside it.
+	@open scripts/perf-report.html 2>/dev/null || \
+		xdg-open scripts/perf-report.html 2>/dev/null || \
+		echo 'Open scripts/perf-report.html in your browser'
 
 ## ---------- Misc ----------
 

@@ -5,12 +5,17 @@ authors = ["Aleh Zasypkin <dev@retrack.dev>"]
 description = "Tracks changes in a web page, API, or file."
 edition = "2024"
 
+[lib]
+name = "retrack"
+path = "src/lib.rs"
+
 [[bin]]
 name = "retrack"
 path = "src/main.rs"
 
 [workspace]
 members = [
+    "benches/js-runtime-perf",
     "components/retrack-types"
 ]
 
