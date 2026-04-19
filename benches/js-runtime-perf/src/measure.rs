@@ -151,8 +151,8 @@ fn current_rss_kb() -> i64 {
 
     unsafe {
         let mut info: MachTaskBasicInfo = std::mem::zeroed();
-        let mut count: u32 = (std::mem::size_of::<MachTaskBasicInfo>()
-            / std::mem::size_of::<i32>()) as u32;
+        let mut count: u32 =
+            (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<i32>()) as u32;
         let kr = task_info(
             mach_task_self(),
             MACH_TASK_BASIC_INFO,
