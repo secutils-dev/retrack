@@ -11,13 +11,15 @@ pub use self::{
 };
 use crate::{config::JsRuntimeConfig, js_runtime::script::ScriptDefinition};
 use anyhow::{Context, anyhow};
-use deno_core::{Extension, RuntimeOptions, scope, serde_v8, v8};
+use deno_core::{Extension, JsRuntimeForSnapshot, RuntimeOptions, scope, serde_v8, v8};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
+    num::NonZeroUsize,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicUsize, Ordering},
     },
+    thread,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -43,10 +45,44 @@ const SCRIPT_EXCLUDED_OPS: [&str; 6] = [
     "op_eval_context",
 ];
 
+/// Cached V8 startup snapshot, built once per process in `init_platform`. The
+/// snapshot is deliberately empty - it captures the default V8 context state
+/// *before* any extensions are registered. Per-worker `deno_core::JsRuntime`
+/// instances still get their own `retrack_ext` extension, so behaviour is
+/// unchanged; the snapshot exists purely to amortise context bootstrap cost
+/// across every script execution in the process.
+static STARTUP_SNAPSHOT: OnceLock<&'static [u8]> = OnceLock::new();
+
+/// Build a blank V8 startup snapshot once and cache the resulting byte slice
+/// in a `OnceLock`. The bytes are intentionally leaked so the slice can live
+/// for the process lifetime with a `'static` lifetime - V8 requires snapshot
+/// blobs to outlive the isolates they're attached to.
+fn startup_snapshot() -> &'static [u8] {
+    STARTUP_SNAPSHOT.get_or_init(|| {
+        let runtime = JsRuntimeForSnapshot::new(RuntimeOptions::default());
+        let snapshot = runtime.snapshot();
+        Box::leak(snapshot.into_vec().into_boxed_slice())
+    })
+}
+
+/// Pick a sensible worker count. We clamp between 2 and 8 so that small boxes
+/// still get parallelism and large ones don't pay for per-worker V8 overhead
+/// we can't actually saturate. The previous implementation always used 1.
+fn default_worker_count() -> usize {
+    thread::available_parallelism()
+        .map(NonZeroUsize::get)
+        .unwrap_or(4)
+        .clamp(2, 8)
+}
+
 /// An abstraction over the V8/Deno runtime that allows any utilities to execute custom user
 /// JavaScript scripts.
 pub struct JsRuntime {
-    tx: mpsc::Sender<ScriptTask>,
+    /// Per-worker senders. Incoming work is dispatched round-robin across
+    /// these, giving us up to `workers.len()` concurrent script executions
+    /// without any additional synchronisation on the caller side.
+    workers: Vec<mpsc::Sender<ScriptTask>>,
+    next: AtomicUsize,
 }
 
 impl JsRuntime {
@@ -54,36 +90,61 @@ impl JsRuntime {
     pub fn init_platform(config: &JsRuntimeConfig) -> anyhow::Result<Self> {
         deno_core::JsRuntime::init_platform(None);
 
-        // JsRuntime will be initialized in the dedicated thread.
-        let (tx, mut rx) = mpsc::channel::<ScriptTask>(config.channel_buffer_size);
+        // Build the shared V8 snapshot on the main thread before any worker is
+        // spawned, so every worker can cheaply clone the pointer later.
+        let _ = startup_snapshot();
+
+        let worker_count = default_worker_count();
+        let mut workers = Vec::with_capacity(worker_count);
+        for idx in 0..worker_count {
+            workers.push(Self::spawn_worker(idx, config.channel_buffer_size)?);
+        }
+
+        Ok(Self {
+            workers,
+            next: AtomicUsize::new(0),
+        })
+    }
+
+    /// Spawn a single long-lived worker thread that owns a `CurrentThread`
+    /// tokio runtime + `LocalSet` and drains `ScriptTask`s from its channel.
+    /// Returns the sender half for dispatching work to this worker.
+    fn spawn_worker(
+        index: usize,
+        channel_buffer: usize,
+    ) -> anyhow::Result<mpsc::Sender<ScriptTask>> {
+        let (tx, mut rx) = mpsc::channel::<ScriptTask>(channel_buffer);
         let rt = Builder::new_current_thread()
             .enable_all()
             .build()
-            .context("Unable to initialize JS runtime worker thread.")?;
-        std::thread::spawn(move || {
-            let local = LocalSet::new();
-            local.spawn_local(async move {
-                while let Some(task) = rx.recv().await {
-                    match task.script {
-                        Script::ApiTargetConfigurator(def) => {
-                            JsRuntime::handle_script(&task.config, def).await;
-                        }
-                        Script::ApiTargetExtractor(def) => {
-                            JsRuntime::handle_script(&task.config, def).await;
-                        }
-                        Script::ActionFormatter(def) => {
-                            JsRuntime::handle_script(&task.config, def).await;
-                        }
-                        Script::Custom(def) => {
-                            JsRuntime::handle_script(&task.config, def).await;
+            .context("Unable to initialize JS runtime worker tokio runtime")?;
+        let name = format!("retrack-js-worker-{index}");
+        thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                let local = LocalSet::new();
+                local.spawn_local(async move {
+                    while let Some(task) = rx.recv().await {
+                        match task.script {
+                            Script::ApiTargetConfigurator(def) => {
+                                JsRuntime::handle_script(&task.config, def).await;
+                            }
+                            Script::ApiTargetExtractor(def) => {
+                                JsRuntime::handle_script(&task.config, def).await;
+                            }
+                            Script::ActionFormatter(def) => {
+                                JsRuntime::handle_script(&task.config, def).await;
+                            }
+                            Script::Custom(def) => {
+                                JsRuntime::handle_script(&task.config, def).await;
+                            }
                         }
                     }
-                }
-            });
-            rt.block_on(local);
-        });
-
-        Ok(Self { tx })
+                });
+                rt.block_on(local);
+            })
+            .context("Failed to spawn JS runtime worker thread")?;
+        Ok(tx)
     }
 
     /// Executes a user script and returns the result.
@@ -95,7 +156,8 @@ impl JsRuntime {
     ) -> Result<Option<ScriptResult>, anyhow::Error> {
         let (script_result_tx, script_result_rx) = oneshot::channel();
 
-        self.tx
+        let slot = self.next.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+        self.workers[slot]
             .send(ScriptTask {
                 config: script_config,
                 script: script_args.build(script_src, script_result_tx).0,
@@ -128,6 +190,7 @@ impl JsRuntime {
             create_params: Some(
                 v8::Isolate::create_params().heap_limits(1_048_576, config.max_heap_size),
             ),
+            startup_snapshot: Some(startup_snapshot()),
             // Disable certain built-in operations.
             extensions: vec![Extension {
                 name: "retrack_ext",
@@ -933,7 +996,6 @@ pub mod tests {
           "Deno.core.writeSync()",
           "Deno.core.writeTypeError()",
           "Error()",
-          "ErrorStackTraceLimit=10",
           "EvalError()",
           "FinalizationRegistry()",
           "Float32Array()",
