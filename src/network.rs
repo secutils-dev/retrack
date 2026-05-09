@@ -53,7 +53,7 @@ impl Network<TokioDnsResolver> {
         };
 
         Ok(Network {
-            resolver: TokioDnsResolver::create(),
+            resolver: TokioDnsResolver::create()?,
             smtp,
         })
     }
@@ -86,8 +86,8 @@ impl<DR: DnsResolver> Network<DR> {
 pub mod tests {
     use super::Network;
     use hickory_resolver::{
-        Name, ResolveError,
-        proto::rr::{RData, Record, rdata::A},
+        net::NetError,
+        proto::rr::{Name, RData, Record, rdata::A},
     };
     use std::net::Ipv4Addr;
     use url::Url;
@@ -168,7 +168,7 @@ pub mod tests {
 
         // Hosts that fail to resolve aren't supported and gracefully handled.
         let broken_network = Network {
-            resolver: MockResolver::new_with_error(ResolveError::from("can not lookup IPs")),
+            resolver: MockResolver::new_with_error(NetError::from("can not lookup IPs")),
             smtp: None,
         };
         assert!(!broken_network.is_public_web_url(&url).await);

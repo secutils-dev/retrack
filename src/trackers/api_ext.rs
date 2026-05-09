@@ -2575,10 +2575,7 @@ mod tests {
     use actix_web::ResponseError;
     use bytes::Bytes;
     use futures::StreamExt;
-    use hickory_resolver::{
-        Name,
-        proto::rr::{RData, Record, rdata::A},
-    };
+    use hickory_resolver::proto::rr::{Name, RData, Record, rdata::A};
     use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE};
     use httpmock::MockServer;
     use insta::{assert_debug_snapshot, assert_json_snapshot};
