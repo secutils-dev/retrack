@@ -106,7 +106,7 @@ try {
   log.error(
     `Failed to connect to a browser at ${browserConfig.wsEndpoint} (protocol: ${browserConfig.protocol}): ${Diagnostics.errorMessage(err)}.`,
   );
-  throw new Error('Failed to connect to a browser.');
+  throw new Error('Failed to connect to a browser.', { cause: err });
 }
 
 const context = await browser.newContext({ ignoreHTTPSErrors: acceptInvalidCertificates, userAgent, viewport: null });

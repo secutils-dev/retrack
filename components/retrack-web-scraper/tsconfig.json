@@ -11,15 +11,9 @@
     "noImplicitAny": true,
     "sourceMap": false,
     "outDir": "dist",
-    "baseUrl": ".",
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "strict": true,
-    "paths": {
-      "*": [
-        "node_modules/*"
-      ]
-    }
+    "strict": true
   },
   "ts-node": {
     "esm": true
