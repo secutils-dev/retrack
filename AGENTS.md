@@ -1,5 +1,157 @@
 # AGENTS.md
 
+## Dependency upgrades
+
+### Recommended upgrade order
+
+Retrack has a hard dependency surface (Rust crates → SQLx schema cache → Node runtime →
+NPM packages → Docker base images). Upgrade in this order so each stage builds on a
+green previous one and a single failure does not contaminate later stages:
+
+1. **Rust crates** in `Cargo.toml` (workspace root), `components/retrack-types/Cargo.toml`,
+   and `benches/js-runtime-perf/Cargo.toml`. Bump everything to the latest semver-compatible
+   release in one pass; refresh `Cargo.lock` with `cargo update`.
+2. **`.nvmrc`** to the next Node LTS (the same major must be reflected in `engines.node` of
+   every `package.json` in the workspace).
+3. **NPM packages** in workspace-root `package.json` and `components/retrack-web-scraper/package.json`.
+   Refresh `package-lock.json` with `npm install` (run from the workspace root so all
+   workspaces resolve through the same tree).
+4. **Dockerfile base images** (`Dockerfile`, `Dockerfile.web-scraper`,
+   `Dockerfile.web-scraper-camoufox`), UPX, Camoufox, `playwright-python`. Re-pin SHA256
+   manifest digests with `./dev/scripts/docker-pin-digests.sh`.
+
+Do **not** reorder — bumping Node before bumping NPM deps means the host `npm install`
+runs against the new Node and may produce a lockfile the older Docker base cannot
+consume; bumping the Docker bases before the NPM lock means the runtime stage's
+`npm ci` validates against a stale lock.
+
+### Stage 1 — Rust crates
+
+```bash
+# Edit Cargo.toml files, then:
+cargo update
+cargo fmt
+cargo clippy --all-targets -- -D warnings
+cargo test
+make perf ANALYZE=1 PERF_ITERATIONS=20 PERF_WARMUP=5    # smoke; never fails the build
+```
+
+What to watch for:
+
+- **`deno_core`** bumps almost always invalidate the `js_runtime::tests::can_access_deno_apis`
+  inline snapshot because `Deno.core.*` exposes new ops or removes deprecated ones (e.g.
+  `__processTimers`/`__resolveOps` were removed in favour of `__eventLoopTick` /
+  `__setTimerExpiry`). Run `cargo insta accept -p retrack` and review the diff to confirm
+  the new API surface is intentional rather than a regression.
+- **`sqlx`** macros validate queries against `.sqlx/` cached query plans. After a `sqlx`
+  bump or a query change, `cargo check` will fail offline with `Connection refused` /
+  `SQLX_OFFLINE` errors. Regenerate the cache:
+
+  ```bash
+  make dev-up        # starts the dev Postgres
+  make db-prepare    # runs `cargo sqlx prepare` against the live DB
+  ```
+
+  Commit the regenerated `.sqlx/` directory alongside the bump. CI runs `make
+  db-prepare-check` and fails if the cache is out of date.
+
+### Stage 2 — Node major bump (`.nvmrc`)
+
+```bash
+echo 24 > .nvmrc
+# Update engines.node in every package.json (workspace root + each leaf) to "24.x"
+# Update @types/node to ^24.x in every package.json that declares it (root, web-scraper).
+npm install                                                     # refreshes package-lock.json
+npm run lint --ws --if-present
+npm test --ws --if-present
+npm run build --ws --if-present
+```
+
+### Stage 3 — NPM packages
+
+```bash
+# Edit package.json files (root + leaves), then from components/retrack/:
+npm install
+npm run lint --ws --if-present
+npm test --ws --if-present
+npm run build --ws --if-present
+```
+
+What to watch for:
+
+- **`playwright-core` must be pinned to a single exact version** across the whole product
+  (web-scraper, secutils-webui, e2e harness, and the `playwright-python` git ref baked
+  into `Dockerfile.web-scraper-camoufox`). Mismatches cause subtle protocol-level
+  incompatibilities. When bumping it here, record the pinned version and bump the other
+  three locations in their respective stages — do not let them drift between PRs.
+- **`@commitlint/*` majors** sometimes change their config schema; rerun `npx commitlint
+  --from HEAD~1` after bumping to confirm the existing `commitlint.config.cjs` still
+  parses.
+
+### Stage 4 — Docker base images
+
+```bash
+# Edit FROM lines (image + tag, no digest) and language/tool versions.
+./dev/scripts/docker-pin-digests.sh    # rewrites @sha256:... to current manifest digests
+make docker-api
+make docker-scraper
+make docker-scraper-camoufox
+```
+
+The pin script reads every `FROM` line in the three Dockerfiles, calls `docker buildx
+imagetools inspect <image>:<tag>` to resolve the current manifest-list digest, and
+rewrites the line in place. It always re-pins, even when the tag did not change — running
+it on every upgrade keeps the digest fresh against the rolling tag.
+
+What to watch for:
+
+- **`Dockerfile.web-scraper` runtime stage requires the workspace layout.** The runtime
+  image is a flat install, but the workspace lockfile records the web-scraper's deps
+  under `packages."components/retrack-web-scraper"`, not under the top-level
+  `packages.""` key. With npm ≥ 11 (which ships with Node ≥ 22), `npm ci --production`
+  in a flattened layout fails with `Missing: <pkg> from lock file` /
+  `Invalid: lock file's <pkg>@x does not satisfy <pkg>@y`. The Dockerfile preserves the
+  workspace structure under `/app` and installs with:
+
+  ```dockerfile
+  COPY --from=builder ["/app/package.json", "/app/package-lock.json", "./"]
+  COPY --from=builder ["/app/components/retrack-web-scraper/package.json", "./components/retrack-web-scraper/"]
+  COPY --from=builder ["/app/components/retrack-web-scraper/dist/", "./components/retrack-web-scraper/"]
+  RUN npm ci --omit=dev --workspace=retrack-web-scraper --include-workspace-root=false && ...
+  CMD ["node", "components/retrack-web-scraper/src/index.js"]
+  ```
+
+  Do not "simplify" by flattening — it works against the host npm cache but breaks the
+  fresh `npm ci` inside the runtime stage.
+- **Camoufox is a coupled triple.** `cloverlabs-camoufox` (PyPI), `playwright-python`
+  (git ref `release-x.y`), and the Camoufox Firefox build ID
+  (`python -m camoufox fetch official/<id>`) must move together. Only bump the Firefox
+  ID when `cloverlabs-camoufox` has been released against it; otherwise the loader
+  rejects the binary. The current set has `cloverlabs-camoufox==0.5.5` +
+  `playwright-python@release-1.59` + `official/146.0.1-alpha.25`.
+- **`playwright-python` minor** must match the `playwright-core` minor pinned in stage 3
+  (currently `1.59`). The Camoufox image's Playwright driver speaks the protocol of the
+  matching Node-side Playwright; mismatches surface as cryptic "browser closed
+  unexpectedly" errors at runtime.
+- **Smoke-test each image after build:** check that the entrypoint path exists
+  (`components/retrack-web-scraper/src/index.js` for the scraper, `/app/camoufox_launcher.py`
+  for camoufox), the language runtime version is what was requested
+  (`node --version` / `python3 --version`), and for camoufox that the Firefox build cache
+  populated under `/root/.cache/camoufox/browsers`. The full app stack lives one level up
+  in the parent `secutils` repo's `dev/docker/docker-compose.yml`; the local
+  `dev/docker/docker-compose.yml` here only spins up Postgres for `make dev-up`.
+
+### Cross-cutting reminders
+
+- **Commitlint.** The repo enforces conventional commits via husky pre-commit. Use
+  `chore(deps): ...` for dependency-only commits and `chore(docker): ...` for image
+  re-pins; mixing dep code changes (e.g. an API adapter for `hickory-resolver`) with the
+  bump is fine and should still go under `chore(deps)`.
+- **Performance harness regressions are advisory.** A perf delta after a `deno_core`,
+  `tokio`, or `reqwest` bump is informational; the CI job never fails on it. If a
+  regression is large, decide whether to roll back the specific crate or accept it
+  before commit — but do not block the upgrade chain on the harness.
+
 ## JS Runtime Performance Harness (`benches/js-runtime-perf/`)
 
 ### Overview
