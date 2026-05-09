@@ -188,7 +188,6 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
         const worker = new Worker(resolve(import.meta.dirname, 'worker.js'), {
           eval: false,
           env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k === 'NODE' || k === 'NODE_OPTIONS')),
-          execArgv: ['--no-experimental-global-webcrypto'],
           workerData,
         });
 

@@ -29,6 +29,10 @@ const {
   debug: debugOptions,
 } = workerData as WorkerData;
 
+// SECURITY: Strip the global Web Crypto API from the extractor sandbox.
+// `node:crypto` imports are independently blocked by `extractor_module_hooks`.
+delete (globalThis as { crypto?: unknown }).crypto;
+
 // SECURITY: Basic prototype pollution protection against the most common vectors until we can use Playwright with
 // `--frozen-intrinsics`. It DOES NOT protect against all prototype pollution vectors.
 for (const Class of [

@@ -7,7 +7,7 @@
   },
   "version": "0.0.1",
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "type": "module",
   "main": "dist/src/index.js",
@@ -21,7 +21,7 @@
     "test:watch": "NODE_OPTIONS=--import=./register.js NODE_NO_WARNINGS=1 node --experimental-test-module-mocks --test --watch ./src/tests.ts"
   },
   "overrides": {
-    "@types/node": "^22.19.15"
+    "@types/node": "^24.12.3"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",
@@ -31,7 +31,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^9.39.4",
-    "@types/node": "^22.19.15",
+    "@types/node": "^24.12.3",
     "@types/ws": "^8.18.1",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
