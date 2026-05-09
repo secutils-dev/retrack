@@ -1,4 +1,4 @@
-FROM python:3.14-slim-trixie@sha256:fb83750094b46fd6b8adaa80f66e2302ecbe45d513f6cece637a841e1025b4ca
+FROM python:3.14-slim-trixie@sha256:aee3b1c52ce756c42ee4ad90437ae49d87fa87fc2f09c17895f098b67f081a8d
 EXPOSE 7777
 
 ENV CAMOUFOX_PORT=7777
@@ -19,7 +19,7 @@ RUN set -x \
 # Layer 2: Camoufox install + patch + fetch
 RUN set -x \
     && pip install cloverlabs-camoufox==0.5.5 \
-    && pip install "git+https://github.com/microsoft/playwright-python.git@release-1.58" \
+    && pip install "git+https://github.com/microsoft/playwright-python.git@release-1.59" \
     && sed -i 's/fontconfigs/fontconfig/g' /usr/local/lib/python3.14/site-packages/camoufox/utils.py \
     && python -m camoufox sync \
     && echo y | python -m camoufox fetch official/146.0.1-alpha.25

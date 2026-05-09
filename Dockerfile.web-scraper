@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea AS builder
+FROM --platform=$BUILDPLATFORM node:24-slim@sha256:f96cade014243001e5c18f1befaf0bf44564f7cf358287ef691114dcb04b173b AS builder
 WORKDIR /app
 
 # Copy workspace root `package.json` and `package-lock.json` files,
@@ -12,7 +12,7 @@ COPY ["./components/retrack-web-scraper", "./components/retrack-web-scraper"]
 RUN set -x && npm test --ws
 RUN set -x && npm run build --ws
 
-FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091cd9b1675ea
+FROM node:24-slim@sha256:f96cade014243001e5c18f1befaf0bf44564f7cf358287ef691114dcb04b173b
 ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     RETRACK_WEB_SCRAPER_BROWSER_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium
@@ -34,14 +34,21 @@ RUN set -x && apt-get update && \
 COPY ./dev/docker/chromium_local.conf /etc/fonts/local.conf
 RUN set -x && fc-cache -fv
 
-COPY --from=builder ["/app/components/retrack-web-scraper/dist/", "./"]
-COPY --from=builder ["/app/components/retrack-web-scraper/package.json", "/app/package-lock.json", "./"]
+# Preserve the workspace layout (root + leaf package.json + workspace lock
+# file) so `npm ci` can resolve the web-scraper's deps via its workspace entry.
+# Flattening these files into /app fails with npm >= 11 because the workspace
+# lockfile records dependencies under `packages."components/retrack-web-scraper"`,
+# not under the top-level `packages.""` key.
+COPY --from=builder ["/app/package.json", "/app/package-lock.json", "./"]
+COPY --from=builder ["/app/components/retrack-web-scraper/package.json", "./components/retrack-web-scraper/"]
+COPY --from=builder ["/app/components/retrack-web-scraper/dist/", "./components/retrack-web-scraper/"]
 
-# Install production dependencies, then use Playwright to install only the
-# Chromium binary (no --with-deps). Create a stable symlink so the app can
-# find the binary regardless of the Playwright revision number.
-# Post-install cleanup: remove headless-shell, ffmpeg, all but en-US locale.
-RUN set -x && npm ci --production && \
+# Install production dependencies for the web-scraper workspace only, then use
+# Playwright to install only the Chromium binary (no --with-deps). Create a
+# stable symlink so the app can find the binary regardless of the Playwright
+# revision number. Post-install cleanup: remove headless-shell, ffmpeg, all but
+# en-US locale.
+RUN set -x && npm ci --omit=dev --workspace=retrack-web-scraper --include-workspace-root=false && \
     npx playwright install chromium && \
     rm -rf /ms-playwright/chromium_headless_shell-* && \
     rm -rf /ms-playwright/ffmpeg-* && \
@@ -56,5 +63,5 @@ RUN set -x && npm ci --production && \
 USER node
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["node", "src/index.js"]
+CMD ["node", "components/retrack-web-scraper/src/index.js"]
 
