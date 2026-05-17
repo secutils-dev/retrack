@@ -1409,7 +1409,9 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
             serde_json::from_slice(&response_bytes)
                 .context("Cannot deserialize tracker extractor script result")?
         } else if responses.len() == 1 {
-            serde_json::from_slice(&responses[0].body).context("Cannot deserialize API response")?
+            serde_json::from_slice::<JsonValue>(&responses[0].body).unwrap_or_else(|_| {
+                JsonValue::String(String::from_utf8_lossy(&responses[0].body).into_owned())
+            })
         } else {
             JsonValue::Array(
                 responses
@@ -5199,6 +5201,63 @@ mod tests {
         ]
         "###
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_saves_api_target_revision_with_non_json_body(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        let server = MockServer::start();
+        let config = mock_config()?;
+
+        let api = mock_api_with_config(pool, config).await?;
+
+        let trackers = api.trackers();
+        let tracker = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_schedule("0 0 * * * *")
+                    .with_target(TrackerTarget::Api(ApiTarget {
+                        requests: vec![TargetRequest {
+                            url: server.url("/api/llms.txt").parse()?,
+                            method: None,
+                            headers: None,
+                            body: None,
+                            media_type: None,
+                            accept_statuses: None,
+                            accept_invalid_certificates: false,
+                        }],
+                        configurator: None,
+                        extractor: None,
+                        params: None,
+                    }))
+                    .build(),
+            )
+            .await?;
+
+        let markdown_body = "# Hello\n\nNot JSON, just markdown.";
+        let content_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api/llms.txt");
+            then.status(200)
+                .header("Content-Type", "text/markdown")
+                .body(markdown_body);
+        });
+
+        let revision = trackers
+            .create_tracker_data_revision(tracker.id, Default::default())
+            .await?;
+        assert_eq!(revision.tracker_id, tracker.id);
+        assert_eq!(revision.data, TrackerDataValue::new(json!(markdown_body)));
+
+        let tracker_data = trackers
+            .get_tracker_data_revisions(tracker.id, Default::default())
+            .await?;
+        assert_eq!(tracker_data.len(), 1);
+        assert_eq!(tracker_data[0].data, TrackerDataValue::new(json!(markdown_body)));
+
+        content_mock.assert();
 
         Ok(())
     }
