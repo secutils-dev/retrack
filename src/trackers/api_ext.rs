@@ -5255,7 +5255,10 @@ mod tests {
             .get_tracker_data_revisions(tracker.id, Default::default())
             .await?;
         assert_eq!(tracker_data.len(), 1);
-        assert_eq!(tracker_data[0].data, TrackerDataValue::new(json!(markdown_body)));
+        assert_eq!(
+            tracker_data[0].data,
+            TrackerDataValue::new(json!(markdown_body))
+        );
 
         content_mock.assert();
 
