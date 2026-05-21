@@ -341,13 +341,18 @@ impl TrackersRunJob {
                         Self::create_job_meta().set_retry_attempt(job_meta.retry_attempt + 1),
                     )?;
 
-                    // Retain the job ID for the retry job.
-                    let mut job_data = retry_job.job_data()?;
-                    job_data.id = Some(job_id.into());
-                    retry_job.set_job_data(job_data)?;
-
+                    // Register the retry under a fresh job ID, repoint the tracker to it, and
+                    // only then remove the currently running job. Reusing the original
+                    // `job_id` for the retry races with `tokio-cron-scheduler`'s in-memory
+                    // closure store (two independent listener tasks process the `add` and
+                    // `remove` events on a shared `HashMap<Uuid, _>`); when the deletion
+                    // is applied after the insertion, the retry's closure is wiped while
+                    // its persisted metadata remains, and the next cron tick can't find a
+                    // closure for the id. With distinct ids the two listeners touch
+                    // different keys and cannot collide.
+                    let new_job_id = job_scheduler.add(retry_job).await?;
+                    trackers.set_tracker_job(tracker.id, new_job_id).await?;
                     job_scheduler.remove(&job_id).await?;
-                    job_scheduler.add(retry_job).await?;
                 } else {
                     // Resets job meta and report the error.
                     scheduler
@@ -442,7 +447,7 @@ mod tests {
     use std::{ops::Add, sync::Arc, time::Duration};
     use test_log::test;
     use time::OffsetDateTime;
-    use uuid::uuid;
+    use uuid::{Uuid, uuid};
 
     #[sqlx::test]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
@@ -1556,6 +1561,114 @@ mod tests {
         Ok(())
     }
 
+    /// Regression test for the same-`job_id` race in `tokio-cron-scheduler`'s in-memory
+    /// `SimpleJobCode` closure store. When a job fails and is rescheduled as a retry, the
+    /// retry must be registered under a fresh `job_id` so that the closure insertion and
+    /// removal listener tasks can never collide on the same HashMap key. If the retry
+    /// reused the original `job_id`, the deletion listener could wipe the freshly-inserted
+    /// closure while the persisted `scheduler_jobs` row remained, leading to the retry
+    /// silently failing to fire and the row's `next_tick` snapping to the next match of
+    /// the date-pinned retry cron — one year out.
+    #[test(sqlx::test)]
+    async fn retry_uses_fresh_job_id_after_failure(pool: PgPool) -> anyhow::Result<()> {
+        let mut scheduler = mock_scheduler(&pool).await?;
+        let server = MockServer::start();
+        let api = Arc::new(mock_api(pool).await?);
+
+        // Create a tracker with a retry strategy that points at a guaranteed-failing target.
+        let mut create_params = TrackerCreateParamsBuilder::new("tracker-retry-id")
+            .with_target(TrackerTarget::Api(ApiTarget {
+                requests: vec![TargetRequest::new(server.url("/api-retry-id").parse()?)],
+                configurator: None,
+                extractor: None,
+                params: None,
+            }))
+            .build();
+        create_params.config.job = Some(SchedulerJobConfig {
+            schedule: "0 0 * * * *".to_string(),
+            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                interval: Duration::from_secs(60),
+                max_attempts: 3,
+            }),
+        });
+        let trackers = api.trackers();
+        let tracker = trackers.create_tracker(create_params).await?;
+
+        // Register the initial job and link it to the tracker.
+        let job_schedule = mock_schedule_in_sec(1);
+        let original_job_id = scheduler
+            .add(TrackersRunJob::create(api.clone(), &job_schedule)?)
+            .await?;
+        trackers
+            .set_tracker_job(tracker.id, original_job_id)
+            .await?;
+
+        let fail_mock = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/api-retry-id");
+            then.status(400)
+                .header("Content-Type", "application/json")
+                .body("Boom!")
+                .delay(Duration::from_secs(1));
+        });
+
+        // Start the scheduler and wait for the tracker's `job_id` to be repointed at the
+        // retry's fresh id (or give up after ~20s).
+        scheduler.start().await?;
+        let mut new_job_id: Option<Uuid> = None;
+        for _ in 0..200 {
+            if let Some(t) = trackers.get_tracker(tracker.id).await?
+                && let Some(id) = t.job_id
+                && id != original_job_id
+            {
+                new_job_id = Some(id);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        scheduler.shutdown().await?;
+        fail_mock.assert();
+
+        // The retry must have been registered under a different job id (the regression
+        // guard) and the original `scheduler_jobs` row must be gone.
+        let new_job_id = new_job_id.expect(
+            "retry should have repointed tracker.job_id to a fresh id (same-id race regression)",
+        );
+        assert_ne!(new_job_id, original_job_id);
+        assert!(
+            mock_get_scheduler_job(&api.db, original_job_id)
+                .await?
+                .is_none(),
+            "original scheduler_jobs row should be removed once the retry is registered"
+        );
+
+        // The new `scheduler_jobs` row must carry the retry's 6-field cron schedule with
+        // day-of-week left unrestricted, plus `retry_attempt = 1`.
+        let new_job = mock_get_scheduler_job(&api.db, new_job_id)
+            .await?
+            .expect("retry scheduler_jobs row must exist");
+        let schedule = new_job
+            .schedule
+            .as_ref()
+            .expect("retry job must have a schedule")
+            .clone();
+        let fields: Vec<&str> = schedule.split_whitespace().collect();
+        assert_eq!(
+            fields.len(),
+            6,
+            "retry schedule must be a 6-field cron expression: {schedule}"
+        );
+        assert_eq!(
+            fields[5], "*",
+            "retry schedule must leave day-of-week unrestricted: {schedule}"
+        );
+        let meta = SchedulerJobMetadata::try_from(new_job.extra.as_deref().unwrap())?;
+        assert_eq!(meta.job_type, SchedulerJob::TrackersRun);
+        assert_eq!(meta.retry_attempt, 1);
+        assert!(!meta.is_running);
+
+        Ok(())
+    }
+
     #[test(sqlx::test)]
     async fn can_schedule_retries_if_request_fails(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
@@ -1650,33 +1763,58 @@ mod tests {
                 .is_empty()
         );
 
-        // Start scheduler and wait for a few seconds, then stop it.
+        // Start scheduler and wait for a few seconds, then stop it. Each retry attempt is
+        // registered under a fresh `job_id` (see the failure branch of
+        // `TrackersRunJob::execute`), so the loop follows the tracker's current `job_id`
+        // rather than the original one, and asserts that the id changes between attempts.
         scheduler.start().await?;
         let mut should_increase_counter = true;
         let mut attempts_counter = 1;
+        let mut observed_job_ids: Vec<Uuid> = vec![job_id];
         loop {
-            if let Some(job) = mock_get_scheduler_job(&api.db, job_id).await? {
-                // Every time the job is marked as running, update tracker tags with the attempt
-                // number, so that configurator script can change HTTP request header and we can
-                // use separate mocks for every attempt.
-                let job_meta = SchedulerJobMetadata::try_from(job.extra.unwrap().as_ref())?;
-                if job_meta.is_running && should_increase_counter {
-                    attempts_counter += 1;
-                    let update_params = TrackerUpdateParams {
-                        tags: Some(vec![format!("attempt-{attempts_counter}")]),
-                        ..Default::default()
-                    };
-                    trackers.update_tracker(tracker.id, update_params).await?;
+            let current_job_id = trackers
+                .get_tracker(tracker.id)
+                .await?
+                .and_then(|t| t.job_id);
 
-                    should_increase_counter = false;
-                } else if !job_meta.is_running {
-                    should_increase_counter = true;
+            if let Some(current_job_id) = current_job_id {
+                if observed_job_ids.last() != Some(&current_job_id) {
+                    observed_job_ids.push(current_job_id);
+                }
+
+                if let Some(job) = mock_get_scheduler_job(&api.db, current_job_id).await? {
+                    // Every time the job is marked as running, update tracker tags with the
+                    // attempt number, so that configurator script can change HTTP request
+                    // header and we can use separate mocks for every attempt.
+                    let job_meta = SchedulerJobMetadata::try_from(job.extra.unwrap().as_ref())?;
+                    if job_meta.is_running && should_increase_counter {
+                        attempts_counter += 1;
+                        let update_params = TrackerUpdateParams {
+                            tags: Some(vec![format!("attempt-{attempts_counter}")]),
+                            ..Default::default()
+                        };
+                        trackers.update_tracker(tracker.id, update_params).await?;
+
+                        should_increase_counter = false;
+                    } else if !job_meta.is_running {
+                        should_increase_counter = true;
+                    }
                 }
             } else if attempts_counter >= 4 {
                 break;
             }
 
             tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        // Each failure should have re-registered the retry under a fresh job_id (the
+        // regression guard for the same-id race in `tokio-cron-scheduler`'s closure store).
+        assert!(
+            observed_job_ids.len() >= 3,
+            "expected at least 3 distinct job ids across original + 2 retries, got {observed_job_ids:?}"
+        );
+        for window in observed_job_ids.windows(2) {
+            assert_ne!(window[0], window[1], "retry must use a fresh job id");
         }
 
         scheduler.shutdown().await?;
