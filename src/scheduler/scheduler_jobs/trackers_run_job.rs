@@ -11,7 +11,10 @@ use crate::{
 use anyhow::Context;
 use croner::Cron;
 use retrack_types::trackers::Tracker;
-use std::{ops::Add, sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use time::OffsetDateTime;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error, warn};
@@ -94,20 +97,31 @@ impl TrackersRunJob {
             return Ok(None);
         }
 
-        // Check #6: The job should have the same parameters as during job creation. It's possible
-        // that we need to resume the job that was scheduled for retry. In that case, the job
-        // schedule will be different from the tracker schedule, and it's expected.
-        let mut new_job = Self::create(
-            api.clone(),
-            if job_meta.retry_attempt > 0 {
-                existing_job_data
-                    .schedule
-                    .as_ref()
-                    .unwrap_or(&job_config.schedule)
-            } else {
-                &job_config.schedule
-            },
-        )?;
+        // Check #6: The job should have the same parameters as during job creation. Retry jobs
+        // are persisted as `tokio_cron_scheduler` one-shots (`schedule = None`,
+        // `job_type = OneShot`), reconstruct them via `create_retry` so the resumed `Job` is the
+        // matching `NonCronJob` variant. Legacy retries persisted as date-pinned 6-field cron
+        // strings (from before the one-shot migration) cannot be safely re-armed - clear the
+        // tracker job and let `TrackersScheduleJob` re-schedule it with its real cron.
+        let mut new_job = if job_meta.retry_attempt > 0 {
+            if existing_job_data.schedule.is_some() {
+                warn!(
+                    tracker.id = %tracker.id,
+                    tracker.name = tracker.name,
+                    job.id = %existing_job_data.id,
+                    "Found legacy cron-style retry job, clearing tracker job to allow re-scheduling."
+                );
+                trackers.clear_tracker_job(tracker.id).await?;
+                return Ok(None);
+            }
+
+            // The `Instant` here is a placeholder: `set_raw_job_data` below overwrites
+            // `next_tick` with the persisted timestamp, and the scheduler reads that
+            // persisted value (not the in-memory `Job`) when deciding when to fire.
+            Self::create_retry(api.clone(), Instant::now() + Duration::from_secs(60))?
+        } else {
+            Self::create(api.clone(), &job_config.schedule)?
+        };
         if !new_job.are_schedules_equal(&existing_job_data)? {
             debug!(
                 tracker.id = %tracker.id,
@@ -154,6 +168,37 @@ impl TrackersRunJob {
                 })
             },
         )?;
+
+        job.set_job_meta(&Self::create_job_meta())?;
+
+        Ok(job)
+    }
+
+    /// Creates a one-shot retry `TrackersRun` job that fires once at the given `instant`.
+    ///
+    /// Retries deliberately do not reuse the cron path: a date-pinned 6-field cron
+    /// (e.g. `0 30 10 21 5 *`) parses in Quartz mode (day-of-month AND day-of-week,
+    /// `dom_and_dow(true)`) and, once the persisted closure is dropped from
+    /// `tokio_cron_scheduler`'s in-memory `SimpleJobCode` map, the next persisted tick is
+    /// computed as the next matching date - typically a year out. A `OneShot` job has no
+    /// schedule string at all (`schedule = None`, `job_type = OneShot`), after firing,
+    /// `next_tick` is set to `None` and the row is reaped by the scheduler's
+    /// `to_be_deleted` pass, so there is no future tick to drift.
+    pub fn create_retry<DR: DnsResolver>(
+        api: Arc<Api<DR>>,
+        instant: Instant,
+    ) -> anyhow::Result<Job> {
+        let mut job = Job::new_one_shot_at_instant_async(instant, move |job_id, job_scheduler| {
+            let api = api.clone();
+            Box::pin(async move {
+                debug!(job.id = %job_id, "Running retry job.");
+                if let Err(err) = Self::execute(job_id, api, &job_scheduler).await {
+                    error!(job.id = %job_id, "Retry job failed with unexpected error: {err:?}.");
+                } else {
+                    debug!(job.id = %job_id, "Finished running retry job.");
+                }
+            })
+        })?;
 
         job.set_job_meta(&Self::create_job_meta())?;
 
@@ -316,27 +361,23 @@ impl TrackersRunJob {
                     }
 
                     let retry_in = retry_strategy.interval(job_meta.retry_attempt);
-                    let next_at = OffsetDateTime::now_utc().add(retry_in);
-                    let new_schedule = format!(
-                        "{} {} {} {} {} *",
-                        next_at.second(),
-                        next_at.minute(),
-                        next_at.hour(),
-                        next_at.day(),
-                        u8::from(next_at.month()),
-                    );
                     warn!(
                         tracker.id = %tracker.id,
                         tracker.name = tracker.name,
                         job.id = %job_id,
                         metrics.job_retries = job_meta.retry_attempt + 1,
-                        "Scheduled a retry to create tracker data revision in {} ({new_schedule}).",
+                        "Scheduled a one-shot retry to create tracker data revision in {}.",
                         humantime::format_duration(retry_in)
                     );
 
-                    // Create a new job that inherits all parameters from the current job, but
-                    // with a new schedule based on retry strategy.
-                    let mut retry_job = Self::create(api.clone(), &new_schedule)?;
+                    // Schedule the retry as a `tokio_cron_scheduler` one-shot. This avoids the
+                    // year-pinned cron pattern that the previous implementation built from
+                    // `now + retry_in`: a date-pinned 6-field cron parses in Quartz mode and,
+                    // once the in-memory closure is lost for any reason, the scheduler advances
+                    // `next_tick` to the next matching date - typically a year out. With a
+                    // one-shot, `next_tick` is the absolute retry instant and is cleared to
+                    // `None` after firing, so there is no future tick to drift.
+                    let mut retry_job = Self::create_retry(api.clone(), Instant::now() + retry_in)?;
                     retry_job.set_job_meta(
                         Self::create_job_meta().set_retry_attempt(job_meta.retry_attempt + 1),
                     )?;
@@ -347,7 +388,7 @@ impl TrackersRunJob {
                     // closure store (two independent listener tasks process the `add` and
                     // `remove` events on a shared `HashMap<Uuid, _>`); when the deletion
                     // is applied after the insertion, the retry's closure is wiped while
-                    // its persisted metadata remains, and the next cron tick can't find a
+                    // its persisted metadata remains, and the next tick can't find a
                     // closure for the id. With distinct ids the two listeners touch
                     // different keys and cannot collide.
                     let new_job_id = job_scheduler.add(retry_job).await?;
@@ -557,8 +598,13 @@ mod tests {
         let tracker = api.trackers().create_tracker(create_params).await?;
         api.trackers().set_tracker_job(tracker.id, job_id).await?;
 
-        // Create associated tracker job.
-        let mut mock_job = mock_scheduler_job(job_id, SchedulerJob::TrackersRun, "0 10 10 10 * *");
+        // Persist a one-shot retry job (schedule = None, job_type = OneShot/2) at the
+        // shape that `TrackersRunJob::create_retry` writes when scheduling a retry.
+        let mut mock_job = mock_scheduler_job(job_id, SchedulerJob::TrackersRun, "");
+        mock_job.schedule = None;
+        mock_job.job_type = 2;
+        mock_job.next_tick =
+            Some((OffsetDateTime::now_utc() + Duration::from_secs(60)).unix_timestamp());
         mock_job.extra = Some(Vec::try_from(
             &*SchedulerJobMetadata::new(SchedulerJob::TrackersRun).set_retry_attempt(2),
         )?);
@@ -566,27 +612,21 @@ mod tests {
 
         let mut job = TrackersRunJob::try_resume(api.clone(), mock_job)
             .await?
-            .unwrap();
-        let job_data = job
-            .job_data()
-            .map(|job_data| (job_data.job_type, job_data.extra, job_data.job))?;
-        assert_debug_snapshot!(job_data, @r###"
-        (
-            0,
-            [
-                2,
-                0,
-                2,
-            ],
-            Some(
-                CronJob(
-                    CronJob {
-                        schedule: "0 10 10 10 * *",
-                    },
-                ),
-            ),
-        )
-        "###);
+            .expect("one-shot retry job should be resumable");
+        let job_data = job.job_data()?;
+        // `job_type = 2` (OneShot) and `retry_attempt = 2` survive the resume round-trip.
+        assert_eq!(job_data.job_type, 2);
+        assert_eq!(
+            SchedulerJobMetadata::try_from(job_data.extra.as_slice())?,
+            *SchedulerJobMetadata::new(SchedulerJob::TrackersRun).set_retry_attempt(2)
+        );
+        // The inner job is a `NonCronJob` (no cron schedule string).
+        match job_data.job {
+            Some(tokio_cron_scheduler::job::job_data_prost::job_stored_data::Job::NonCronJob(
+                _,
+            )) => {}
+            other => panic!("expected NonCronJob, got {other:?}"),
+        }
 
         let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
         assert!(unscheduled_trackers.is_empty());
@@ -598,6 +638,58 @@ mod tests {
                 .unwrap()
                 .id,
             tracker.id
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn removes_legacy_cron_style_retry_job(pool: PgPool) -> anyhow::Result<()> {
+        let api = Arc::new(mock_api(pool).await?);
+
+        let job_id = uuid!("00000000-0000-0000-0000-000000000000");
+
+        // Create tracker with retry config.
+        let mut create_params = TrackerCreateParamsBuilder::new("tracker").build();
+        create_params.config.job = Some(SchedulerJobConfig {
+            schedule: "0 0 * * * *".to_string(),
+            retry_strategy: Some(SchedulerJobRetryStrategy::Constant {
+                interval: Duration::from_secs(60),
+                max_attempts: 3,
+            }),
+        });
+        let tracker = api.trackers().create_tracker(create_params).await?;
+        api.trackers().set_tracker_job(tracker.id, job_id).await?;
+
+        // Mimic a retry job persisted by the pre-one-shot code path: a 6-field cron
+        // (`<sec> <min> <hour> <dom> <month> *`) with a `retry_attempt > 0` metadata.
+        // The new `try_resume` must recognise this as stale and unstick the tracker.
+        let mut mock_job = mock_scheduler_job(job_id, SchedulerJob::TrackersRun, "0 10 10 10 5 *");
+        mock_job.extra = Some(Vec::try_from(
+            &*SchedulerJobMetadata::new(SchedulerJob::TrackersRun).set_retry_attempt(2),
+        )?);
+        mock_upsert_scheduler_job(&api.db, &mock_job).await?;
+
+        let job = TrackersRunJob::try_resume(api.clone(), mock_job).await?;
+        assert!(
+            job.is_none(),
+            "legacy cron-style retry should be dropped from the scheduler"
+        );
+
+        // Tracker should now be unscheduled (job_id cleared) and visible to the scheduling job.
+        let unscheduled_trackers = api.trackers().get_trackers_to_schedule().await?;
+        assert_eq!(
+            unscheduled_trackers,
+            vec![Tracker {
+                job_id: None,
+                ..tracker
+            }]
+        );
+        assert!(
+            api.trackers()
+                .get_tracker_by_job_id(job_id)
+                .await?
+                .is_none()
         );
 
         Ok(())
@@ -1641,25 +1733,28 @@ mod tests {
             "original scheduler_jobs row should be removed once the retry is registered"
         );
 
-        // The new `scheduler_jobs` row must carry the retry's 6-field cron schedule with
-        // day-of-week left unrestricted, plus `retry_attempt = 1`.
+        // The new `scheduler_jobs` row must be a `tokio_cron_scheduler` one-shot:
+        // `schedule = None`, `job_type = OneShot` (= 2), `next_tick` in the near future,
+        // and `retry_attempt = 1` in its metadata.
         let new_job = mock_get_scheduler_job(&api.db, new_job_id)
             .await?
             .expect("retry scheduler_jobs row must exist");
-        let schedule = new_job
-            .schedule
-            .as_ref()
-            .expect("retry job must have a schedule")
-            .clone();
-        let fields: Vec<&str> = schedule.split_whitespace().collect();
-        assert_eq!(
-            fields.len(),
-            6,
-            "retry schedule must be a 6-field cron expression: {schedule}"
+        assert!(
+            new_job.schedule.is_none(),
+            "one-shot retry must not carry a cron schedule string: {:?}",
+            new_job.schedule
         );
         assert_eq!(
-            fields[5], "*",
-            "retry schedule must leave day-of-week unrestricted: {schedule}"
+            new_job.job_type, 2,
+            "one-shot retry must persist `job_type = OneShot` (2)"
+        );
+        let next_tick = new_job
+            .next_tick
+            .expect("one-shot retry must have a concrete next_tick");
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        assert!(
+            next_tick >= now - 5 && next_tick <= now + 120,
+            "retry next_tick should sit near `now + retry_interval` (60s): next_tick={next_tick}, now={now}"
         );
         let meta = SchedulerJobMetadata::try_from(new_job.extra.as_deref().unwrap())?;
         assert_eq!(meta.job_type, SchedulerJob::TrackersRun);
