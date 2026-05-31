@@ -17,12 +17,32 @@ RUN set -x \
     && rm -rf /var/lib/apt/lists/*
 
 # Layer 2: Camoufox install + patch + fetch
+#
+# CAMOUFOX_BUILD is the camoufox build ID to fetch. Note this is the *asset* build
+# label, which differs from the upstream git tag: daijro release `v150.0.2-beta.25`
+# ships its Linux asset as `camoufox-150.0.2-alpha.25-lin.arm64.zip`, so the build
+# ID camoufox understands is `150.0.2-alpha.25` (not `-beta.25`).
+#
+# Two upstream gotchas make this pin fragile, hence the explicit verification below:
+#   1. `camoufox fetch <id>` exits 0 even when the build is absent from the synced
+#      repo cache, silently baking a browser-less image that crash-loops at runtime
+#      with `CamoufoxNotInstalled`.
+#   2. `camoufox sync` dedups available builds by their *build label* alone
+#      (`seen_builds`), so when two daijro releases share a label (e.g. both
+#      `146.0.1` and `150.0.2` ship `alpha.25`), only the newest survives in the
+#      cache and the older `<version>-<label>` id stops resolving. This is why the
+#      previous `official/146.0.1-alpha.25` pin broke once `v150.0.2` was published.
+# The `test` guards turn either failure into a hard build error instead of a
+# runtime crash loop.
+ARG CAMOUFOX_BUILD=150.0.2-alpha.25
 RUN set -x \
     && pip install cloverlabs-camoufox==0.5.5 \
     && pip install "git+https://github.com/microsoft/playwright-python.git@release-1.59" \
     && sed -i 's/fontconfigs/fontconfig/g' /usr/local/lib/python3.14/site-packages/camoufox/utils.py \
     && python -m camoufox sync \
-    && echo y | python -m camoufox fetch official/146.0.1-alpha.25
+    && echo y | python -m camoufox fetch "official/${CAMOUFOX_BUILD}" \
+    && test -d "/root/.cache/camoufox/browsers/official/${CAMOUFOX_BUILD}" \
+    && test -n "$(ls -A "/root/.cache/camoufox/browsers/official/${CAMOUFOX_BUILD}")"
 
 # Layer 3: Remove build-only packages
 RUN apt-get purge -y --auto-remove git curl \

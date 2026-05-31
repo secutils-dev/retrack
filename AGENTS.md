@@ -128,7 +128,29 @@ What to watch for:
   (`python -m camoufox fetch official/<id>`) must move together. Only bump the Firefox
   ID when `cloverlabs-camoufox` has been released against it; otherwise the loader
   rejects the binary. The current set has `cloverlabs-camoufox==0.5.5` +
-  `playwright-python@release-1.59` + `official/146.0.1-alpha.25`.
+  `playwright-python@release-1.59` + `official/150.0.2-alpha.25` (pinned via the
+  `CAMOUFOX_BUILD` ARG in `Dockerfile.web-scraper-camoufox`).
+- **The Camoufox build ID is the *asset* label, not the git tag.** daijro publishes
+  releases under tags like `v150.0.2-beta.25`, but the Linux asset inside is
+  `camoufox-150.0.2-alpha.25-lin.arm64.zip` — so the id camoufox resolves is
+  `150.0.2-alpha.25` (`-alpha`, not `-beta`). Read the actual asset filename from the
+  release, not the tag name, when bumping the pin.
+- **`camoufox fetch` fails silently; the Dockerfile guards against it.** `camoufox
+  fetch official/<id>` exits 0 even when `<id>` is absent from the synced repo cache,
+  which would bake a *browser-less* image that crash-loops at runtime with
+  `CamoufoxNotInstalled: official/stable is not installed`. The fetch RUN layer asserts
+  the browser dir (`/root/.cache/camoufox/browsers/official/<id>`) exists and is
+  non-empty so a dead pin breaks the build instead of e2e-up. If you hit
+  `CamoufoxNotInstalled` after `make e2e-up`, the camoufox image was built against an
+  id that no longer resolves — re-pin and rebuild (`make e2e-up BUILD=1`).
+- **`camoufox sync` dedups builds by label, which expires older pins.** The sync cache
+  keys available builds by their build label alone (`seen_builds`), so when two daijro
+  releases ship the same label (e.g. both `146.0.1` and `150.0.2` carry `alpha.25`),
+  only the newest survives in the cache and the older `<version>-<label>` id stops
+  resolving. This is exactly what retired the previous `official/146.0.1-alpha.25` pin
+  once `v150.0.2` was published. Camoufox also sorts builds by label (`alpha` < `beta`),
+  so the newest Firefox can rank *below* stale `*-beta` builds in `official/stable` —
+  always pin the explicit `<version>-<label>` you verified, do not rely on `stable`.
 - **`playwright-python` minor** must match the `playwright-core` minor pinned in stage 3
   (currently `1.59`). The Camoufox image's Playwright driver speaks the protocol of the
   matching Node-side Playwright; mismatches surface as cryptic "browser closed
