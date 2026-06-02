@@ -128,13 +128,21 @@ What to watch for:
   (`python -m camoufox fetch official/<id>`) must move together. Only bump the Firefox
   ID when `cloverlabs-camoufox` has been released against it; otherwise the loader
   rejects the binary. The current set has `cloverlabs-camoufox==0.5.5` +
-  `playwright-python@release-1.59` + `official/150.0.2-alpha.25` (pinned via the
-  `CAMOUFOX_BUILD` ARG in `Dockerfile.web-scraper-camoufox`).
-- **The Camoufox build ID is the *asset* label, not the git tag.** daijro publishes
-  releases under tags like `v150.0.2-beta.25`, but the Linux asset inside is
-  `camoufox-150.0.2-alpha.25-lin.arm64.zip` — so the id camoufox resolves is
-  `150.0.2-alpha.25` (`-alpha`, not `-beta`). Read the actual asset filename from the
-  release, not the tag name, when bumping the pin.
+  `playwright-python@release-1.59` + Firefox `150.0.2`, pinned via the
+  `CAMOUFOX_VERSION` ARG in `Dockerfile.web-scraper-camoufox`. **Pin the version,
+  not the full build label** — see the next two bullets for why.
+- **The Camoufox build ID is the *asset* label, and it differs per architecture.**
+  daijro publishes releases under tags like `v150.0.2-beta.25`, but the build id
+  camoufox resolves comes from the *asset filename*, which is both `-alpha` (not the
+  tag's `-beta`) **and architecture-specific**: `v150.0.2-beta.25` ships
+  `camoufox-150.0.2-alpha.25-lin.arm64.zip` on arm64 but
+  `camoufox-150.0.2-alpha.26-lin.x86_64.zip` on x86_64. Hardcoding a full
+  `<version>-<label>` id therefore only builds on one arch — a local arm64 build can
+  pass while CI's amd64 `docker bake` fails on the exact same id. The Dockerfile
+  avoids this by pinning only `CAMOUFOX_VERSION` and resolving the arch-correct
+  `<version>-<label>` from the platform-filtered `repo_cache.json` after
+  `camoufox sync`, then fetching that. When bumping, set `CAMOUFOX_VERSION` to the
+  Firefox version (e.g. `150.0.2`), never the build label.
 - **`camoufox fetch` fails silently; the Dockerfile guards against it.** `camoufox
   fetch official/<id>` exits 0 even when `<id>` is absent from the synced repo cache,
   which would bake a *browser-less* image that crash-loops at runtime with
@@ -150,7 +158,9 @@ What to watch for:
   resolving. This is exactly what retired the previous `official/146.0.1-alpha.25` pin
   once `v150.0.2` was published. Camoufox also sorts builds by label (`alpha` < `beta`),
   so the newest Firefox can rank *below* stale `*-beta` builds in `official/stable` —
-  always pin the explicit `<version>-<label>` you verified, do not rely on `stable`.
+  do not rely on `stable`. This is why the Dockerfile resolves the build by matching
+  the pinned `CAMOUFOX_VERSION` against the synced cache (per the previous bullet)
+  rather than fetching `official/stable` or trusting "latest".
 - **`playwright-python` minor** must match the `playwright-core` minor pinned in stage 3
   (currently `1.59`). The Camoufox image's Playwright driver speaks the protocol of the
   matching Node-side Playwright; mismatches surface as cryptic "browser closed

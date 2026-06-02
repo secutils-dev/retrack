@@ -18,28 +18,35 @@ RUN set -x \
 
 # Layer 2: Camoufox install + patch + fetch
 #
-# CAMOUFOX_BUILD is the camoufox build ID to fetch. Note this is the *asset* build
-# label, which differs from the upstream git tag: daijro release `v150.0.2-beta.25`
-# ships its Linux asset as `camoufox-150.0.2-alpha.25-lin.arm64.zip`, so the build
-# ID camoufox understands is `150.0.2-alpha.25` (not `-beta.25`).
+# CAMOUFOX_VERSION is the Firefox version to pin (NOT the build label). The build
+# label is resolved per-architecture from the synced repo cache below, because
+# daijro tags the *same* version with a *different* build label on each arch:
+# release `v150.0.2-beta.25` ships `camoufox-150.0.2-alpha.25-lin.arm64.zip` on
+# arm64 but `camoufox-150.0.2-alpha.26-lin.x86_64.zip` on x86_64. Hardcoding a full
+# `<version>-<label>` id therefore only builds on one architecture (this is why CI
+# on amd64 failed while local arm64 builds passed). Note the label is also `alpha`,
+# not the `beta` from the git tag.
 #
-# Two upstream gotchas make this pin fragile, hence the explicit verification below:
-#   1. `camoufox fetch <id>` exits 0 even when the build is absent from the synced
-#      repo cache, silently baking a browser-less image that crash-loops at runtime
-#      with `CamoufoxNotInstalled`.
-#   2. `camoufox sync` dedups available builds by their *build label* alone
+# Three upstream gotchas, all guarded below so they fail the build loudly instead
+# of silently shipping a browser-less image that crash-loops at runtime with
+# `CamoufoxNotInstalled`:
+#   1. `camoufox fetch <id>` exits 0 even when the build is absent from the cache.
+#   2. The build label is architecture-specific (see above), so we resolve it from
+#      the platform-filtered cache rather than hardcoding it.
+#   3. `camoufox sync` dedups available builds by their *build label* alone
 #      (`seen_builds`), so when two daijro releases share a label (e.g. both
-#      `146.0.1` and `150.0.2` ship `alpha.25`), only the newest survives in the
-#      cache and the older `<version>-<label>` id stops resolving. This is why the
-#      previous `official/146.0.1-alpha.25` pin broke once `v150.0.2` was published.
-# The `test` guards turn either failure into a hard build error instead of a
-# runtime crash loop.
-ARG CAMOUFOX_BUILD=150.0.2-alpha.25
-RUN set -x \
+#      `146.0.1` and `150.0.2` ship `alpha.25` on arm64), only the newest survives
+#      in the cache and the older id stops resolving. This is why the previous
+#      `official/146.0.1-alpha.25` pin broke once `v150.0.2` was published.
+ARG CAMOUFOX_VERSION=150.0.2
+RUN set -eux \
     && pip install cloverlabs-camoufox==0.5.5 \
     && pip install "git+https://github.com/microsoft/playwright-python.git@release-1.59" \
     && sed -i 's/fontconfigs/fontconfig/g' /usr/local/lib/python3.14/site-packages/camoufox/utils.py \
     && python -m camoufox sync \
+    && CAMOUFOX_BUILD="$(python -c "import json; d=json.load(open('/root/.cache/camoufox/repo_cache.json')); print(next((x['version']+'-'+x['build'] for r in d['repos'] if r['name']=='Official' for x in r['versions'] if x['version']=='${CAMOUFOX_VERSION}'), ''))")" \
+    && test -n "${CAMOUFOX_BUILD}" \
+    && echo "Resolved Camoufox build for ${CAMOUFOX_VERSION}: ${CAMOUFOX_BUILD}" \
     && echo y | python -m camoufox fetch "official/${CAMOUFOX_BUILD}" \
     && test -d "/root/.cache/camoufox/browsers/official/${CAMOUFOX_BUILD}" \
     && test -n "$(ls -A "/root/.cache/camoufox/browsers/official/${CAMOUFOX_BUILD}")"
