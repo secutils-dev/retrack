@@ -32,7 +32,6 @@ pub enum TrackersListSort {
     CreatedAt,
     #[default]
     UpdatedAt,
-    Enabled,
     ScheduledAt,
     LastRanAt,
 }

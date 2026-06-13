@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,\n       t.job_id, t.job_needed,\n       to_timestamp(sj.next_tick) as scheduled_at,\n       to_timestamp(sj.last_tick) as last_ran_at\nFROM trackers t\nLEFT JOIN scheduler_jobs sj ON t.job_id = sj.id\nORDER BY t.updated_at, t.id\n                ",
+  "query": "SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, t.job_id, t.job_needed, to_timestamp(sj.next_tick) AS scheduled_at, to_timestamp(sj.last_tick) AS last_ran_at FROM trackers t LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id WHERE t.tags @> $1 AND ($2::text IS NULL OR t.name ILIKE ('%' || $2 || '%') ESCAPE '\\') ORDER BY sj.next_tick DESC NULLS LAST, t.id DESC LIMIT $3 OFFSET $4",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,12 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "TextArray",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -76,5 +81,5 @@
       null
     ]
   },
-  "hash": "c3224d2b9965aeccadee454a4bfbaf6cdec099454fd06460fcd7c8a703bec6cb"
+  "hash": "e2018ff2ff4702b8049301ecc4e360aaf2e909998a5f6c3f9cc969aba9d3897f"
 }

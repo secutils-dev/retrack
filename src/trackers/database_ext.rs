@@ -20,6 +20,46 @@ use sqlx::{Pool, Postgres, error::ErrorKind as SqlxErrorKind, query, query_as, q
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// Shared `SELECT` projection (including the scheduler-job join) for every query that hydrates a
+/// [`RawTracker`]. Callers append SQL fragments (`WHERE`/`ORDER BY`/`LIMIT`/...) as string literals
+/// after the projection, optionally followed by `;` and the bind arguments. Everything is joined
+/// with `+` into a single string literal so `query_as!` keeps validating the query at compile time
+/// (`query_as!` matches columns to `RawTracker` fields by name, so the projection order is fixed in
+/// one place here).
+macro_rules! select_trackers {
+    ($($frag:literal),+ $(; $($arg:expr),* $(,)?)?) => {
+        query_as!(
+            RawTracker,
+            "SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, \
+             t.job_id, t.job_needed, \
+             to_timestamp(sj.next_tick) AS scheduled_at, \
+             to_timestamp(sj.last_tick) AS last_ran_at \
+             FROM trackers t \
+             LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id "
+            $(+ $frag)+
+            $($(, $arg)*)?
+        )
+    };
+}
+
+/// Builds and runs a single page query for [`TrackersDatabaseExt::get_trackers`]. Only the
+/// `ORDER BY` clause differs between sort/order combinations, keeping it a string literal (instead
+/// of a bound parameter inside a `CASE` ladder) lets every variant be validated at compile time and
+/// lets Postgres use a plain, index-friendly `ORDER BY`. The trailing `id` tie-break always follows
+/// the requested direction. Returns `sqlx::Result<Vec<RawTracker>>`.
+macro_rules! select_trackers_page {
+    ($order_by:literal, $pool:expr, $tags:expr, $query:expr, $params:expr) => {
+        select_trackers!(
+            r#"WHERE t.tags @> $1 AND ($2::text IS NULL OR t.name ILIKE ('%' || $2 || '%') ESCAPE '\') "#,
+            $order_by,
+            " LIMIT $3 OFFSET $4";
+            $tags, $query, $params.limit, $params.offset
+        )
+        .fetch_all($pool)
+        .await
+    };
+}
+
 /// A database extension for the trackers-related operations.
 pub struct TrackersDatabaseExt<'pool> {
     pool: &'pool Pool<Postgres>,
@@ -34,37 +74,13 @@ impl<'pool> TrackersDatabaseExt<'pool> {
     /// trackers are returned.
     pub async fn get_all_trackers(&self, tags: &[String]) -> anyhow::Result<Vec<Tracker>> {
         let raw_trackers = if tags.is_empty() {
-            query_as!(
-                RawTracker,
-                r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_id, t.job_needed,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-ORDER BY t.updated_at, t.id
-                "#
-            )
-            .fetch_all(self.pool)
-            .await?
+            select_trackers!("ORDER BY t.updated_at, t.id")
+                .fetch_all(self.pool)
+                .await?
         } else {
-            query_as!(
-                RawTracker,
-                r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_id, t.job_needed,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-WHERE t.tags @> $1
-ORDER BY t.updated_at, t.id
-                "#,
-                tags
-            )
-            .fetch_all(self.pool)
-            .await?
+            select_trackers!("WHERE t.tags @> $1 ORDER BY t.updated_at, t.id"; tags)
+                .fetch_all(self.pool)
+                .await?
         };
 
         let mut trackers = vec![];
@@ -82,56 +98,81 @@ ORDER BY t.updated_at, t.id
         params: &ResolvedTrackersListParams,
     ) -> anyhow::Result<(Vec<Tracker>, i64)> {
         let query = params.query.as_deref();
-        let sort = match params.sort {
-            TrackersListSort::Name => "name",
-            TrackersListSort::CreatedAt => "createdAt",
-            TrackersListSort::UpdatedAt => "updatedAt",
-            TrackersListSort::Enabled => "enabled",
-            TrackersListSort::ScheduledAt => "scheduledAt",
-            TrackersListSort::LastRanAt => "lastRanAt",
-        };
-        let order = match params.order {
-            SortOrder::Asc => "asc",
-            SortOrder::Desc => "desc",
-        };
 
-        let raw_trackers = query_as!(
-            RawTracker,
-            r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_id, t.job_needed,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-WHERE t.tags @> $1
-  AND ($2::text IS NULL OR t.name ILIKE ('%' || $2 || '%') ESCAPE '\')
-ORDER BY
-  CASE WHEN $5 = 'name' AND $6 = 'asc' THEN lower(t.name) END ASC NULLS LAST,
-  CASE WHEN $5 = 'name' AND $6 = 'desc' THEN lower(t.name) END DESC NULLS LAST,
-  CASE WHEN $5 = 'createdAt' AND $6 = 'asc' THEN t.created_at END ASC NULLS LAST,
-  CASE WHEN $5 = 'createdAt' AND $6 = 'desc' THEN t.created_at END DESC NULLS LAST,
-  CASE WHEN $5 = 'updatedAt' AND $6 = 'asc' THEN t.updated_at END ASC NULLS LAST,
-  CASE WHEN $5 = 'updatedAt' AND $6 = 'desc' THEN t.updated_at END DESC NULLS LAST,
-  CASE WHEN $5 = 'enabled' AND $6 = 'asc' THEN t.enabled END ASC NULLS LAST,
-  CASE WHEN $5 = 'enabled' AND $6 = 'desc' THEN t.enabled END DESC NULLS LAST,
-  CASE WHEN $5 = 'scheduledAt' AND $6 = 'asc' THEN sj.next_tick END ASC NULLS LAST,
-  CASE WHEN $5 = 'scheduledAt' AND $6 = 'desc' THEN sj.next_tick END DESC NULLS LAST,
-  CASE WHEN $5 = 'lastRanAt' AND $6 = 'asc' THEN sj.last_tick END ASC NULLS LAST,
-  CASE WHEN $5 = 'lastRanAt' AND $6 = 'desc' THEN sj.last_tick END DESC NULLS LAST,
-  CASE WHEN $6 = 'asc' THEN t.id END ASC,
-  CASE WHEN $6 = 'desc' THEN t.id END DESC
-LIMIT $3 OFFSET $4
-            "#,
-            tags,
-            query,
-            params.limit,
-            params.offset,
-            sort,
-            order
-        )
-        .fetch_all(self.pool)
-        .await?;
+        // Only the `ORDER BY` clause varies per sort/order, so each variant is a distinct, fully
+        // compile-time-validated query rather than a runtime-bound `CASE` ladder.
+        let raw_trackers = match (params.sort, params.order) {
+            (TrackersListSort::Name, SortOrder::Asc) => select_trackers_page!(
+                "ORDER BY lower(t.name) ASC NULLS LAST, t.id ASC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::Name, SortOrder::Desc) => select_trackers_page!(
+                "ORDER BY lower(t.name) DESC NULLS LAST, t.id DESC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::CreatedAt, SortOrder::Asc) => select_trackers_page!(
+                "ORDER BY t.created_at ASC NULLS LAST, t.id ASC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::CreatedAt, SortOrder::Desc) => select_trackers_page!(
+                "ORDER BY t.created_at DESC NULLS LAST, t.id DESC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::UpdatedAt, SortOrder::Asc) => select_trackers_page!(
+                "ORDER BY t.updated_at ASC NULLS LAST, t.id ASC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::UpdatedAt, SortOrder::Desc) => select_trackers_page!(
+                "ORDER BY t.updated_at DESC NULLS LAST, t.id DESC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::ScheduledAt, SortOrder::Asc) => select_trackers_page!(
+                "ORDER BY sj.next_tick ASC NULLS LAST, t.id ASC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::ScheduledAt, SortOrder::Desc) => select_trackers_page!(
+                "ORDER BY sj.next_tick DESC NULLS LAST, t.id DESC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::LastRanAt, SortOrder::Asc) => select_trackers_page!(
+                "ORDER BY sj.last_tick ASC NULLS LAST, t.id ASC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+            (TrackersListSort::LastRanAt, SortOrder::Desc) => select_trackers_page!(
+                "ORDER BY sj.last_tick DESC NULLS LAST, t.id DESC",
+                self.pool,
+                tags,
+                query,
+                params
+            )?,
+        };
 
         let total = query_scalar!(
             r#"
@@ -160,22 +201,10 @@ WHERE t.tags @> $1
             return Ok(vec![]);
         }
 
-        let raw_trackers = query_as!(
-            RawTracker,
-            r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_id, t.job_needed,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-WHERE t.id = ANY($1)
-ORDER BY t.updated_at, t.id
-            "#,
-            ids
-        )
-        .fetch_all(self.pool)
-        .await?;
+        let raw_trackers =
+            select_trackers!("WHERE t.id = ANY($1) ORDER BY t.updated_at, t.id"; ids)
+                .fetch_all(self.pool)
+                .await?;
 
         let mut trackers = vec![];
         for raw_tracker in raw_trackers {
@@ -187,23 +216,11 @@ ORDER BY t.updated_at, t.id
 
     /// Retrieves tracker with the specified ID.
     pub async fn get_tracker(&self, id: Uuid) -> anyhow::Result<Option<Tracker>> {
-        query_as!(
-            RawTracker,
-            r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_id, t.job_needed,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-WHERE t.id = $1
-            "#,
-            id
-        )
-        .fetch_optional(self.pool)
-        .await?
-        .map(Tracker::try_from)
-        .transpose()
+        select_trackers!("WHERE t.id = $1"; id)
+            .fetch_optional(self.pool)
+            .await?
+            .map(Tracker::try_from)
+            .transpose()
     }
 
     /// Inserts tracker.
@@ -551,18 +568,9 @@ LIMIT 1
     /// Retrieves all trackers that need to be scheduled (either don't have associated job ID or
     /// job ID isn't valid).
     pub async fn get_trackers_to_schedule(&self) -> anyhow::Result<Vec<Tracker>> {
-        let raw_trackers = query_as!(
-            RawTracker,
-            r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_needed, t.job_id,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers as t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-WHERE t.job_needed = TRUE AND t.enabled = TRUE AND (t.job_id IS NULL OR sj.id IS NULL)
-ORDER BY t.updated_at, t.id
-                "#
+        let raw_trackers = select_trackers!(
+            "WHERE t.job_needed = TRUE AND t.enabled = TRUE AND (t.job_id IS NULL OR sj.id IS NULL) \
+             ORDER BY t.updated_at, t.id"
         )
         .fetch_all(self.pool)
         .await?;
@@ -575,23 +583,11 @@ ORDER BY t.updated_at, t.id
 
     /// Retrieves tracker by the specified job ID.
     pub async fn get_tracker_by_job_id(&self, job_id: Uuid) -> anyhow::Result<Option<Tracker>> {
-        query_as!(
-            RawTracker,
-            r#"
-SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
-       t.job_needed, t.job_id,
-       to_timestamp(sj.next_tick) as scheduled_at,
-       to_timestamp(sj.last_tick) as last_ran_at
-FROM trackers t
-LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
-WHERE t.job_id = $1
-            "#,
-            job_id
-        )
-        .fetch_optional(self.pool)
-        .await?
-        .map(Tracker::try_from)
-        .transpose()
+        select_trackers!("WHERE t.job_id = $1"; job_id)
+            .fetch_optional(self.pool)
+            .await?
+            .map(Tracker::try_from)
+            .transpose()
     }
 
     /// Inserts a tracker execution log entry.
@@ -1249,10 +1245,6 @@ mod tests {
         assert_eq!(
             sorted_ids(&trackers, TrackersListSort::UpdatedAt, SortOrder::Asc).await?,
             vec![tracker_three.id, tracker_two.id, tracker_one.id]
-        );
-        assert_eq!(
-            sorted_ids(&trackers, TrackersListSort::Enabled, SortOrder::Asc).await?,
-            vec![tracker_three.id, tracker_one.id, tracker_two.id]
         );
         assert_eq!(
             sorted_ids(&trackers, TrackersListSort::ScheduledAt, SortOrder::Asc).await?,
