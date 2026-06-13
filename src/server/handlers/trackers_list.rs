@@ -278,11 +278,7 @@ mod tests {
 
         let response = call_service(
             &app,
-            TestRequest::with_uri(&format!(
-                "https://retrack.dev/api/trackers?q={}",
-                tracker_1.id
-            ))
-            .to_request(),
+            TestRequest::with_uri("https://retrack.dev/api/trackers?q=name_one").to_request(),
         )
         .await;
         assert_eq!(response.status(), 200);
