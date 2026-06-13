@@ -82,7 +82,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert!(trackers[0].enabled);
@@ -161,7 +162,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert_eq!(trackers.len(), 1);
         assert_eq!(trackers[0].name, "my-minimal-tracker");
         assert!(!trackers[0].enabled);
@@ -247,6 +249,7 @@ mod tests {
                 .trackers()
                 .get_trackers(Default::default())
                 .await?
+                .items
                 .is_empty()
         );
 

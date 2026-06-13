@@ -12,8 +12,11 @@ use crate::{
 };
 use anyhow::{Context, anyhow, bail};
 use raw_tracker::RawTracker;
-use retrack_types::trackers::{Tracker, TrackerDataRevision, TrackerExecutionLog};
-use sqlx::{Pool, Postgres, error::ErrorKind as SqlxErrorKind, query, query_as};
+use retrack_types::trackers::{
+    ResolvedTrackersListParams, SortOrder, Tracker, TrackerDataRevision, TrackerExecutionLog,
+    TrackersListSort,
+};
+use sqlx::{Pool, Postgres, error::ErrorKind as SqlxErrorKind, query, query_as, query_scalar};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -29,7 +32,7 @@ impl<'pool> TrackersDatabaseExt<'pool> {
 
     /// Retrieves all trackers that have all specified tags. If the `tags` field is empty, all
     /// trackers are returned.
-    pub async fn get_trackers(&self, tags: &[String]) -> anyhow::Result<Vec<Tracker>> {
+    pub async fn get_all_trackers(&self, tags: &[String]) -> anyhow::Result<Vec<Tracker>> {
         let raw_trackers = if tags.is_empty() {
             query_as!(
                 RawTracker,
@@ -70,6 +73,85 @@ ORDER BY t.updated_at, t.id
         }
 
         Ok(trackers)
+    }
+
+    /// Retrieves a page of trackers that have all specified tags.
+    pub async fn get_trackers(
+        &self,
+        tags: &[String],
+        params: &ResolvedTrackersListParams,
+    ) -> anyhow::Result<(Vec<Tracker>, i64)> {
+        let query = params.query.as_deref();
+        let sort = match params.sort {
+            TrackersListSort::Name => "name",
+            TrackersListSort::CreatedAt => "createdAt",
+            TrackersListSort::UpdatedAt => "updatedAt",
+            TrackersListSort::Enabled => "enabled",
+            TrackersListSort::ScheduledAt => "scheduledAt",
+            TrackersListSort::LastRanAt => "lastRanAt",
+        };
+        let order = match params.order {
+            SortOrder::Asc => "asc",
+            SortOrder::Desc => "desc",
+        };
+
+        let raw_trackers = query_as!(
+            RawTracker,
+            r#"
+SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at,
+       t.job_id, t.job_needed,
+       to_timestamp(sj.next_tick) as scheduled_at,
+       to_timestamp(sj.last_tick) as last_ran_at
+FROM trackers t
+LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id
+WHERE t.tags @> $1
+  AND ($2::text IS NULL OR t.name ILIKE ('%' || $2 || '%') ESCAPE '\')
+ORDER BY
+  CASE WHEN $5 = 'name' AND $6 = 'asc' THEN lower(t.name) END ASC NULLS LAST,
+  CASE WHEN $5 = 'name' AND $6 = 'desc' THEN lower(t.name) END DESC NULLS LAST,
+  CASE WHEN $5 = 'createdAt' AND $6 = 'asc' THEN t.created_at END ASC NULLS LAST,
+  CASE WHEN $5 = 'createdAt' AND $6 = 'desc' THEN t.created_at END DESC NULLS LAST,
+  CASE WHEN $5 = 'updatedAt' AND $6 = 'asc' THEN t.updated_at END ASC NULLS LAST,
+  CASE WHEN $5 = 'updatedAt' AND $6 = 'desc' THEN t.updated_at END DESC NULLS LAST,
+  CASE WHEN $5 = 'enabled' AND $6 = 'asc' THEN t.enabled END ASC NULLS LAST,
+  CASE WHEN $5 = 'enabled' AND $6 = 'desc' THEN t.enabled END DESC NULLS LAST,
+  CASE WHEN $5 = 'scheduledAt' AND $6 = 'asc' THEN sj.next_tick END ASC NULLS LAST,
+  CASE WHEN $5 = 'scheduledAt' AND $6 = 'desc' THEN sj.next_tick END DESC NULLS LAST,
+  CASE WHEN $5 = 'lastRanAt' AND $6 = 'asc' THEN sj.last_tick END ASC NULLS LAST,
+  CASE WHEN $5 = 'lastRanAt' AND $6 = 'desc' THEN sj.last_tick END DESC NULLS LAST,
+  CASE WHEN $6 = 'asc' THEN t.id END ASC,
+  CASE WHEN $6 = 'desc' THEN t.id END DESC
+LIMIT $3 OFFSET $4
+            "#,
+            tags,
+            query,
+            params.limit,
+            params.offset,
+            sort,
+            order
+        )
+        .fetch_all(self.pool)
+        .await?;
+
+        let total = query_scalar!(
+            r#"
+SELECT COUNT(*) as "count!"
+FROM trackers t
+WHERE t.tags @> $1
+  AND ($2::text IS NULL OR t.name ILIKE ('%' || $2 || '%') ESCAPE '\')
+            "#,
+            tags,
+            query
+        )
+        .fetch_one(self.pool)
+        .await?;
+
+        let mut trackers = vec![];
+        for raw_tracker in raw_trackers {
+            trackers.push(Tracker::try_from(raw_tracker)?);
+        }
+
+        Ok((trackers, total))
     }
 
     /// Retrieves trackers with the specified IDs.
@@ -690,8 +772,8 @@ mod tests {
     };
     use insta::assert_debug_snapshot;
     use retrack_types::trackers::{
-        Tracker, TrackerDataRevision, TrackerDataValue, TrackerExecutionLog,
-        TrackerExecutionLogPhase, TrackerExecutionLogStatus,
+        SortOrder, Tracker, TrackerDataRevision, TrackerDataValue, TrackerExecutionLog,
+        TrackerExecutionLogPhase, TrackerExecutionLogStatus, TrackersListParams, TrackersListSort,
     };
     use serde_json::json;
     use sqlx::PgPool;
@@ -1008,7 +1090,182 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+        assert_eq!(trackers.get_all_trackers(&[]).await?, trackers_list);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_retrieve_trackers_page(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let trackers = db.trackers();
+        let trackers_list = vec![
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000001"), "Alpha", 3)?
+                .with_tags(vec!["tag:common".to_string()])
+                .build(),
+            MockTrackerBuilder::create(uuid!("00000000-0000-0000-0000-000000000002"), "Beta", 3)?
+                .with_tags(vec!["tag:common".to_string(), "tag:rare".to_string()])
+                .build(),
+            MockTrackerBuilder::create(
+                uuid!("00000000-0000-0000-0000-000000000003"),
+                "100%_literal",
+                3,
+            )?
+            .build(),
+        ];
+        for tracker in &trackers_list {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        let params = TrackersListParams {
+            page_size: Some(2),
+            sort: Some(TrackersListSort::Name),
+            ..Default::default()
+        }
+        .resolve();
+        let (page, total) = trackers.get_trackers(&[], &params).await?;
+        assert_eq!(total, 3);
+        assert_eq!(
+            page.into_iter()
+                .map(|tracker| tracker.id)
+                .collect::<Vec<_>>(),
+            vec![trackers_list[2].id, trackers_list[0].id]
+        );
+
+        let params = TrackersListParams {
+            page: Some(1),
+            page_size: Some(2),
+            sort: Some(TrackersListSort::Name),
+            ..Default::default()
+        }
+        .resolve();
+        let (page, total) = trackers.get_trackers(&[], &params).await?;
+        assert_eq!(total, 3);
+        assert_eq!(
+            page.into_iter()
+                .map(|tracker| tracker.id)
+                .collect::<Vec<_>>(),
+            vec![trackers_list[1].id]
+        );
+
+        let params = TrackersListParams {
+            q: Some("100%_".to_string()),
+            ..Default::default()
+        }
+        .resolve();
+        let (page, total) = trackers.get_trackers(&[], &params).await?;
+        assert_eq!(total, 1);
+        assert_eq!(page[0].id, trackers_list[2].id);
+
+        let params = TrackersListParams::default().resolve();
+        let (page, total) = trackers
+            .get_trackers(&["tag:common".to_string(), "tag:rare".to_string()], &params)
+            .await?;
+        assert_eq!(total, 1);
+        assert_eq!(page[0].id, trackers_list[1].id);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_sort_trackers_page(pool: PgPool) -> anyhow::Result<()> {
+        let db = Database::create(pool).await?;
+        let trackers = db.trackers();
+
+        let job_one_id = uuid!("00000000-0000-0000-0000-000000000101");
+        let job_two_id = uuid!("00000000-0000-0000-0000-000000000102");
+        let mut job_one = mock_scheduler_job(job_one_id, SchedulerJob::TrackersRun, "* * * * *");
+        job_one.next_tick = Some(946720900);
+        job_one.last_tick = Some(946720700);
+        mock_upsert_scheduler_job(&db, &job_one).await?;
+        let mut job_two = mock_scheduler_job(job_two_id, SchedulerJob::TrackersRun, "* * * * *");
+        job_two.next_tick = Some(946721000);
+        job_two.last_tick = Some(946720600);
+        mock_upsert_scheduler_job(&db, &job_two).await?;
+
+        let mut tracker_one = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000011"),
+            "b-tracker",
+            3,
+        )?
+        .with_job_id(job_one_id)
+        .build();
+        tracker_one.created_at = OffsetDateTime::from_unix_timestamp(946720810)?;
+        tracker_one.updated_at = OffsetDateTime::from_unix_timestamp(946720830)?;
+
+        let mut tracker_two = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000022"),
+            "a-tracker",
+            3,
+        )?
+        .with_job_id(job_two_id)
+        .build();
+        tracker_two.created_at = OffsetDateTime::from_unix_timestamp(946720820)?;
+        tracker_two.updated_at = OffsetDateTime::from_unix_timestamp(946720820)?;
+
+        let mut tracker_three = MockTrackerBuilder::create(
+            uuid!("00000000-0000-0000-0000-000000000033"),
+            "c-tracker",
+            3,
+        )?
+        .build();
+        tracker_three.enabled = false;
+        tracker_three.created_at = OffsetDateTime::from_unix_timestamp(946720800)?;
+        tracker_three.updated_at = OffsetDateTime::from_unix_timestamp(946720810)?;
+
+        for tracker in [&tracker_one, &tracker_two, &tracker_three] {
+            trackers.insert_tracker(tracker).await?;
+        }
+
+        async fn sorted_ids(
+            trackers: &super::TrackersDatabaseExt<'_>,
+            sort: TrackersListSort,
+            order: SortOrder,
+        ) -> anyhow::Result<Vec<Uuid>> {
+            let params = TrackersListParams {
+                sort: Some(sort),
+                order: Some(order),
+                page_size: Some(10),
+                ..Default::default()
+            }
+            .resolve();
+            Ok(trackers
+                .get_trackers(&[], &params)
+                .await?
+                .0
+                .into_iter()
+                .map(|tracker| tracker.id)
+                .collect())
+        }
+
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::Name, SortOrder::Asc).await?,
+            vec![tracker_two.id, tracker_one.id, tracker_three.id]
+        );
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::CreatedAt, SortOrder::Desc).await?,
+            vec![tracker_two.id, tracker_one.id, tracker_three.id]
+        );
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::UpdatedAt, SortOrder::Asc).await?,
+            vec![tracker_three.id, tracker_two.id, tracker_one.id]
+        );
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::Enabled, SortOrder::Asc).await?,
+            vec![tracker_three.id, tracker_one.id, tracker_two.id]
+        );
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::ScheduledAt, SortOrder::Asc).await?,
+            vec![tracker_one.id, tracker_two.id, tracker_three.id]
+        );
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::ScheduledAt, SortOrder::Desc).await?,
+            vec![tracker_two.id, tracker_one.id, tracker_three.id]
+        );
+        assert_eq!(
+            sorted_ids(&trackers, TrackersListSort::LastRanAt, SortOrder::Asc).await?,
+            vec![tracker_two.id, tracker_one.id, tracker_three.id]
+        );
 
         Ok(())
     }
@@ -1038,7 +1295,7 @@ mod tests {
         }
 
         assert_eq!(trackers.remove_trackers(&[]).await?, 2);
-        assert!(trackers.get_trackers(&[]).await?.is_empty());
+        assert!(trackers.get_all_trackers(&[]).await?.is_empty());
 
         Ok(())
     }
@@ -1075,24 +1332,24 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+        assert_eq!(trackers.get_all_trackers(&[]).await?, trackers_list);
         assert_eq!(
-            trackers.get_trackers(&["tag:1".to_string()]).await?,
+            trackers.get_all_trackers(&["tag:1".to_string()]).await?,
             vec![trackers_list[0].clone(), trackers_list[1].clone()]
         );
         assert_eq!(
-            trackers.get_trackers(&["tag:2".to_string()]).await?,
+            trackers.get_all_trackers(&["tag:2".to_string()]).await?,
             vec![trackers_list[1].clone()]
         );
         assert_eq!(
             trackers
-                .get_trackers(&["tag:1".to_string(), "tag:2".to_string()])
+                .get_all_trackers(&["tag:1".to_string(), "tag:2".to_string()])
                 .await?,
             vec![trackers_list[1].clone()]
         );
         assert!(
             trackers
-                .get_trackers(&[
+                .get_all_trackers(&[
                     "tag:1".to_string(),
                     "tag:2".to_string(),
                     "tag:3".to_string()
@@ -1143,27 +1400,27 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+        assert_eq!(trackers.get_all_trackers(&[]).await?, trackers_list);
         assert_eq!(trackers.remove_trackers(&["tag:1".to_string()]).await?, 2);
         assert_eq!(
-            trackers.get_trackers(&[]).await?,
+            trackers.get_all_trackers(&[]).await?,
             vec![trackers_list[2].clone(), trackers_list[3].clone()]
         );
 
         assert_eq!(trackers.remove_trackers(&["tag:2".to_string()]).await?, 0);
         assert_eq!(
-            trackers.get_trackers(&[]).await?,
+            trackers.get_all_trackers(&[]).await?,
             vec![trackers_list[2].clone(), trackers_list[3].clone()]
         );
 
         assert_eq!(trackers.remove_trackers(&["tag:3".to_string()]).await?, 1);
         assert_eq!(
-            trackers.get_trackers(&[]).await?,
+            trackers.get_all_trackers(&[]).await?,
             vec![trackers_list[3].clone()]
         );
 
         assert_eq!(trackers.remove_trackers(&[]).await?, 1);
-        assert!(trackers.get_trackers(&[]).await?.is_empty());
+        assert!(trackers.get_all_trackers(&[]).await?.is_empty());
 
         Ok(())
     }
@@ -1812,7 +2069,7 @@ mod tests {
             trackers.insert_tracker(tracker).await?;
         }
 
-        assert_eq!(trackers.get_trackers(&[]).await?, trackers_list);
+        assert_eq!(trackers.get_all_trackers(&[]).await?, trackers_list);
 
         let trackers = db.trackers();
         assert_eq!(
@@ -1831,7 +2088,7 @@ mod tests {
             )
             .await?;
         assert_eq!(
-            trackers.get_trackers(&[]).await?,
+            trackers.get_all_trackers(&[]).await?,
             vec![
                 trackers_list[0].clone(),
                 Tracker {
@@ -2470,7 +2727,7 @@ mod tests {
         job.last_tick = Some(946720700);
         mock_upsert_scheduler_job(&db, &job).await?;
 
-        let all_trackers = trackers.get_trackers(&[]).await?;
+        let all_trackers = trackers.get_all_trackers(&[]).await?;
         assert_eq!(all_trackers.len(), 2);
 
         let fetched_with_job = all_trackers

@@ -1,11 +1,15 @@
 @tracker = 0193089e-f3b7-7502-8633-5871baa96106
 
 ### Get trackers
-GET {{host}}/api/trackers
+GET {{host}}/api/trackers?page=0&pageSize=15&sort=updatedAt&order=asc
 Accept: application/json
 
 ### Get trackers by tags
-GET {{host}}/api/trackers?tag=app:retrack
+GET {{host}}/api/trackers?tag=app:retrack&page=0&pageSize=15
+Accept: application/json
+
+### Search trackers
+GET {{host}}/api/trackers?q=github&sort=name&order=asc
 Accept: application/json
 
 ### Get tracker by ID

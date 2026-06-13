@@ -34,13 +34,13 @@ use retrack_types::{
         ConfiguratorScriptResult, DEFAULT_EXECUTION_LOGS_BATCH_SIZE,
         DEFAULT_EXECUTION_LOGS_PAGE_SIZE, DEFAULT_REVISIONS_BATCH_SIZE, DebugOptions,
         EmailDestinationDebugInfo, ExtractorEngine, ExtractorScriptArgs, ExtractorScriptResult,
-        FormatterScriptArgs, FormatterScriptResult, PageLogEntry, PageScreenshotEntry, PageTarget,
-        PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo, ServerLogAction,
-        TargetRequest, TargetResponse, Tracker, TrackerAction, TrackerCreateParams,
-        TrackerDataRevision, TrackerDataRevisionImportParams, TrackerDataRevisionImportResult,
-        TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
-        TrackerDebugTargetResult, TrackerExecutionLog, TrackerExecutionLogPhase,
-        TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
+        FormatterScriptArgs, FormatterScriptResult, Page, PageLogEntry, PageScreenshotEntry,
+        PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
+        ServerLogAction, TargetRequest, TargetResponse, Tracker, TrackerAction,
+        TrackerCreateParams, TrackerDataRevision, TrackerDataRevisionImportParams,
+        TrackerDataRevisionImportResult, TrackerDataValue, TrackerDebugExistingParams,
+        TrackerDebugParams, TrackerDebugResult, TrackerDebugTargetResult, TrackerExecutionLog,
+        TrackerExecutionLogPhase, TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
         TrackerListExecutionLogsParams, TrackerListRevisionsBatchParams,
         TrackerListRevisionsParams, TrackerTarget, TrackerUpdateParams, TrackersListParams,
         WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
@@ -134,8 +134,9 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         }
     }
 
-    /// Returns all trackers.
-    pub async fn get_trackers(&self, params: TrackersListParams) -> anyhow::Result<Vec<Tracker>> {
+    /// Returns a page of trackers.
+    pub async fn get_trackers(&self, params: TrackersListParams) -> anyhow::Result<Page<Tracker>> {
+        let resolved_params = params.resolve();
         let normalized_tags = Self::normalize_tracker_tags(params.tags);
         if normalized_tags.len() > MAX_TRACKER_TAGS_COUNT {
             bail!(RetrackError::client(format!(
@@ -144,7 +145,11 @@ impl<'a, DR: DnsResolver> TrackersApiExt<'a, DR> {
         }
         Self::validate_tracker_tags(&normalized_tags)?;
 
-        self.trackers.get_trackers(&normalized_tags).await
+        let (trackers, total) = self
+            .trackers
+            .get_trackers(&normalized_tags, &resolved_params)
+            .await?;
+        Ok(Page::new(trackers, total))
     }
 
     /// Returns tracker by its ID.
@@ -2584,13 +2589,13 @@ mod tests {
     use retrack_types::{
         scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
         trackers::{
-            ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, TargetRequest,
-            Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
+            ApiTarget, EmailAction, ExtractorEngine, PageTarget, ServerLogAction, SortOrder,
+            TargetRequest, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
             TrackerDataRevisionImportParams, TrackerDataValue, TrackerDebugExistingParams,
             TrackerDebugParams, TrackerDebugTargetResult, TrackerExecutionLog,
             TrackerExecutionLogStatus, TrackerListExecutionLogsParams, TrackerListRevisionsParams,
-            TrackerTarget, TrackerUpdateParams, TrackersListParams, WebhookAction,
-            WebhookActionPayload, WebhookActionPayloadResult,
+            TrackerTarget, TrackerUpdateParams, TrackersListParams, TrackersListSort,
+            WebhookAction, WebhookActionPayload, WebhookActionPayloadResult,
         },
     };
     use serde_json::json;
@@ -4464,20 +4469,26 @@ mod tests {
             .await?;
 
         assert_eq!(
-            trackers.get_trackers(Default::default()).await?,
+            trackers.get_trackers(Default::default()).await?.items,
             vec![tracker_one.clone(), tracker_two.clone()],
         );
 
         trackers.remove_tracker(tracker_one.id).await?;
 
         assert_eq!(
-            trackers.get_trackers(Default::default()).await?,
+            trackers.get_trackers(Default::default()).await?.items,
             vec![tracker_two.clone()],
         );
 
         trackers.remove_tracker(tracker_two.id).await?;
 
-        assert!(trackers.get_trackers(Default::default()).await?.is_empty());
+        assert!(
+            trackers
+                .get_trackers(Default::default())
+                .await?
+                .items
+                .is_empty()
+        );
 
         Ok(())
     }
@@ -4527,7 +4538,13 @@ mod tests {
         let api = mock_api(pool).await?;
 
         let trackers = api.trackers();
-        assert!(trackers.get_trackers(Default::default()).await?.is_empty(),);
+        assert!(
+            trackers
+                .get_trackers(Default::default())
+                .await?
+                .items
+                .is_empty(),
+        );
 
         let tracker_one = trackers
             .create_tracker(
@@ -4545,7 +4562,7 @@ mod tests {
             )
             .await?;
         assert_eq!(
-            trackers.get_trackers(Default::default()).await?,
+            trackers.get_trackers(Default::default()).await?.items,
             vec![tracker_one.clone()],
         );
         let tracker_two = trackers
@@ -4565,49 +4582,104 @@ mod tests {
             .await?;
 
         assert_eq!(
-            trackers.get_trackers(Default::default()).await?,
+            trackers.get_trackers(Default::default()).await?.items,
             vec![tracker_one.clone(), tracker_two.clone()],
         );
         assert_eq!(
             trackers
                 .get_trackers(TrackersListParams {
-                    tags: vec!["tag:2".to_string()]
+                    tags: vec!["tag:2".to_string()],
+                    ..Default::default()
                 })
-                .await?,
+                .await?
+                .items,
             vec![tracker_two.clone()],
         );
         assert_eq!(
             trackers
                 .get_trackers(TrackersListParams {
-                    tags: vec!["tag:1".to_string()]
+                    tags: vec!["tag:1".to_string()],
+                    ..Default::default()
                 })
-                .await?,
+                .await?
+                .items,
             vec![tracker_one.clone()],
         );
         assert_eq!(
             trackers
                 .get_trackers(TrackersListParams {
-                    tags: vec!["tag:1".to_string(), "tag:common".to_string()]
+                    tags: vec!["tag:1".to_string(), "tag:common".to_string()],
+                    ..Default::default()
                 })
-                .await?,
+                .await?
+                .items,
             vec![tracker_one.clone()],
         );
         assert_eq!(
             trackers
                 .get_trackers(TrackersListParams {
-                    tags: vec!["tag:2".to_string(), "tag:common".to_string()]
+                    tags: vec!["tag:2".to_string(), "tag:common".to_string()],
+                    ..Default::default()
                 })
-                .await?,
+                .await?
+                .items,
             vec![tracker_two.clone()],
         );
         assert!(
             trackers
                 .get_trackers(TrackersListParams {
-                    tags: vec!["tag:unknown".to_string(), "tag:common".to_string()]
+                    tags: vec!["tag:unknown".to_string(), "tag:common".to_string()],
+                    ..Default::default()
                 })
                 .await?
+                .items
                 .is_empty()
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn properly_returns_trackers_page(pool: PgPool) -> anyhow::Result<()> {
+        let api = mock_api(pool).await?;
+
+        let trackers = api.trackers();
+        let tracker_one = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_one")
+                    .with_tags(vec!["Tag:Common".to_string()])
+                    .build(),
+            )
+            .await?;
+        let tracker_two = trackers
+            .create_tracker(
+                TrackerCreateParamsBuilder::new("name_two")
+                    .with_tags(vec!["tag:common".to_string(), "tag:rare".to_string()])
+                    .build(),
+            )
+            .await?;
+
+        let page = trackers
+            .get_trackers(TrackersListParams {
+                tags: vec!["TAG:COMMON".to_string()],
+                page: Some(1),
+                page_size: Some(1),
+                sort: Some(TrackersListSort::Name),
+                order: Some(SortOrder::Asc),
+                ..Default::default()
+            })
+            .await?;
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items, vec![tracker_two.clone()]);
+
+        let page = trackers
+            .get_trackers(TrackersListParams {
+                q: Some("name_one".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items, vec![tracker_one]);
 
         Ok(())
     }
@@ -4624,7 +4696,8 @@ mod tests {
         // Very long tag.
         assert_debug_snapshot!(
             list_and_fail(api.get_trackers(TrackersListParams {
-                tags: vec!["a".repeat(101)]
+                tags: vec!["a".repeat(101)],
+                ..Default::default()
             }).await),
             @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
@@ -4632,7 +4705,8 @@ mod tests {
         // Empty tag.
         assert_debug_snapshot!(
             list_and_fail(api.get_trackers(TrackersListParams {
-                tags: vec!["tag".to_string(), "".to_string()]
+                tags: vec!["tag".to_string(), "".to_string()],
+                ..Default::default()
             }).await),
             @r###""Tracker tags cannot be empty or longer than 100 characters.""###
         );
@@ -4640,7 +4714,8 @@ mod tests {
         // Too many tags.
         assert_debug_snapshot!(
             list_and_fail(api.get_trackers(TrackersListParams {
-                tags: (0..21).map(|i| i.to_string()).collect()
+                tags: (0..21).map(|i| i.to_string()).collect(),
+                ..Default::default()
             }).await),
             @r###""Trackers filter params cannot use more than 20 tags.""###
         );
@@ -4686,25 +4761,30 @@ mod tests {
             .await?;
 
         assert_eq!(
-            trackers.get_trackers(Default::default()).await?,
+            trackers.get_trackers(Default::default()).await?.items,
             vec![tracker_one.clone(), tracker_two.clone()],
         );
         assert_eq!(
             trackers
                 .remove_trackers(TrackersListParams {
-                    tags: vec!["tag:2".to_string()]
+                    tags: vec!["tag:2".to_string()],
+                    ..Default::default()
                 })
                 .await?,
             1
         );
         assert_eq!(
-            trackers.get_trackers(TrackersListParams::default()).await?,
+            trackers
+                .get_trackers(TrackersListParams::default())
+                .await?
+                .items,
             vec![tracker_one.clone()],
         );
         assert_eq!(
             trackers
                 .remove_trackers(TrackersListParams {
-                    tags: vec!["tag:1".to_string(), "tag:common".to_string()]
+                    tags: vec!["tag:1".to_string(), "tag:common".to_string()],
+                    ..Default::default()
                 })
                 .await?,
             1
@@ -4713,6 +4793,7 @@ mod tests {
             trackers
                 .get_trackers(TrackersListParams::default())
                 .await?
+                .items
                 .is_empty()
         );
 

@@ -96,7 +96,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert_eq!(trackers.len(), 2);
 
         let response = call_service(
@@ -116,7 +117,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert!(trackers.is_empty());
 
         Ok(())
@@ -171,7 +173,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert_eq!(trackers.len(), 2);
 
         let response = call_service(
@@ -204,7 +207,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert_eq!(trackers.len(), 1);
 
         let response = call_service(
@@ -224,7 +228,8 @@ mod tests {
             .api
             .trackers()
             .get_trackers(Default::default())
-            .await?;
+            .await?
+            .items;
         assert!(trackers.is_empty());
         assert!(trackers.is_empty());
 

@@ -113,25 +113,26 @@ retrack/
 
 ## API Endpoints
 
-| Method   | Path                                      | Description                     |
-|----------|-------------------------------------------|---------------------------------|
-| `GET`    | `/api/status`                             | Server status and version       |
-| `GET`    | `/api/trackers`                           | List all trackers               |
-| `POST`   | `/api/trackers`                           | Create a new tracker            |
-| `GET`    | `/api/trackers/{id}`                      | Get a tracker by ID             |
-| `PUT`    | `/api/trackers/{id}`                      | Update a tracker                |
-| `DELETE` | `/api/trackers/{id}`                      | Remove a tracker                |
-| `POST`   | `/api/trackers/bulk-remove`               | Bulk remove trackers            |
-| `POST`   | `/api/trackers/debug`                     | Debug a new tracker definition  |
-| `POST`   | `/api/trackers/{id}/debug`                | Debug an existing tracker       |
-| `GET`    | `/api/trackers/{id}/revisions`            | List revisions for a tracker    |
-| `POST`   | `/api/trackers/{id}/revisions`            | Trigger an ad-hoc revision      |
-| `GET`    | `/api/trackers/{id}/revisions/{rev_id}`   | Get a specific revision         |
-| `DELETE` | `/api/trackers/{id}/revisions/{rev_id}`   | Remove a specific revision      |
-| `DELETE` | `/api/trackers/{id}/revisions`            | Clear all revisions             |
-| `GET`    | `/api/trackers/{id}/execution-logs`       | List execution logs for tracker |
-| `DELETE` | `/api/trackers/{id}/execution-logs`       | Clear execution logs for tracker|
-| `DELETE` | `/api/trackers/execution-logs`            | Clear all execution logs        |
+| Method   | Path                                    | Description                      |
+|----------|-----------------------------------------|----------------------------------|
+| `GET`    | `/api/status`                           | Server status and version        |
+| `GET`    | `/api/trackers`                         | List trackers with pagination    |
+| `POST`   | `/api/trackers`                         | Create a new tracker             |
+| `GET`    | `/api/trackers/{id}`                    | Get a tracker by ID              |
+| `PUT`    | `/api/trackers/{id}`                    | Update a tracker                 |
+| `DELETE` | `/api/trackers/{id}`                    | Remove a tracker                 |
+| `POST`   | `/api/trackers/_bulk_get`               | Bulk get trackers by ID          |
+| `DELETE` | `/api/trackers`                         | Bulk remove trackers by tags     |
+| `POST`   | `/api/trackers/_debug`                  | Debug a new tracker definition   |
+| `POST`   | `/api/trackers/{id}/_debug`             | Debug an existing tracker        |
+| `GET`    | `/api/trackers/{id}/revisions`          | List revisions for a tracker     |
+| `POST`   | `/api/trackers/{id}/revisions`          | Trigger an ad-hoc revision       |
+| `GET`    | `/api/trackers/{id}/revisions/{rev_id}` | Get a specific revision          |
+| `DELETE` | `/api/trackers/{id}/revisions/{rev_id}` | Remove a specific revision       |
+| `DELETE` | `/api/trackers/{id}/revisions`          | Clear all revisions              |
+| `GET`    | `/api/trackers/{id}/execution-logs`     | List execution logs for tracker  |
+| `DELETE` | `/api/trackers/{id}/execution-logs`     | Clear execution logs for tracker |
+| `DELETE` | `/api/trackers/execution-logs`          | Clear all execution logs         |
 
 OpenAPI documentation is served at `/api-docs` via RapiDoc.
 

@@ -25,15 +25,15 @@ use retrack_types::{
     scheduler::{SchedulerJobConfig, SchedulerJobRetryStrategy},
     trackers::{
         ActionDebugInfo, ActionDestinationDebugInfo, ApiRequestDebugInfo, ApiTarget,
-        ApiTrackerDebugResult, AutoParseDebugInfo, EmailAction, ExtractorEngine, PageLogEntry,
-        PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
-        ServerLogAction, TargetRequest, Tracker, TrackerAction, TrackerConfig, TrackerCreateParams,
-        TrackerDataRevision, TrackerDataRevisionImportParams, TrackerDataRevisionImportResult,
-        TrackerDataValue, TrackerDebugExistingParams, TrackerDebugParams, TrackerDebugResult,
-        TrackerDebugTargetResult, TrackerExecutionLog, TrackerExecutionLogPhase,
-        TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
+        ApiTrackerDebugResult, AutoParseDebugInfo, EmailAction, ExtractorEngine, Page,
+        PageLogEntry, PageTarget, PageTrackerDebugResult, RenderedEmailDebugInfo, ScriptDebugInfo,
+        ServerLogAction, SortOrder, TargetRequest, Tracker, TrackerAction, TrackerConfig,
+        TrackerCreateParams, TrackerDataRevision, TrackerDataRevisionImportParams,
+        TrackerDataRevisionImportResult, TrackerDataValue, TrackerDebugExistingParams,
+        TrackerDebugParams, TrackerDebugResult, TrackerDebugTargetResult, TrackerExecutionLog,
+        TrackerExecutionLogPhase, TrackerExecutionLogStatus, TrackerListExecutionLogsBatchParams,
         TrackerListRevisionsBatchParams, TrackerTarget, TrackerUpdateParams, TrackersBulkGetParams,
-        WebhookAction, WebhookDestinationDebugInfo,
+        TrackersListSort, WebhookAction, WebhookDestinationDebugInfo,
     },
 };
 use utoipa::OpenApi;
@@ -80,6 +80,7 @@ use utoipa::OpenApi;
         AutoParseDebugInfo,
         EmailAction,
         ExtractorEngine,
+        Page<Tracker>,
         PageLogEntry,
         PageTarget,
         PageTrackerDebugResult,
@@ -88,6 +89,7 @@ use utoipa::OpenApi;
         SchedulerJobRetryStrategy,
         ScriptDebugInfo,
         ServerLogAction,
+        SortOrder,
         Status,
         TargetRequest,
         Tracker,
@@ -110,6 +112,7 @@ use utoipa::OpenApi;
         TrackerTarget,
         TrackerUpdateParams,
         TrackersBulkGetParams,
+        TrackersListSort,
         WebhookAction,
         WebhookDestinationDebugInfo
     ))

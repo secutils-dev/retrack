@@ -1,7 +1,7 @@
 use crate::{error::Error as RetrackError, server::ServerState};
 use actix_web::{HttpResponse, get, web};
 use actix_web_lab::extract::Query;
-use retrack_types::trackers::{Tracker, TrackersListParams};
+use retrack_types::trackers::{Page, Tracker, TrackersListParams};
 use tracing::error;
 
 /// Gets a list of active trackers.
@@ -9,7 +9,7 @@ use tracing::error;
     tags = ["trackers"],
     params(TrackersListParams),
     responses(
-        (status = 200, description = "A list of currently active trackers, optionally filtered by the specified tags.", body = [Tracker])
+        (status = 200, description = "A page of currently active trackers, optionally filtered by the specified tags.", body = Page<Tracker>)
     )
 )]
 #[get("/api/trackers")]
@@ -38,9 +38,15 @@ mod tests {
         test::{TestRequest, call_service, init_service},
         web,
     };
-    use retrack_types::trackers::{EmailAction, TrackerAction};
+    use retrack_types::trackers::{EmailAction, Page, Tracker, TrackerAction};
     use sqlx::PgPool;
-    use std::str::from_utf8;
+
+    fn response_body(body: impl MessageBody) -> anyhow::Result<serde_json::Value> {
+        let bytes = body
+            .try_into_bytes()
+            .map_err(|_| anyhow::anyhow!("Failed to read response body."))?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
 
     #[sqlx::test]
     async fn can_list_trackers(pool: PgPool) -> anyhow::Result<()> {
@@ -59,8 +65,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            "[]"
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::<Tracker>::new(vec![], 0))?
         );
 
         // Create tracker.
@@ -77,8 +83,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[&tracker_1])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1.clone()], 1))?
         );
 
         // Create another tracker.
@@ -103,8 +109,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[tracker_1, tracker_2])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1, tracker_2], 2))?
         );
 
         Ok(())
@@ -127,8 +133,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            "[]"
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::<Tracker>::new(vec![], 0))?
         );
 
         // Create tracker.
@@ -160,8 +166,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[&tracker_1])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1.clone()], 1))?
         );
 
         let response = call_service(
@@ -172,8 +178,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[&tracker_1])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1.clone()], 1))?
         );
 
         let response = call_service(
@@ -183,8 +189,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[&tracker_2])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_2.clone()], 1))?
         );
 
         let response = call_service(
@@ -195,8 +201,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[&tracker_2])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_2.clone()], 1))?
         );
 
         let response = call_service(
@@ -206,8 +212,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[&tracker_1, &tracker_2])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1.clone(), tracker_2.clone()], 2))?
         );
 
         let response = call_service(
@@ -217,8 +223,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            serde_json::to_string(&[tracker_1, tracker_2])?,
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1, tracker_2], 2))?
         );
 
         let response = call_service(
@@ -228,9 +234,69 @@ mod tests {
         .await;
         assert_eq!(response.status(), 200);
         assert_eq!(
-            from_utf8(&response.into_body().try_into_bytes().unwrap())?,
-            "[]"
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::<Tracker>::new(vec![], 0))?
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn can_list_trackers_with_pagination_params(pool: PgPool) -> anyhow::Result<()> {
+        let server_state = web::Data::new(mock_server_state(pool).await?);
+        let app = init_service(
+            App::new()
+                .app_data(server_state.clone())
+                .service(trackers_list),
+        )
+        .await;
+
+        let tracker_1 = server_state
+            .api
+            .trackers()
+            .create_tracker(TrackerCreateParamsBuilder::new("name_one").build())
+            .await?;
+        let tracker_2 = server_state
+            .api
+            .trackers()
+            .create_tracker(TrackerCreateParamsBuilder::new("name_two").build())
+            .await?;
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri(
+                "https://retrack.dev/api/trackers?page=1&pageSize=1&sort=name&order=asc",
+            )
+            .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_2], 2))?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri(&format!(
+                "https://retrack.dev/api/trackers?q={}",
+                tracker_1.id
+            ))
+            .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response_body(response.into_body())?,
+            serde_json::to_value(Page::new(vec![tracker_1], 1))?
+        );
+
+        let response = call_service(
+            &app,
+            TestRequest::with_uri("https://retrack.dev/api/trackers?sort=notAField").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), 422);
 
         Ok(())
     }
