@@ -6,72 +6,156 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "tracker_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "tracker_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "job_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "job_id"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "started_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "started_at"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "finished_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "finished_at"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "status",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "status"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "error",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "error"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "is_manual",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "is_manual"
+          }
+        }
       },
       {
         "ordinal": 8,
         "name": "retry_attempt",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "retry_attempt"
+          }
+        }
       },
       {
         "ordinal": 9,
         "name": "max_retry_attempts",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "max_retry_attempts"
+          }
+        }
       },
       {
         "ordinal": 10,
         "name": "revision_size",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "revision_size"
+          }
+        }
       },
       {
         "ordinal": 11,
         "name": "has_changes",
-        "type_info": "Bool"
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "has_changes"
+          }
+        }
       },
       {
         "ordinal": 12,
         "name": "duration_ms",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "duration_ms"
+          }
+        }
       },
       {
         "ordinal": 13,
         "name": "phases",
-        "type_info": "Bytea"
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "tracker_execution_logs",
+            "name": "phases"
+          }
+        }
       }
     ],
     "parameters": {
