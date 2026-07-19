@@ -131,24 +131,20 @@ What to watch for:
   `Dockerfile.web-scraper-camoufox`. **Pin the version, not the full build label** — see the
   next two bullets for why.
   - **Use the official `camoufox` package, not the `cloverlabs-camoufox` fork.** The fork's
-    `launchServer.js` still does `require(${cwd}/lib/browserServerImpl.js)`, a driver
-    internal that playwright **1.60 removed**, so the fork crash-loops
-    (`MODULE_NOT_FOUND` → "Server process terminated unexpectedly") on any
-    `playwright-python >= 1.60` — that is what forced the old `release-1.59` pin. The
-    official package rewrote `launchServer.js` to resolve Playwright through the driver's
-    **public `index.js` entrypoint** and call the public `firefox.launchServer()` API,
-    which is stable across 1.60/1.61, so it runs fine on 1.61.
+    `launchServer.js` does `require(${cwd}/lib/browserServerImpl.js)`, a driver internal
+    that current Playwright does not ship, so it crash-loops (`MODULE_NOT_FOUND` → "Server
+    process terminated unexpectedly"). The official package resolves Playwright through the
+    driver's **public `index.js` entrypoint** and calls the public `firefox.launchServer()`
+    API, which is stable across current Playwright versions.
   - **Override the official package's conservative `playwright<1.61` cap.** `pip install
     camoufox==0.5.4` pulls `playwright 1.60.0`; the Dockerfile then runs `pip install
     playwright==1.61.0` to match the rest of the stack. pip prints a harmless
-    dependency-conflict warning and proceeds (verified: the private import
+    dependency-conflict warning and proceeds — the private import
     `playwright._impl._driver.compute_driver_executable` and `driver/package/index.js`
-    both resolve under 1.61). Re-check this if you bump `camoufox` — a future release may
-    drop the cap or, conversely, change how it launches the server.
-  - **`playwright-python` is a normal PyPI release now.** Install it with
-    `pip install playwright==<x.y.z>`; the old `git+…/playwright-python.git@release-x.y`
-    hack (used when the 1.61 branch had no PyPI release) is gone, and with it the `git`/
-    `curl` build deps and the separate purge layer.
+    both resolve under 1.61. Re-check this when you bump `camoufox`: a future release may
+    drop the cap or change how it launches the server.
+  - **Install `playwright-python` from PyPI** with `pip install playwright==<x.y.z>` — no
+    git ref, and therefore no `git`/`curl` build deps or purge layer in the Dockerfile.
 - **The Camoufox build ID is the *asset* label, and it differs per architecture.**
   daijro publishes releases under tags like `v150.0.2-beta.25`, but the build id
   camoufox resolves comes from the *asset filename*, which is both `-alpha` (not the
