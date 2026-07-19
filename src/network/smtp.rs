@@ -312,7 +312,7 @@ pub mod tests {
             } else if command == b"helo" {
                 client_state.reset();
                 client_state.has_ehloed = true;
-                stream.write_all(format!("250 {}\r\n", &self.domain).as_bytes())?;
+                stream.write_all(format!("250 {}\r\n", self.domain).as_bytes())?;
             } else if command == b"quit" {
                 stream.write_all(b"221 OK\r\n")?;
                 stream.shutdown(Shutdown::Both)?;
