@@ -35,7 +35,7 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         name: Checkout
 
       - name: Install Protoc
@@ -48,13 +48,30 @@ jobs:
           rustup override set ${{ matrix.rust }}
           rustup component add clippy
           rustup component add --toolchain nightly rustfmt
-          cargo install --force sqlx-cli
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci-api"
+          cache-all-crates: true
 
       - name: Check format
         run: cargo +nightly fmt --all -- --check
+
+      - name: Cache sqlx-cli
+        id: cache-sqlx
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/sqlx
+            ~/.cargo/bin/cargo-sqlx
+          key: sqlx-cli-0.9.0-${{ runner.os }}
+
+      - name: Install sqlx-cli
+        if: steps.cache-sqlx.outputs.cache-hit != 'true'
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall --no-confirm sqlx-cli
 
       - name: Create test database
         run: |
@@ -80,7 +97,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
@@ -98,10 +115,10 @@ jobs:
           shared-key: "ci-perf"
           cache-all-crates: true
 
-      - name: Set Node.js 22.x
-        uses: actions/setup-node@v6
+      - name: Set Node.js 24.x
+        uses: actions/setup-node@v7
         with:
-          node-version: 22.x
+          node-version: 24.x
 
       - name: Run perf harness and record history
         run: make perf ANALYZE=1
@@ -126,13 +143,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         name: Checkout
 
-      - name: Set Node.js 22.x
-        uses: actions/setup-node@v6
+      - name: Set Node.js 24.x
+        uses: actions/setup-node@v7
         with:
-          node-version: 22.x
+          node-version: 24.x
           cache: 'npm'
 
       - name: Install dependencies
