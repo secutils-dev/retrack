@@ -92,15 +92,7 @@ const { connectToBrowserServer } = await import('../../utilities/browser.js');
 let browser: Browser | undefined;
 try {
   log.info(`Connecting to a browser at ${browserConfig.wsEndpoint} (protocol: ${browserConfig.protocol})…`);
-  browser = await connectToBrowserServer(
-    {
-      isEnabled: () => true,
-      // Forward browser logs to the main log sink.
-      log: (context, level, message, args) =>
-        level === 'error' ? log.error(`${context}: ${message}`, args) : log.info(`${context}: ${message}`, args),
-    },
-    browserConfig,
-  );
+  browser = await connectToBrowserServer(browserConfig);
   log.info(`Successfully connected to a browser at ${browserConfig.wsEndpoint} (protocol: ${browserConfig.protocol}).`);
 } catch (err) {
   log.error(

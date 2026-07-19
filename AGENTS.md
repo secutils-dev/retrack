@@ -80,10 +80,11 @@ npm run build --ws --if-present
 What to watch for:
 
 - **`playwright-core` must be pinned to a single exact version** across the whole product
-  (web-scraper, secutils-webui, e2e harness, and the `playwright-python` git ref baked
-  into `Dockerfile.web-scraper-camoufox`). Mismatches cause subtle protocol-level
+  (web-scraper, secutils-webui, e2e harness, and the `playwright==<x.y.z>` pip pin in
+  `Dockerfile.web-scraper-camoufox`). Mismatches cause subtle protocol-level
   incompatibilities. When bumping it here, record the pinned version and bump the other
-  three locations in their respective stages — do not let them drift between PRs.
+  three locations in their respective stages — do not let them drift between PRs. All four
+  are currently `1.61.0`.
 - **`@commitlint/*` majors** sometimes change their config schema; rerun `npx commitlint
   --from HEAD~1` after bumping to confirm the existing `commitlint.config.cjs` still
   parses.
@@ -123,14 +124,31 @@ What to watch for:
 
   Do not "simplify" by flattening — it works against the host npm cache but breaks the
   fresh `npm ci` inside the runtime stage.
-- **Camoufox is a coupled triple.** `cloverlabs-camoufox` (PyPI), `playwright-python`
-  (git ref `release-x.y`), and the Camoufox Firefox build ID
-  (`python -m camoufox fetch official/<id>`) must move together. Only bump the Firefox
-  ID when `cloverlabs-camoufox` has been released against it; otherwise the loader
-  rejects the binary. The current set has `cloverlabs-camoufox==0.5.5` +
-  `playwright-python@release-1.59` + Firefox `150.0.2`, pinned via the
-  `CAMOUFOX_VERSION` ARG in `Dockerfile.web-scraper-camoufox`. **Pin the version,
-  not the full build label** — see the next two bullets for why.
+- **Camoufox is a coupled triple.** The Camoufox wrapper (PyPI), `playwright-python`, and
+  the Camoufox Firefox build ID (`python -m camoufox fetch official/<id>`) must move
+  together. The current set is the **official** `camoufox==0.5.4` (daijro) +
+  `playwright==1.61.0` + Firefox `152.0.4`, pinned via the `CAMOUFOX_VERSION` ARG in
+  `Dockerfile.web-scraper-camoufox`. **Pin the version, not the full build label** — see the
+  next two bullets for why.
+  - **Use the official `camoufox` package, not the `cloverlabs-camoufox` fork.** The fork's
+    `launchServer.js` still does `require(${cwd}/lib/browserServerImpl.js)`, a driver
+    internal that playwright **1.60 removed**, so the fork crash-loops
+    (`MODULE_NOT_FOUND` → "Server process terminated unexpectedly") on any
+    `playwright-python >= 1.60` — that is what forced the old `release-1.59` pin. The
+    official package rewrote `launchServer.js` to resolve Playwright through the driver's
+    **public `index.js` entrypoint** and call the public `firefox.launchServer()` API,
+    which is stable across 1.60/1.61, so it runs fine on 1.61.
+  - **Override the official package's conservative `playwright<1.61` cap.** `pip install
+    camoufox==0.5.4` pulls `playwright 1.60.0`; the Dockerfile then runs `pip install
+    playwright==1.61.0` to match the rest of the stack. pip prints a harmless
+    dependency-conflict warning and proceeds (verified: the private import
+    `playwright._impl._driver.compute_driver_executable` and `driver/package/index.js`
+    both resolve under 1.61). Re-check this if you bump `camoufox` — a future release may
+    drop the cap or, conversely, change how it launches the server.
+  - **`playwright-python` is a normal PyPI release now.** Install it with
+    `pip install playwright==<x.y.z>`; the old `git+…/playwright-python.git@release-x.y`
+    hack (used when the 1.61 branch had no PyPI release) is gone, and with it the `git`/
+    `curl` build deps and the separate purge layer.
 - **The Camoufox build ID is the *asset* label, and it differs per architecture.**
   daijro publishes releases under tags like `v150.0.2-beta.25`, but the build id
   camoufox resolves comes from the *asset filename*, which is both `-alpha` (not the
@@ -162,9 +180,11 @@ What to watch for:
   the pinned `CAMOUFOX_VERSION` against the synced cache (per the previous bullet)
   rather than fetching `official/stable` or trusting "latest".
 - **`playwright-python` minor** must match the `playwright-core` minor pinned in stage 3
-  (currently `1.59`). The Camoufox image's Playwright driver speaks the protocol of the
+  (currently `1.61`). The Camoufox image's Playwright driver speaks the protocol of the
   matching Node-side Playwright; mismatches surface as cryptic "browser closed
-  unexpectedly" errors at runtime.
+  unexpectedly" errors at runtime. The whole product is now on a single Playwright
+  version — `playwright-core` (web-scraper, secutils-webui), `@playwright/test` (e2e), and
+  `playwright-python` (camoufox) are all `1.61.0`.
 - **Smoke-test each image after build:** check that the entrypoint path exists
   (`components/retrack-web-scraper/src/index.js` for the scraper, `/app/camoufox_launcher.py`
   for camoufox), the language runtime version is what was requested

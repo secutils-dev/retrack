@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { FastifyBaseLogger } from 'fastify';
-import type { BrowserServer, Logger } from 'playwright-core';
+import type { BrowserServer } from 'playwright-core';
 import { Diagnostics } from '../api/diagnostics.js';
 import type { LocalBrowserConfig, RemoteBrowserConfig } from '../config.js';
 
@@ -35,15 +35,17 @@ const BROWSER_LAUNCH_RETRY_DELAY_MS = 500;
  *   In this case communication between Playwright client and server will be done over the special Playwright protocol,
  *   and then the Playwright Server would be talking to the browser over normal CDP.
  *   See https://github.com/microsoft/playwright/issues/15265#issuecomment-1172860134 for more details.
- * @param logger
  * @param config
  */
-export async function connectToBrowserServer(logger: Logger, config: RemoteBrowserConfig) {
+export async function connectToBrowserServer(config: RemoteBrowserConfig) {
   const { chromium, firefox } = await import('playwright-core');
   const backend = config.backend === 'chromium' ? chromium : firefox;
+  // NOTE: Playwright 1.60 removed the `logger` option from `ConnectOptions`/`ConnectOverCDPOptions`
+  // (it is still supported on launch options), so connect-time browser logs can no longer be
+  // forwarded to the Fastify logger from here.
   return config.protocol === 'playwright'
-    ? backend.connect(config.wsEndpoint, { timeout: BROWSER_CONNECT_TIMEOUT_MS, logger })
-    : backend.connectOverCDP(config.wsEndpoint, { timeout: BROWSER_CONNECT_TIMEOUT_MS, logger });
+    ? backend.connect(config.wsEndpoint, { timeout: BROWSER_CONNECT_TIMEOUT_MS })
+    : backend.connectOverCDP(config.wsEndpoint, { timeout: BROWSER_CONNECT_TIMEOUT_MS });
 }
 
 export async function launchBrowserServer(logger: FastifyBaseLogger, config: LocalBrowserConfig) {

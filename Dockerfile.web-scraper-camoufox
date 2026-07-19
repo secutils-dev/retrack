@@ -8,52 +8,56 @@ ENV CAMOUFOX_HEADLESS=true
 
 WORKDIR /app
 
-# Layer 1: OS deps
+# Layer 1: OS deps (Firefox runtime libraries + init). No git/curl needed: the
+# camoufox library and its browser builds are fetched over HTTP from PyPI and the
+# daijro release repo via `requests`, and playwright-python now ships as a proper
+# PyPI wheel (no git clone of a release branch).
 RUN set -x \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         libgtk-3-0 libx11-xcb1 libasound2 dumb-init \
-        git curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Layer 2: Camoufox install + patch + fetch
 #
-# CAMOUFOX_VERSION is the Firefox version to pin (NOT the build label). The build
-# label is resolved per-architecture from the synced repo cache below, because
-# daijro tags the *same* version with a *different* build label on each arch:
-# release `v150.0.2-beta.25` ships `camoufox-150.0.2-alpha.25-lin.arm64.zip` on
-# arm64 but `camoufox-150.0.2-alpha.26-lin.x86_64.zip` on x86_64. Hardcoding a full
-# `<version>-<label>` id therefore only builds on one architecture (this is why CI
-# on amd64 failed while local arm64 builds passed). Note the label is also `alpha`,
-# not the `beta` from the git tag.
+# We use the OFFICIAL `camoufox` package (daijro) rather than the `cloverlabs-camoufox`
+# fork. The fork's `launchServer.js` still does `require(${cwd}/lib/browserServerImpl.js)`,
+# a driver internal that playwright 1.60 removed, so it crash-loops on playwright >= 1.60.
+# The official package resolves Playwright through the driver's public `index.js` entrypoint
+# and calls the public `firefox.launchServer()` API, which is stable across 1.60/1.61 — so it
+# works on playwright 1.61 despite its conservative `playwright<1.61` pin. We install camoufox
+# first (which pulls playwright 1.60.0) and then force playwright to 1.61.0 to match the rest
+# of the stack (scraper / webui playwright-core, e2e @playwright/test); pip prints a harmless
+# dependency-conflict warning and proceeds.
 #
-# Three upstream gotchas, all guarded below so they fail the build loudly instead
-# of silently shipping a browser-less image that crash-loops at runtime with
-# `CamoufoxNotInstalled`:
+# CAMOUFOX_VERSION is the Firefox version to pin (NOT the build label). The build label is
+# resolved from the synced repo cache below rather than hardcoded, because daijro has in the
+# past tagged the *same* version with a *different* build label per architecture.
+#
+# Three upstream gotchas, all guarded below so they fail the build loudly instead of silently
+# shipping a browser-less image that crash-loops at runtime with `CamoufoxNotInstalled`:
 #   1. `camoufox fetch <id>` exits 0 even when the build is absent from the cache.
-#   2. The build label is architecture-specific (see above), so we resolve it from
-#      the platform-filtered cache rather than hardcoding it.
-#   3. `camoufox sync` dedups available builds by their *build label* alone
-#      (`seen_builds`), so when two daijro releases share a label (e.g. both
-#      `146.0.1` and `150.0.2` ship `alpha.25` on arm64), only the newest survives
-#      in the cache and the older id stops resolving. This is why the previous
-#      `official/146.0.1-alpha.25` pin broke once `v150.0.2` was published.
-ARG CAMOUFOX_VERSION=150.0.2
+#   2. The build label can be architecture-specific, so we resolve it from the platform-filtered
+#      cache rather than hardcoding it.
+#   3. The official package's multiversion installer lays the browser down under
+#      `browsers/official/<version>-<build>-<sha8>` — i.e. with an 8-char sha suffix appended to
+#      the `<version>-<build>` id — and only treats it as installed once a `version.json` marker
+#      exists in that folder. So we locate the install by `<version>-<build>` *prefix* and assert
+#      its `version.json`, instead of matching the bare id (which never matches the sha-suffixed dir).
+ARG CAMOUFOX_VERSION=152.0.4
 RUN set -eux \
-    && pip install cloverlabs-camoufox==0.5.5 \
-    && pip install "git+https://github.com/microsoft/playwright-python.git@release-1.59" \
+    && pip install camoufox==0.5.4 \
+    && pip install playwright==1.61.0 \
     && sed -i 's/fontconfigs/fontconfig/g' /usr/local/lib/python3.14/site-packages/camoufox/utils.py \
     && python -m camoufox sync \
     && CAMOUFOX_BUILD="$(python -c "import json; d=json.load(open('/root/.cache/camoufox/repo_cache.json')); print(next((x['version']+'-'+x['build'] for r in d['repos'] if r['name']=='Official' for x in r['versions'] if x['version']=='${CAMOUFOX_VERSION}'), ''))")" \
     && test -n "${CAMOUFOX_BUILD}" \
     && echo "Resolved Camoufox build for ${CAMOUFOX_VERSION}: ${CAMOUFOX_BUILD}" \
     && echo y | python -m camoufox fetch "official/${CAMOUFOX_BUILD}" \
-    && test -d "/root/.cache/camoufox/browsers/official/${CAMOUFOX_BUILD}" \
-    && test -n "$(ls -A "/root/.cache/camoufox/browsers/official/${CAMOUFOX_BUILD}")"
-
-# Layer 3: Remove build-only packages
-RUN apt-get purge -y --auto-remove git curl \
-    && rm -rf /var/lib/apt/lists/*
+    && CAMOUFOX_DIR="$(find /root/.cache/camoufox/browsers/official -mindepth 1 -maxdepth 1 -type d -name "${CAMOUFOX_BUILD}*" 2>/dev/null | head -1)" \
+    && test -n "${CAMOUFOX_DIR}" \
+    && test -f "${CAMOUFOX_DIR}/version.json" \
+    && echo "Installed Camoufox browser at: ${CAMOUFOX_DIR}"
 
 # Copy the custom runner that allows specifying different options.
 COPY ./dev/docker/camoufox_launcher.py /app/
