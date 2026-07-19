@@ -48,7 +48,7 @@ mod tests {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_list_trackers(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
@@ -116,7 +116,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_list_trackers_with_tags(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
@@ -241,7 +241,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_list_trackers_with_pagination_params(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(

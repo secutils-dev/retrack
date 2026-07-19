@@ -128,7 +128,7 @@ mod tests {
     use time::OffsetDateTime;
     use uuid::{Uuid, uuid};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_add_and_retrieve_tasks(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         assert!(
@@ -233,7 +233,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_update_task(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tasks = vec![
@@ -362,7 +362,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn correctly_handles_non_existent_tasks_on_update(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let update_error = db
@@ -390,7 +390,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_remove_tasks(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -475,7 +475,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_get_tasks_ids(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 

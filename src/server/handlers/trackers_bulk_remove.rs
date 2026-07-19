@@ -47,7 +47,7 @@ mod tests {
     use sqlx::PgPool;
     use std::str::from_utf8;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_remove_all_trackers(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
@@ -124,7 +124,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_remove_trackers_with_tags(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(

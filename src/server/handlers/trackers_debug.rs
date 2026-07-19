@@ -43,7 +43,7 @@ mod tests {
     use sqlx::PgPool;
     use std::time::Duration;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn returns_400_for_invalid_params(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
@@ -66,7 +66,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn accepts_valid_page_target(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(

@@ -61,7 +61,7 @@ mod tests {
     use time::OffsetDateTime;
     use uuid::uuid;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_tracker_data_revision(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(

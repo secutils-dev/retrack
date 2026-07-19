@@ -49,7 +49,7 @@ mod tests {
     use sqlx::PgPool;
     use std::str::from_utf8;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_return_status(pool: PgPool) -> anyhow::Result<()> {
         let app = init_service(
             App::new()

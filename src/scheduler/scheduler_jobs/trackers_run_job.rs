@@ -490,7 +490,7 @@ mod tests {
     use time::OffsetDateTime;
     use uuid::{Uuid, uuid};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -520,7 +520,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_resume_job(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -580,7 +580,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_resume_retry_job(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -643,7 +643,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_legacy_cron_style_retry_job(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -695,7 +695,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_job_if_does_not_have_meta(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -720,7 +720,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_if_job_is_running(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -748,7 +748,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_job_if_tracker_no_longer_exists(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -772,7 +772,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_job_if_tracker_is_disabled(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -808,7 +808,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_job_if_tracker_does_not_support_revisions(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -847,7 +847,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_job_if_tracker_no_longer_has_schedule(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -881,7 +881,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_job_if_schedule_changes(pool: PgPool) -> anyhow::Result<()> {
         let api = Arc::new(mock_api(pool).await?);
 
@@ -922,7 +922,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_retry_job_if_tracker_no_longer_supports_retry(
         pool: PgPool,
     ) -> anyhow::Result<()> {

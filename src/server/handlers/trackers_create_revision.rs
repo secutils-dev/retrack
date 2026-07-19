@@ -61,7 +61,7 @@ mod tests {
     use url::Url;
     use uuid::uuid;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_create_tracker_data(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -121,7 +121,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_with_bad_request_for_unknown_trackers(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
@@ -147,7 +147,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_with_bad_request_for_action_failures(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -210,7 +210,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_with_bad_request_for_page_target_if_remote_extractor_is_unavailable(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -269,7 +269,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_with_bad_request_for_api_target_if_remote_configurator_is_unavailable(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -338,7 +338,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_with_bad_request_for_api_target_if_remote_extractor_is_unavailable(
         pool: PgPool,
     ) -> anyhow::Result<()> {

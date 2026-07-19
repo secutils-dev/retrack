@@ -43,7 +43,7 @@ mod tests {
     use time::OffsetDateTime;
     use uuid::Uuid;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_clear_all_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
 

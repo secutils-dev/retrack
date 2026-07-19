@@ -140,7 +140,7 @@ pub mod tests {
         .await?)
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_update_and_retrieve_scheduler_job_metadata(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let jobs = vec![
@@ -238,7 +238,7 @@ pub mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_all_jobs(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 

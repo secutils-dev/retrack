@@ -790,7 +790,7 @@ mod tests {
         })
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_add_and_retrieve_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let mut trackers_list: Vec<Tracker> = vec![
@@ -829,7 +829,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn correctly_handles_duplicated_trackers_on_insert(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -880,7 +880,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_update_tracker(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -958,7 +958,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn correctly_handles_non_existent_trackers_on_update(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let update_error = db
@@ -982,7 +982,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_remove_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1062,7 +1062,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_all_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1091,7 +1091,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_trackers_page(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let trackers = db.trackers();
@@ -1163,7 +1163,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_sort_trackers_page(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let trackers = db.trackers();
@@ -1262,7 +1262,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_bulk_remove_all_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1292,7 +1292,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_trackers_by_tags(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1353,7 +1353,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_remove_trackers_by_tags(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1417,7 +1417,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_add_and_retrieve_tracker_data(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1513,7 +1513,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_all_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1607,7 +1607,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_remove_tracker_data_revision(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1720,7 +1720,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_clear_all_data_revisions_at_once(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1802,7 +1802,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_enforce_tracker_data_revisions_limit(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -1936,7 +1936,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_import_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2003,7 +2003,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_all_unscheduled_trackers(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2122,7 +2122,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_retrieve_tracker_by_job_id(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2174,7 +2174,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_update_trackers_job_id(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2220,7 +2220,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_to_update_trackers_job_id_if_needed(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2275,7 +2275,7 @@ mod tests {
         })
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_insert_and_retrieve_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker =
@@ -2316,7 +2316,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn retrieves_execution_logs_in_desc_order(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker =
@@ -2353,7 +2353,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn respects_size_limit_for_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker =
@@ -2376,7 +2376,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_clear_execution_logs_for_tracker(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker1 =
@@ -2419,7 +2419,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_clear_all_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker1 =
@@ -2453,7 +2453,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_cleanup_old_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker =
@@ -2490,7 +2490,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn execution_logs_deleted_on_tracker_delete(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker =
@@ -2524,7 +2524,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_insert_execution_log_with_failure_status(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let tracker =
@@ -2560,7 +2560,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn get_tracker_returns_schedule_timestamps_from_scheduler_job(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -2607,7 +2607,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn get_tracker_returns_none_schedule_timestamps_without_job(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -2628,14 +2628,14 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn bulk_get_trackers_returns_empty_for_empty_ids(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         assert!(db.trackers().bulk_get_trackers(&[]).await?.is_empty());
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn bulk_get_trackers_returns_only_requested(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
 
@@ -2684,7 +2684,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn get_trackers_returns_correct_schedule_timestamps_for_mixed_trackers(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -2745,7 +2745,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_get_tracker_data_revisions_batch_empty(pool: PgPool) -> anyhow::Result<()> {
         let db = Database::create(pool).await?;
         let revisions = db
@@ -2757,7 +2757,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_get_tracker_data_revisions_batch_returns_grouped(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -2811,7 +2811,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_get_tracker_data_revisions_batch_respects_size(
         pool: PgPool,
     ) -> anyhow::Result<()> {

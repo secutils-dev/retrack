@@ -134,7 +134,7 @@ mod tests {
     use sqlx::PgPool;
     use uuid::uuid;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_compile_tracker_changes_template_to_email(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -188,7 +188,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_compile_tracker_changes_error_template_to_email(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -244,7 +244,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_compile_task_failed_template_to_email(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 

@@ -2605,7 +2605,7 @@ mod tests {
     use url::Url;
     use uuid::{Uuid, uuid};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_creates_new_tracker(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let api = api.trackers();
@@ -2691,7 +2691,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_validates_tracker_at_creation(pool: PgPool) -> anyhow::Result<()> {
         let global_config = Config {
             trackers: TrackersConfig {
@@ -3458,7 +3458,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_updates_tracker(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -3684,7 +3684,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_validates_tracker_at_update(pool: PgPool) -> anyhow::Result<()> {
         let global_config = Config {
             trackers: TrackersConfig {
@@ -4347,7 +4347,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_updates_tracker_job_id_at_update(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -4448,7 +4448,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_removes_tracker(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -4493,7 +4493,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_returns_trackers_by_id(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -4533,7 +4533,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_returns_all_trackers(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -4639,7 +4639,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_returns_trackers_page(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -4684,7 +4684,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_validates_trackers_list_parameters(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let api = api.trackers();
@@ -4723,7 +4723,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_removes_all_trackers(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -4800,7 +4800,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_page_target_revision(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -4979,7 +4979,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_specifies_backend_for_page_target_revision(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -5091,7 +5091,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let config = mock_config()?;
@@ -5286,7 +5286,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_non_json_body(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -5346,7 +5346,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_extractor(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let config = mock_config()?;
@@ -5463,7 +5463,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_params(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let config = mock_config()?;
@@ -5529,7 +5529,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_non_success_code(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -5627,7 +5627,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_configurator_response(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -5730,7 +5730,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_parser_xlsx(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -5851,7 +5851,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_parser_csv(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -5939,7 +5939,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_multiple_requests(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -6046,7 +6046,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_saves_api_target_revision_with_remote_scripts(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -6163,7 +6163,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_execute_tracker_actions(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -6418,7 +6418,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_execute_tracker_actions_in_fail_scenarios(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -6544,7 +6544,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn dont_execute_tracker_actions_in_fail_scenarios_if_retries_left(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -6634,7 +6634,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_execute_tracker_actions_combined_with_default_actions(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -6889,7 +6889,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_execute_only_default_actions(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -7086,7 +7086,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_execute_tracker_actions_with_formatter(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -7327,7 +7327,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_execute_tracker_actions_with_remote_formatter_script(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -7406,7 +7406,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_forwards_error_if_revision_extraction_fails(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -7461,7 +7461,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_ignores_revision_with_no_diff(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -7534,7 +7534,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_removes_revision(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -7589,7 +7589,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_removes_revisions_when_tracker_is_removed(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -7648,7 +7648,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_resets_job_id_when_tracker_schedule_changed(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -7734,7 +7734,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_removes_job_id_when_tracker_revisions_disabled(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -7817,7 +7817,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_removes_job_id_when_tracker_is_disabled(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -7895,7 +7895,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_manipulate_tracker_jobs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -7970,7 +7970,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_happy_path(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8054,7 +8054,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_with_request_failure(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -8106,7 +8106,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_existing_tracker_not_found(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -8126,7 +8126,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_existing_tracker_with_overrides(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8239,7 +8239,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_action_dry_run_no_formatter(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8331,7 +8331,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_action_dry_run_with_formatter(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8437,7 +8437,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_action_dry_run_formatter_returns_null_skips(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8536,7 +8536,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_action_dry_run_webhook_destination(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8636,7 +8636,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_action_dry_run_extraction_failed(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -8701,7 +8701,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_with_extractor(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8800,7 +8800,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_with_configurator(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8907,7 +8907,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_with_mock_responses(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -8984,7 +8984,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_multiple_requests(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9111,7 +9111,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_api_target_multiple_requests_html(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9228,7 +9228,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_matches_revision_api_simple(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9287,7 +9287,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_matches_revision_api_with_extractor(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9358,7 +9358,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_matches_revision_api_with_configurator(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9430,7 +9430,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_matches_revision_api_with_configurator_and_extractor(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -9504,7 +9504,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_matches_revision_api_with_mock_responses(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9563,7 +9563,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn debug_matches_revision_api_with_actions(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -9669,7 +9669,7 @@ mod tests {
         }
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_get_tracker_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -9714,7 +9714,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn get_tracker_execution_logs_respects_size(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -9746,7 +9746,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn get_tracker_execution_logs_fails_for_unknown_tracker(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -9762,7 +9762,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_clear_tracker_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -9804,7 +9804,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn clear_tracker_execution_logs_fails_for_unknown_tracker(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -9820,7 +9820,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_clear_all_tracker_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -9862,7 +9862,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_cleanup_old_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -9901,7 +9901,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn execution_logs_cascade_on_tracker_delete(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -9953,7 +9953,7 @@ mod tests {
         logs.into_iter().next().unwrap()
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_success_log_with_all_phases(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let api = mock_api_with_config(pool, mock_config()?).await?;
@@ -10016,7 +10016,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_failure_log_on_fetch_error(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let api = mock_api_with_config(pool, mock_config()?).await?;
@@ -10064,7 +10064,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_returns_error_for_unknown_tracker(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -10088,7 +10088,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_compare_unchanged_phase(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -10171,7 +10171,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_scheduled_context(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let api = mock_api_with_config(pool, mock_config()?).await?;
@@ -10218,7 +10218,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_retry_context(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let api = mock_api_with_config(pool, mock_config()?).await?;
@@ -10268,7 +10268,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_revision_size_on_success(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let api = mock_api_with_config(pool, mock_config()?).await?;
@@ -10305,7 +10305,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn revision_records_action_failure_phase(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let mut config = mock_config()?;
@@ -10372,7 +10372,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn multiple_revisions_produce_multiple_logs(pool: PgPool) -> anyhow::Result<()> {
         let server = MockServer::start();
         let api = mock_api_with_config(pool, mock_config()?).await?;
@@ -10432,7 +10432,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_imports_tracker_data_revisions(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let trackers = api.trackers();
@@ -10513,7 +10513,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_enforces_max_revisions_on_import(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.trackers.max_revisions = 5;
@@ -10575,7 +10575,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_enforces_global_max_revisions_on_import(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         // Global max is 2, tracker config also set to 2 (must be <= global).

@@ -81,7 +81,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn convert_email_content_to_email(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -133,7 +133,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn convert_template_content_to_email(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let mut template = EmailContent::Template(EmailTemplate::TrackerCheckResult {

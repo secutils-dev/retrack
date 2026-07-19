@@ -173,7 +173,7 @@ mod tests {
     use time::OffsetDateTime;
     use uuid::{Uuid, uuid};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.scheduler.trackers_schedule = "1/5 * * * * *".to_string();
@@ -205,7 +205,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_resume_job(pool: PgPool) -> anyhow::Result<()> {
         let mut config = mock_config()?;
         config.scheduler.trackers_schedule = "0 0 * * * *".to_string();
@@ -244,7 +244,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn resets_job_if_schedule_changed(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api_with_config(pool, mock_config()?).await?;
 
@@ -259,7 +259,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_schedule_trackers_jobs(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
 
@@ -343,7 +343,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn does_not_schedule_trackers_without_schedule(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
 
@@ -386,7 +386,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn does_not_schedule_trackers_if_revisions_is_zero(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
 
@@ -437,7 +437,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn does_not_schedule_trackers_if_disabled(pool: PgPool) -> anyhow::Result<()> {
         let mut scheduler = mock_scheduler(&pool).await?;
 
@@ -512,7 +512,7 @@ mod tests {
         }
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn cleanup_deletes_expired_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api_with_config(pool, mock_config()?).await?;
 
@@ -549,7 +549,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn cleanup_preserves_recent_execution_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api_with_config(pool, mock_config()?).await?;
 
@@ -585,7 +585,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn cleanup_skips_when_interval_not_elapsed(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api_with_config(pool, mock_config()?).await?;
 
@@ -627,7 +627,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn cleanup_deletes_only_expired_logs(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api_with_config(pool, mock_config()?).await?;
 

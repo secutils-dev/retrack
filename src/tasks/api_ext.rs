@@ -367,7 +367,7 @@ mod tests {
     use time::{Duration, OffsetDateTime};
     use uuid::uuid;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_schedules_task(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
 
@@ -431,7 +431,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_executes_email_tasks(pool: PgPool) -> anyhow::Result<()> {
         let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
         smtp_server.start();
@@ -521,7 +521,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_executes_email_tasks_with_attachments(pool: PgPool) -> anyhow::Result<()> {
         let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
         smtp_server.start();
@@ -591,7 +591,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_executes_pending_tasks_in_batches(pool: PgPool) -> anyhow::Result<()> {
         let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
         smtp_server.start();
@@ -649,7 +649,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn sends_emails_respecting_catch_all_filter(pool: PgPool) -> anyhow::Result<()> {
         let smtp_server = MockSmtpServer::new("smtp.retrack.dev");
         smtp_server.start();
@@ -737,7 +737,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn sends_emails_respecting_wide_open_catch_all_filter(
         pool: PgPool,
     ) -> anyhow::Result<()> {
@@ -826,7 +826,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_executes_http_tasks(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let tasks_api = api.tasks();
@@ -925,7 +925,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn schedules_retry_if_http_task_execution_fails(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let tasks_api = api.tasks();
@@ -983,7 +983,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_executes_task_after_retry(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let tasks_api = api.tasks();
@@ -1024,7 +1024,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn removes_task_and_reports_error_if_all_retries_exhausted(
         pool: PgPool,
     ) -> anyhow::Result<()> {

@@ -42,7 +42,7 @@ mod tests {
     use sqlx::PgPool;
     use uuid::uuid;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn properly_sets_and_gets_job_meta(pool: PgPool) -> anyhow::Result<()> {
         let api = mock_api(pool).await?;
         let scheduler = api.scheduler();

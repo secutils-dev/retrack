@@ -57,7 +57,7 @@ mod tests {
     use sqlx::PgPool;
     use std::str::from_utf8;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_update_tracker(pool: PgPool) -> anyhow::Result<()> {
         let server_state = web::Data::new(mock_server_state(pool).await?);
         let app = init_service(
@@ -174,7 +174,7 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn fails_with_bad_request_for_invalid_params(pool: PgPool) -> anyhow::Result<()> {
         // Create tracker.
         let server_state = web::Data::new(mock_server_state(pool.clone()).await?);
