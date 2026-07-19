@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.id AS \"id!\", t.name AS \"name!\", t.enabled AS \"enabled!\", t.config AS \"config!\", t.tags AS \"tags!\", t.created_at AS \"created_at!\", t.updated_at AS \"updated_at!\", t.job_id, t.job_needed AS \"job_needed!\", to_timestamp(sj.next_tick) AS scheduled_at, to_timestamp(sj.last_tick) AS last_ran_at FROM trackers t LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id WHERE t.tags @> $1 AND ($2::text IS NULL OR t.name ILIKE ('%' || $2 || '%') ESCAPE '\\') ORDER BY lower(t.name) DESC NULLS LAST, t.id DESC LIMIT $3 OFFSET $4",
+  "query": "SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, t.job_id, t.job_needed, to_timestamp(sj.next_tick) AS scheduled_at, to_timestamp(sj.last_tick) AS last_ran_at FROM trackers t LEFT JOIN scheduler_jobs sj ON t.job_id = sj.id ORDER BY t.updated_at, t.id",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id!",
+        "name": "id",
         "type_info": "Uuid",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "name!",
+        "name": "name",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -27,7 +27,7 @@
       },
       {
         "ordinal": 2,
-        "name": "enabled!",
+        "name": "enabled",
         "type_info": "Bool",
         "origin": {
           "Table": {
@@ -38,7 +38,7 @@
       },
       {
         "ordinal": 3,
-        "name": "config!",
+        "name": "config",
         "type_info": "Bytea",
         "origin": {
           "Table": {
@@ -49,7 +49,7 @@
       },
       {
         "ordinal": 4,
-        "name": "tags!",
+        "name": "tags",
         "type_info": "TextArray",
         "origin": {
           "Table": {
@@ -60,7 +60,7 @@
       },
       {
         "ordinal": 5,
-        "name": "created_at!",
+        "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -71,7 +71,7 @@
       },
       {
         "ordinal": 6,
-        "name": "updated_at!",
+        "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -93,7 +93,7 @@
       },
       {
         "ordinal": 8,
-        "name": "job_needed!",
+        "name": "job_needed",
         "type_info": "Bool",
         "origin": {
           "Table": {
@@ -116,12 +116,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "TextArray",
-        "Text",
-        "Int8",
-        "Int8"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -137,5 +132,5 @@
       null
     ]
   },
-  "hash": "6bcb32b006640b3b2137b6777c7dc775ced2d244793191e13e0b88f4aaadc764"
+  "hash": "e43fc890ecd796d20950fd59e5c931e2b8834000934c5e885655d84dd522e46b"
 }

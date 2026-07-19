@@ -30,9 +30,8 @@ macro_rules! select_trackers {
     ($($frag:literal),+ $(; $($arg:expr),* $(,)?)?) => {
         query_as!(
             RawTracker,
-            "SELECT t.id AS \"id!\", t.name AS \"name!\", t.enabled AS \"enabled!\", \
-             t.config AS \"config!\", t.tags AS \"tags!\", t.created_at AS \"created_at!\", \
-             t.updated_at AS \"updated_at!\", t.job_id, t.job_needed AS \"job_needed!\", \
+            "SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, \
+             t.job_id, t.job_needed, \
              to_timestamp(sj.next_tick) AS scheduled_at, \
              to_timestamp(sj.last_tick) AS last_ran_at \
              FROM trackers t \
