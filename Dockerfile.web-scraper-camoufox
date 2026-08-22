@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.14-slim-trixie@sha256:aee3b1c52ce756c42ee4ad90437ae49d87fa87fc2f09c17895f098b67f081a8d
 EXPOSE 7777
 
@@ -44,16 +45,30 @@ RUN set -x \
 #      the `<version>-<build>` id — and only treats it as installed once a `version.json` marker
 #      exists in that folder. So we locate the install by `<version>-<build>` *prefix* and assert
 #      its `version.json`, instead of matching the bare id (which never matches the sha-suffixed dir).
+#
+# The browser is a ~150 MB download from the daijro release repo, so it is fetched into a
+# BuildKit cache mount rather than straight into the image: `camoufox fetch` treats an install
+# carrying a `version.json` as already present and skips the download, so any later rebuild of
+# this layer (a base image bump, an edit above) reuses the zip instead of re-downloading it on
+# whatever connection the machine has. `camoufox` resolves its cache through `platformdirs`,
+# hence `XDG_CACHE_HOME`; the fontconfig path it hardcodes to `~/.cache/camoufox` is why the
+# result is copied into the real location afterwards (cache mounts are not part of the image,
+# and runtime sets no `XDG_CACHE_HOME`).
 ARG CAMOUFOX_VERSION=152.0.4
-RUN set -eux \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/camoufox-cache,sharing=locked \
+    set -eux \
     && pip install camoufox==0.5.4 \
     && pip install playwright==1.61.0 \
     && sed -i 's/fontconfigs/fontconfig/g' /usr/local/lib/python3.14/site-packages/camoufox/utils.py \
+    && export XDG_CACHE_HOME=/camoufox-cache \
     && python -m camoufox sync \
-    && CAMOUFOX_BUILD="$(python -c "import json; d=json.load(open('/root/.cache/camoufox/repo_cache.json')); print(next((x['version']+'-'+x['build'] for r in d['repos'] if r['name']=='Official' for x in r['versions'] if x['version']=='${CAMOUFOX_VERSION}'), ''))")" \
+    && CAMOUFOX_BUILD="$(python -c "import json; d=json.load(open('/camoufox-cache/camoufox/repo_cache.json')); print(next((x['version']+'-'+x['build'] for r in d['repos'] if r['name']=='Official' for x in r['versions'] if x['version']=='${CAMOUFOX_VERSION}'), ''))")" \
     && test -n "${CAMOUFOX_BUILD}" \
     && echo "Resolved Camoufox build for ${CAMOUFOX_VERSION}: ${CAMOUFOX_BUILD}" \
     && echo y | python -m camoufox fetch "official/${CAMOUFOX_BUILD}" \
+    && mkdir -p /root/.cache \
+    && cp -a /camoufox-cache/camoufox /root/.cache/camoufox \
     && CAMOUFOX_DIR="$(find /root/.cache/camoufox/browsers/official -mindepth 1 -maxdepth 1 -type d -name "${CAMOUFOX_BUILD}*" 2>/dev/null | head -1)" \
     && test -n "${CAMOUFOX_DIR}" \
     && test -f "${CAMOUFOX_DIR}/version.json" \
