@@ -1,18 +1,19 @@
 services:
   retrack_db:
-    image: postgres:16
+    image: postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
       - POSTGRES_DB=retrack
     volumes:
-      - db_vol_retrack:/var/lib/postgresql/data
+      # PostgreSQL 18 uses a new layout and volume, preserving the PostgreSQL 16 data.
+      - db_vol_retrack_pg18:/var/lib/postgresql
     networks:
       - net
 
 volumes:
-  db_vol_retrack:
+  db_vol_retrack_pg18:
     driver: local
 
 networks:

@@ -29,17 +29,17 @@ jobs:
         rust: [ stable ]
     services:
       postgres:
-        image: postgres:latest
+        image: postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         name: Checkout
 
       - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@v3.0.0
 
       # Always install nightly toolchain for `Rustfmt`.
       - name: Install toolchain ${{ matrix.rust }}
@@ -50,7 +50,7 @@ jobs:
           rustup component add --toolchain nightly rustfmt
 
       - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: "ci-api"
           cache-all-crates: true
@@ -60,7 +60,7 @@ jobs:
 
       - name: Cache sqlx-cli
         id: cache-sqlx
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: |
             ~/.cargo/bin/sqlx
@@ -97,12 +97,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.ref }}
 
       - name: Install Protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@v3.0.0
 
       - name: Install Rust toolchain
         run: |
@@ -110,21 +110,21 @@ jobs:
           rustup override set stable
 
       - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: "ci-perf"
           cache-all-crates: true
 
-      - name: Set Node.js 24.x
-        uses: actions/setup-node@v7
+      - name: Set Node.js
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.x
+          node-version-file: '.nvmrc'
 
       - name: Run perf harness and record history
         run: make perf ANALYZE=1
 
       - name: Upload perf report JSON
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: perf-report
           path: /tmp/perf.json
@@ -143,13 +143,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         name: Checkout
 
-      - name: Set Node.js 24.x
-        uses: actions/setup-node@v7
+      - name: Set Node.js
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24.x
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
       - name: Install dependencies

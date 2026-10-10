@@ -1,8 +1,8 @@
-FROM rust:1.97-slim-trixie@sha256:34fb2f168c432d421a09883c663b275b33cbb30f6b18642fbd09a684c6546d0e AS builder
+FROM rust:1.99-slim-trixie@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581 AS builder
 WORKDIR /app
 
 ARG TARGETARCH
-ARG UPX_VERSION=5.2.0
+ARG UPX_VERSION=5.2.1
 
 # Install dependencies.
 RUN set -x && apt-get update && apt-get install -y make protobuf-compiler curl xz-utils
@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/app/target cargo build --release && \
     upx --best --lzma ./retrack
 
 # Check out https://gcr.io/distroless/cc-debian13:nonroot
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:d97bc0a941b8d4be647dc0ee75b264ddbb772f1ac5ba690a4309c00723b23775
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
 EXPOSE 7676
 
 WORKDIR /app
