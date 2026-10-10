@@ -126,8 +126,8 @@ What to watch for:
   fresh `npm ci` inside the runtime stage.
 - **Camoufox is a coupled triple.** The Camoufox wrapper (PyPI), `playwright-python`, and
   the Camoufox Firefox build ID (`python -m camoufox fetch official/<id>`) must move
-  together. The current set is the **official** `camoufox==0.5.4` (daijro) +
-  `playwright==1.61.0` + Firefox `152.0.4`, pinned via the `CAMOUFOX_VERSION` ARG in
+  together. The current set is the **official** `camoufox==0.5.8` (daijro) +
+  `playwright==1.61.0` + Firefox `156.0.1` (`v156.0.1-beta.36`), pinned via the `CAMOUFOX_VERSION` ARG in
   `Dockerfile.web-scraper-camoufox`. **Pin the version, not the full build label** — see the
   next two bullets for why.
   - **Use the official `camoufox` package, not the `cloverlabs-camoufox` fork.** The fork's
@@ -136,13 +136,17 @@ What to watch for:
     process terminated unexpectedly"). The official package resolves Playwright through the
     driver's **public `index.js` entrypoint** and calls the public `firefox.launchServer()`
     API, which is stable across current Playwright versions.
-  - **Override the official package's conservative `playwright<1.61` cap.** `pip install
-    camoufox==0.5.4` pulls `playwright 1.60.0`; the Dockerfile then runs `pip install
-    playwright==1.61.0` to match the rest of the stack. pip prints a harmless
-    dependency-conflict warning and proceeds — the private import
-    `playwright._impl._driver.compute_driver_executable` and `driver/package/index.js`
-    both resolve under 1.61. Re-check this when you bump `camoufox`: a future release may
-    drop the cap or change how it launches the server.
+  - **Install the wrapper and Playwright together.** Camoufox 0.5.8 accepts
+    `playwright<1.63`, so `pip install camoufox==0.5.8 playwright==1.61.0` resolves without overrides.
+    Run `pip check` inside the image after an upgrade.
+  - **Python 3.14 needs native build dependencies.** Camoufox 0.5.8 uses `fpgen`,
+    which requires `indexed-zstd`. Its Python 3.14 arm64 wheel is absent.
+    Install `build-essential` and `libzstd-dev` before pip, then purge them in the same layer.
+    Keep `libzstd1` as a runtime dependency.
+  - **Fontconfig support is upstream.** Camoufox 0.5.8 supports both `fontconfig/` and
+    `fontconfigs/`. The previous `sed` patch to `utils.py` is unnecessary.
+  - **The Firefox 156 archive is about 1.3 GB.** Keep the browser cache mount across builds.
+    Allow disk space for the extracted browser and Docker image export.
   - **Install `playwright-python` from PyPI** with `pip install playwright==<x.y.z>` — no
     git ref, and therefore no `git`/`curl` build deps or purge layer in the Dockerfile.
 - **The Camoufox build ID is the *asset* label, and it differs per architecture.**
@@ -181,6 +185,9 @@ What to watch for:
   unexpectedly" errors at runtime. The whole product is now on a single Playwright
   version — `playwright-core` (web-scraper, secutils-webui), `@playwright/test` (e2e), and
   `playwright-python` (camoufox) are all `1.61.0`.
+- **GitHub API rate limits can stop `camoufox sync`.** The wrapper reports each HTTP 403,
+  writes an empty cache, and exits successfully. The Dockerfile's non-empty build assertion catches this failure.
+  A browser version upgrade does not remove this API dependency. The wrapper supports `GITHUB_TOKEN` for authenticated requests.
 - **Smoke-test each image after build:** check that the entrypoint path exists
   (`components/retrack-web-scraper/src/index.js` for the scraper, `/app/camoufox_launcher.py`
   for camoufox), the language runtime version is what was requested
@@ -188,6 +195,9 @@ What to watch for:
   populated under `/root/.cache/camoufox/browsers`. The full app stack lives one level up
   in the parent `secutils` repo's `dev/docker/docker-compose.yml`; the local
   `dev/docker/docker-compose.yml` here only spins up Postgres for `make dev-up`.
+  In the parent repo, rebuild only Camoufox with `make e2e-up BUILD=1 ONLY=retrack_web_scraper_camoufox`.
+  Then run `make e2e-test ARGS="tests/page_tracker_camoufox.spec.ts"`.
+  All three tests must pass, including the Chromium control that rejects the Gecko-only feature.
 
 ### Cross-cutting reminders
 
