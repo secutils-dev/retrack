@@ -20,67 +20,67 @@ members = [
 ]
 
 [dependencies]
-actix-cors = "0.7.1"
-actix-web = "4.14.0"
-actix-web-lab = "0.26.0"
+actix-cors = "0.7.2"
+actix-web = "4.15.0"
+actix-web-lab = "0.29.5"
 anyhow = "1.0.104"
 async-stream = "0.3.6"
-byte-unit = "5.2.5"
+byte-unit = "5.2.6"
 bytes = "1.12.1"
-calamine = "0.36.0"
+calamine = "0.36.1"
 chrono = { version = "0.4.45", default-features = false }
-clap = "4.6.2"
-croner = "3.0.1"
+clap = "4.6.7"
+croner = "4.0.1"
 csv = "1.4.0"
-deno_core = "0.408.0"
+deno_core = "0.412.0"
 dotenvy = "0.15.7"
 figment = "0.10.19"
-flate2 = "1.1.9"
-futures = "0.3.33"
-handlebars = "6.4.3"
-http = "1.4.2"
-http-cache-reqwest = "1.0.0-alpha.6"
+flate2 = "1.1.10"
+futures = "0.3.34"
+handlebars = "6.4.4"
+http = "1.5.0"
+http-cache-reqwest = "1.0.0-alpha.9"
 http-serde = "2.1.1"
 humantime = "2.4.0"
 itertools = "0.15.0"
-lettre = { version = "0.11.22", default-features = false }
-mediatype = "0.21.0"
+lettre = { version = "0.11.23", default-features = false }
+mediatype = "0.23.0"
 postcard = { version = "1.1.3", default-features = false }
 regex = "1.13.1"
-reqwest = "0.13.4"
+reqwest = "0.13.5"
 reqwest-middleware = "0.5.2"
 reqwest-tracing = "0.7.1"
 retrack-types = { path = "components/retrack-types" }
-rust-embed = "8.12.0"
+rust-embed = "8.13.0"
 rustls = "0.23.42"
 serde = "1.0.229"
 serde_bytes = "0.11.19"
-serde_json = "1.0.150"
-serde_with = "3.21.0"
-similar = "3.1.1"
+serde_json = "1.0.153"
+serde_with = "3.24.0"
+similar = "3.2.0"
 sqlx = { version = "0.9.0", default-features = false }
-thiserror = "2.0.19"
-time = "0.3.53"
-tokio = "1.53.0"
+thiserror = "2.0.21"
+time = "0.3.55"
+tokio = "1.53.2"
 tokio-cron-scheduler = "0.15.1"
 tracing = "0.1.44"
-tracing-actix-web = "0.7.22"
+tracing-actix-web = "0.7.25"
 tracing-subscriber = "0.3.23"
 hickory-resolver = "0.26.1"
 url = "2.5.8"
 urlencoding = "2.1.3"
-utoipa = "5.5.0"
-utoipa-rapidoc = "6.0.0"
-uuid = "1.24.0"
+utoipa = "6.0.0"
+utoipa-rapidoc = "7.0.0"
+uuid = "1.28.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemallocator = "0.7.0"
 
 [dev-dependencies]
 httpmock = "0.8.3"
-insta = "1.48.0"
+insta = "1.49.0"
 test-log = "0.2.21"
-toml = "1.1.3"
+toml = "1.1.8"
 wg = "1.1.0"
 
 [features]
@@ -91,6 +91,7 @@ default = [
     "figment/env",
     "figment/toml",
     "handlebars/rust-embed",
+    "http-cache-reqwest/manager-cacache",
     "insta/filters",
     "insta/json",
     "insta/redactions",
@@ -142,5 +143,3 @@ panic = "abort"
 package.sqlx-macros.opt-level = 3
 package.insta.opt-level = 3
 package.similar.opt-level = 3
-
-

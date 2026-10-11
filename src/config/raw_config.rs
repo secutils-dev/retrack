@@ -93,8 +93,8 @@ mod tests {
 
         [scheduler]
         enabled = true
-        tasks_run = '0/30 * * * * *'
-        trackers_schedule = '0/10 * * * * *'
+        tasks_run = '*/30 * * * * *'
+        trackers_schedule = '*/10 * * * * *'
         [tasks.http.retry_strategy]
         type = 'exponential'
         initial_interval = 60000
@@ -156,7 +156,7 @@ mod tests {
         enabled = false
         trackers_schedule = '0 * * * * * *'
         trackers_run = '0 * * * * * *'
-        tasks_run = '0/30 * * * * * *'
+        tasks_run = '*/30 * * * * * *'
 
         [tasks.http.retry_strategy]
         type = 'exponential'
@@ -248,7 +248,7 @@ mod tests {
             },
             scheduler: SchedulerJobsConfig {
                 enabled: false,
-                tasks_run: "0/30 * * * * * *",
+                tasks_run: "*/30 * * * * * *",
                 trackers_schedule: "0 * * * * * *",
             },
             tasks: TasksConfig {

@@ -15,8 +15,8 @@ impl Default for SchedulerJobsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            tasks_run: "0/30 * * * * *".to_string(),
-            trackers_schedule: "0/10 * * * * *".to_string(),
+            tasks_run: "*/30 * * * * *".to_string(),
+            trackers_schedule: "*/10 * * * * *".to_string(),
         }
     }
 }
@@ -30,8 +30,8 @@ mod tests {
     fn serialization_and_default() {
         assert_toml_snapshot!(SchedulerJobsConfig::default(), @r###"
         enabled = true
-        tasks_run = '0/30 * * * * *'
-        trackers_schedule = '0/10 * * * * *'
+        tasks_run = '*/30 * * * * *'
+        trackers_schedule = '*/10 * * * * *'
         "###);
     }
 
@@ -40,9 +40,9 @@ mod tests {
         let config: SchedulerJobsConfig = toml::from_str(
             r#"
         enabled = true
-        trackers_schedule = '0/10 * * * * *'
-        trackers_run = '0/10 * * * * *'
-        tasks_run = '0/30 * * * * *'
+        trackers_schedule = '*/10 * * * * *'
+        trackers_run = '*/10 * * * * *'
+        tasks_run = '*/30 * * * * *'
     "#,
         )
         .unwrap();

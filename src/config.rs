@@ -168,8 +168,8 @@ pub mod tests {
             },
             scheduler: SchedulerJobsConfig {
                 enabled: true,
-                tasks_run: "0/30 * * * * *",
-                trackers_schedule: "0/10 * * * * *",
+                tasks_run: "*/30 * * * * *",
+                trackers_schedule: "*/10 * * * * *",
             },
             tasks: TasksConfig {
                 http: HttpTaskConfig {

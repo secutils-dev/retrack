@@ -3112,7 +3112,7 @@ mod tests {
                 target: target.clone(),
                 config: TrackerConfig {
                     job: Some(SchedulerJobConfig {
-                        schedule: "0/5 * * * * *".to_string(),
+                        schedule: "*/5 * * * * *".to_string(),
                         retry_strategy: None
                     }),
                     ..config.clone()
@@ -4053,7 +4053,7 @@ mod tests {
             update_and_fail(trackers.update_tracker(tracker.id, TrackerUpdateParams {
                 config: Some(TrackerConfig {
                     job: Some(SchedulerJobConfig {
-                        schedule: "0/5 * * * * *".to_string(),
+                        schedule: "*/5 * * * * *".to_string(),
                         retry_strategy: None
                     }),
                     ..tracker.config.clone()
