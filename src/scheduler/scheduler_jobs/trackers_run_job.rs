@@ -463,6 +463,7 @@ mod tests {
     use super::TrackersRunJob;
     use crate::{
         config::{SmtpConfig, TrackersConfig},
+        database::Database,
         scheduler::{SchedulerJob, SchedulerJobMetadata},
         tasks::{EmailContent, EmailTaskType, EmailTemplate, TaskType},
         tests::{
@@ -489,6 +490,17 @@ mod tests {
     use test_log::test;
     use time::OffsetDateTime;
     use uuid::{Uuid, uuid};
+
+    async fn wait_for_job_removal(db: &Database, job_id: Uuid) -> anyhow::Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while mock_get_scheduler_job(db, job_id).await?.is_some() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            anyhow::Ok(())
+        })
+        .await??;
+        Ok(())
+    }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn can_create_job_with_correct_parameters(pool: PgPool) -> anyhow::Result<()> {
@@ -1025,11 +1037,11 @@ mod tests {
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
-        while trackers.get_tracker_by_job_id(job_id).await?.is_some() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        // Clearing the tracker link precedes asynchronous deletion of the job row.
+        wait_for_job_removal(&api.db, job_id).await?;
         scheduler.shutdown().await?;
 
+        assert!(trackers.get_tracker_by_job_id(job_id).await?.is_none());
         assert!(mock_get_scheduler_job(&api.db, job_id).await?.is_none());
 
         Ok(())
@@ -1071,11 +1083,10 @@ mod tests {
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
-        while trackers.get_tracker_by_job_id(job_id).await?.is_some() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        wait_for_job_removal(&api.db, job_id).await?;
         scheduler.shutdown().await?;
 
+        assert!(trackers.get_tracker_by_job_id(job_id).await?.is_none());
         assert!(mock_get_scheduler_job(&api.db, job_id).await?.is_none());
 
         Ok(())
@@ -1117,11 +1128,10 @@ mod tests {
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
-        while trackers.get_tracker_by_job_id(job_id).await?.is_some() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        wait_for_job_removal(&api.db, job_id).await?;
         scheduler.shutdown().await?;
 
+        assert!(trackers.get_tracker_by_job_id(job_id).await?.is_none());
         assert!(mock_get_scheduler_job(&api.db, job_id).await?.is_none());
 
         Ok(())
@@ -1157,11 +1167,10 @@ mod tests {
 
         // Start scheduler and wait for a few seconds, then stop it.
         scheduler.start().await?;
-        while trackers.get_tracker_by_job_id(job_id).await?.is_some() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        wait_for_job_removal(&api.db, job_id).await?;
         scheduler.shutdown().await?;
 
+        assert!(trackers.get_tracker_by_job_id(job_id).await?.is_none());
         assert!(mock_get_scheduler_job(&api.db, job_id).await?.is_none());
 
         Ok(())
