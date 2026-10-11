@@ -49,8 +49,7 @@ COPY --from=builder ["/app/components/retrack-web-scraper/dist/", "./components/
 # revision number. Post-install cleanup: remove headless-shell, ffmpeg, all but
 # en-US locale.
 RUN set -x && npm ci --omit=dev --workspace=retrack-web-scraper --include-workspace-root=false && \
-    PLAYWRIGHT_CLI=$(node -p "require('node:path').join(require.resolve('playwright-core/package.json', { paths: ['./components/retrack-web-scraper'] }), '../cli.js')") && \
-    node "$PLAYWRIGHT_CLI" install chromium && \
+    npm exec --workspace=retrack-web-scraper --no -- playwright-core install chromium && \
     rm -rf /ms-playwright/chromium_headless_shell-* && \
     rm -rf /ms-playwright/ffmpeg-* && \
     find /ms-playwright -path '*/locales/*' ! -name 'en-US.pak' -delete && \
