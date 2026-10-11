@@ -41,3 +41,7 @@ If a required check is blocked, report the command and blocker as incomplete ver
 
 When a commit is requested, use conventional commits: `chore(deps)` for dependencies and `chore(docker)` for image pins.
 Inspect the local hooks for their actual wiring.
+
+Before pushing, fetch the target remote and rebase unpublished commits onto its latest branch.
+If upstream advances during verification, repeat the fetch and rebase before retrying the push.
+For Secutils integration, record the final rebased SHA in its submodule pointer.
