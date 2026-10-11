@@ -25,7 +25,7 @@ RUN set -x \
 # fork. The fork's `launchServer.js` still does `require(${cwd}/lib/browserServerImpl.js)`,
 # a driver internal that playwright 1.60 removed, so it crash-loops on playwright >= 1.60.
 # The official package resolves Playwright through the driver's public `index.js` entrypoint
-# and calls the public `firefox.launchServer()` API. Camoufox 0.5.8 supports Playwright 1.61,
+# and calls the public `firefox.launchServer()` API. Camoufox 0.5.8 supports Playwright 1.62,
 # so both packages can be installed together, matching the rest of the stack
 # (scraper / webui playwright-core, e2e @playwright/test).
 # fpgen's indexed-zstd dependency needs a native build on Python 3.14 arm64.
@@ -54,6 +54,7 @@ RUN set -x \
 # hence `XDG_CACHE_HOME`. Copy the result into the runtime cache afterwards:
 # cache mounts are not part of the image, and runtime sets no `XDG_CACHE_HOME`.
 ARG CAMOUFOX_VERSION=156.0.1
+ARG CAMOUFOX_BUILD_LABEL=beta.37
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/camoufox-cache,sharing=locked \
     set -eux \
@@ -64,12 +65,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && rm -rf /var/lib/apt/lists/* \
     && export XDG_CACHE_HOME=/camoufox-cache \
     && python -m camoufox sync \
-    && CAMOUFOX_BUILD="$(python -c "import json; d=json.load(open('/camoufox-cache/camoufox/repo_cache.json')); print(next((x['version']+'-'+x['build'] for r in d['repos'] if r['name']=='Official' for x in r['versions'] if x['version']=='${CAMOUFOX_VERSION}'), ''))")" \
+    && CAMOUFOX_BUILD="$(python -c "import json; d=json.load(open('/camoufox-cache/camoufox/repo_cache.json')); print(next((x['version']+'-'+x['build'] for r in d['repos'] if r['name']=='Official' for x in r['versions'] if x['version']=='${CAMOUFOX_VERSION}' and x['build']=='${CAMOUFOX_BUILD_LABEL}'), ''))")" \
     && test -n "${CAMOUFOX_BUILD}" \
     && echo "Resolved Camoufox build for ${CAMOUFOX_VERSION}: ${CAMOUFOX_BUILD}" \
     && echo y | python -m camoufox fetch "official/${CAMOUFOX_BUILD}" \
-    && mkdir -p /root/.cache \
-    && cp -a /camoufox-cache/camoufox /root/.cache/camoufox \
+    && python -m camoufox set "official/prerelease/${CAMOUFOX_BUILD}" \
+    && mkdir -p /root/.cache/camoufox \
+    && cp -a /camoufox-cache/camoufox/. /root/.cache/camoufox/ \
     && CAMOUFOX_DIR="$(find /root/.cache/camoufox/browsers/official -mindepth 1 -maxdepth 1 -type d -name "${CAMOUFOX_BUILD}*" 2>/dev/null | head -1)" \
     && test -n "${CAMOUFOX_DIR}" \
     && test -f "${CAMOUFOX_DIR}/version.json" \

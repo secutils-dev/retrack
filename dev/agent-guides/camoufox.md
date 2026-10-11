@@ -23,11 +23,14 @@ Purge build dependencies in the same layer and retain runtime `libzstd1`.
 ## Browser resolution and cache
 
 Pin the Firefox version in `CAMOUFOX_VERSION`, rather than a full release/build label.
+For a requested release whose asset labels match across architectures, also pin `CAMOUFOX_BUILD_LABEL`.
 Resolve its build from the platform-filtered `repo_cache.json` after `camoufox sync`.
 Release tags and asset labels can differ. Asset labels can also differ between arm64 and amd64.
 A full label that works locally can therefore fail CI's other architecture.
 
 Resolve the pinned version explicitly rather than using `official/stable`.
+After fetching, select it with `camoufox set official/prerelease/<version>-<build>` for prereleases.
+Verify `camoufox active` inside the runtime image matches the requested build.
 The sync cache deduplicates build labels, so an older version can disappear when a newer release reuses its label.
 Label sorting can also rank an older beta above a newer alpha.
 
