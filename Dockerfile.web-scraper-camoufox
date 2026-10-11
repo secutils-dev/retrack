@@ -59,7 +59,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     set -eux \
     && apt-get update \
     && apt-get install -y --no-install-recommends build-essential libzstd-dev libzstd1 \
-    && pip install camoufox==0.5.8 playwright==1.61.0 \
+    && pip install camoufox==0.5.8 playwright==1.62.0 \
     && apt-get purge -y --auto-remove build-essential libzstd-dev \
     && rm -rf /var/lib/apt/lists/* \
     && export XDG_CACHE_HOME=/camoufox-cache \
