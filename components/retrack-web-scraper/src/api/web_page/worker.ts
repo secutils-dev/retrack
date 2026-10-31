@@ -1,13 +1,11 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import { register } from 'node:module';
-import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { registerHooks } from 'node:module';
 import type { Browser, Locator, LocatorScreenshotOptions, Page, PageScreenshotOptions } from 'playwright-core';
-import type { ExtractorSandboxConfig } from '../../config.js';
 
 import { Diagnostics } from '../diagnostics.js';
 import type { WorkerData } from './constants.js';
 import { MAX_DEBUG_SCREENSHOTS_COUNT, WorkerMessageType } from './constants.js';
+import { createExtractorResolveHook } from './extractor_module_hooks.js';
 
 // We need a parent port to communicate the errors and result of an extractor
 // script to the main thread.
@@ -57,9 +55,7 @@ for (const Class of [
 
 // SECURITY: We load custom hooks to prevent extractor scripts from importing sensitive native and playwright modules.
 // See https://github.com/nodejs/node/issues/47747 for more details.
-register<ExtractorSandboxConfig>(resolve(import.meta.dirname, './extractor_module_hooks.js'), pathToFileURL('./'), {
-  data: extractorSandboxConfig,
-});
+registerHooks({ resolve: createExtractorResolveHook(extractorSandboxConfig) });
 const extractorModule = (await import(`data:text/javascript,${encodeURIComponent(extractor)}`)) as {
   execute: (page: Page, context: { tags: string[]; params?: unknown; previousContent?: unknown }) => Promise<unknown>;
 };

@@ -232,7 +232,7 @@ export function registerExecuteRoutes({ config, server, getLocalBrowserServer }:
           });
 
           worker.on('error', async (err) => {
-            errorResult = err;
+            errorResult = err instanceof Error ? err : new Error(String(err));
             void worker.terminate();
           });
 

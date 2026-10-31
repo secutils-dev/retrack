@@ -18,7 +18,7 @@ and triggers actions (server log, email, webhook) when content changes.
 ## Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain)
-- [Node.js](https://nodejs.org/) 22+ (see `.nvmrc`)
+- [Node.js](https://nodejs.org/) 26+ (see `.nvmrc`)
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 - [sqlx-cli](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli) (for database management)
 
