@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:24.21.0-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66 AS builder
+FROM --platform=$BUILDPLATFORM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS builder
 WORKDIR /app
 
 # Copy workspace root `package.json` and `package-lock.json` files,
@@ -12,7 +12,7 @@ COPY ["./components/retrack-web-scraper", "./components/retrack-web-scraper"]
 RUN set -x && npm test --ws
 RUN set -x && npm run build --ws
 
-FROM node:24.21.0-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
+FROM node:26.13.0-trixie-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39
 ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     RETRACK_WEB_SCRAPER_BROWSER_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium

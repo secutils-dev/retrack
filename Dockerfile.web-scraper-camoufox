@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
+FROM python:3.14.10-slim-trixie@sha256:3cabfd7d7aaf394e6040e79fa1eec6ca1c52b74ed9188650472695d9a9326999
 EXPOSE 7777
 
 ENV CAMOUFOX_PORT=7777
@@ -25,9 +25,9 @@ RUN set -x \
 # fork. The fork's `launchServer.js` still does `require(${cwd}/lib/browserServerImpl.js)`,
 # a driver internal that playwright 1.60 removed, so it crash-loops on playwright >= 1.60.
 # The official package resolves Playwright through the driver's public `index.js` entrypoint
-# and calls the public `firefox.launchServer()` API. Camoufox 0.5.8 supports Playwright 1.62,
-# so both packages can be installed together, matching the rest of the stack
-# (scraper / webui playwright-core, e2e @playwright/test).
+# and calls the public `firefox.launchServer()` API. Camoufox 0.5.9b6 requires playwright<1.63.
+# The Playwright server rejects clients from another minor (HTTP 428), so the scraper's
+# `playwright-core` must stay on the same minor as this image.
 # fpgen's indexed-zstd dependency needs a native build on Python 3.14 arm64.
 # Remove the build tools after pip install, keeping libzstd1 for the runtime.
 #
@@ -53,14 +53,14 @@ RUN set -x \
 # whatever connection the machine has. `camoufox` resolves its cache through `platformdirs`,
 # hence `XDG_CACHE_HOME`. Copy the result into the runtime cache afterwards:
 # cache mounts are not part of the image, and runtime sets no `XDG_CACHE_HOME`.
-ARG CAMOUFOX_VERSION=156.0.1
-ARG CAMOUFOX_BUILD_LABEL=beta.37
+ARG CAMOUFOX_VERSION=158.0.1
+ARG CAMOUFOX_BUILD_LABEL=beta.41
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/camoufox-cache,sharing=locked \
     set -eux \
     && apt-get update \
     && apt-get install -y --no-install-recommends build-essential libzstd-dev libzstd1 \
-    && pip install camoufox==0.5.8 playwright==1.62.0 \
+    && pip install camoufox==0.5.9b6 playwright==1.62.0 \
     && apt-get purge -y --auto-remove build-essential libzstd-dev \
     && rm -rf /var/lib/apt/lists/* \
     && export XDG_CACHE_HOME=/camoufox-cache \

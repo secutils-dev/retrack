@@ -9,7 +9,8 @@ Read actual package and browser pins from the Dockerfile.
 Treat the official PyPI `camoufox` wrapper, PyPI `playwright`, and Firefox `CAMOUFOX_VERSION` as a compatibility set.
 Inspect the wrapper's Playwright requirement before the upgrade.
 Install both Python packages together and run `pip check` inside the image.
-For Secutils integration, match the Node-side Playwright minor in scraper, Web UI, and E2E.
+Pin scraper `playwright-core` to the same minor as PyPI `playwright`.
+The Camoufox Playwright server rejects a client from another minor with HTTP 428.
 
 Use the official `camoufox` package and Playwright's public driver entrypoint.
 The `cloverlabs-camoufox` fork requires the removed `lib/browserServerImpl.js` internal and can crash with `MODULE_NOT_FOUND`.

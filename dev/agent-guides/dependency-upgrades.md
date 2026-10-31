@@ -55,8 +55,8 @@ npm run build --ws --if-present
 Update root and `components/retrack-web-scraper/package.json` dependencies.
 Run the same workspace gate as stage 2 from the Retrack root.
 
-Pin scraper `playwright-core` exactly.
-For Secutils integration, inspect Web UI/E2E/Camoufox pins and keep all four consumers on the same minor.
+Pin scraper `playwright-core` exactly, on the minor of Camoufox's PyPI `playwright` ([Camoufox](camoufox.md)).
+The `camoufox` wrapper's `playwright` cap therefore also caps the scraper.
 Record the selected version for the parent upgrade stages. Match patches where compatible.
 After `@commitlint/*` upgrades, run `npx commitlint --from HEAD~1` to exercise the existing configuration.
 
