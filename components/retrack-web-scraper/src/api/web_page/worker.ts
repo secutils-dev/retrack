@@ -218,6 +218,10 @@ if (isDebug) {
   tracedPage = page;
 }
 
+// SECURITY: Playwright lazily loads a bundled Hono server that polyfills `globalThis.crypto` with the full
+// `node:crypto` module, so strip it again once the browser, context, and page are set up.
+delete (globalThis as { crypto?: unknown }).crypto;
+
 try {
   parentPort?.postMessage({
     type: WorkerMessageType.RESULT,

@@ -304,6 +304,19 @@ export async function execute() {
   assert.strictEqual(response.statusCode, 500);
 });
 
+await test('[/api/web_page/execute] hides global crypto from extractor scripts', async (t) => {
+  t.mock.method(Date, 'now', () => 123000);
+
+  const response = await registerExecuteRoutes(createMock({ wsEndpoint: browserServerMock.endpoint })).inject({
+    method: 'POST',
+    url: '/api/web_page/execute',
+    payload: { extractor: `export async function execute() { return typeof globalThis.crypto; };`, tags: [] },
+  });
+
+  assert.strictEqual(response.body, JSON.stringify({ result: 'undefined' }));
+  assert.strictEqual(response.statusCode, 200);
+});
+
 await test('[/api/web_page/execute] protects runtime from most common prototype pollution cases', async (t) => {
   t.mock.method(Date, 'now', () => 123000);
 
