@@ -77,7 +77,7 @@ pub mod tests {
     use regex::bytes::Regex;
     use std::{
         collections::HashSet,
-        io::{Read, Write},
+        io::{BufRead, BufReader, Write},
         net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream},
         sync::{Arc, Mutex},
         time::Duration,
@@ -163,7 +163,6 @@ pub mod tests {
         wg: WaitGroup,
         re_sep: Regex,
         re_mail_user: Regex,
-        re_body: Regex,
     }
 
     impl MockSmtpServer {
@@ -182,7 +181,6 @@ pub mod tests {
                 wg: WaitGroup::new(),
                 re_sep: Regex::new(r"( |\r\n)").unwrap(),
                 re_mail_user: Regex::new(r".*<(.*?)>").unwrap(),
-                re_body: Regex::new(r"(?s)(.*?)(\r\n\.\r\n|\z)").unwrap(),
             }
         }
 
@@ -217,10 +215,19 @@ pub mod tests {
                 error!("Failed to send READY to {socket}: {e}");
             }
 
-            let mut buffer = vec![0; 2048];
+            // TCP reads do not preserve SMTP command or DATA boundaries.
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut buffer = Vec::new();
             let mut client_state = ClientState::new();
 
-            while let Ok(size) = stream.read(&mut buffer) {
+            loop {
+                buffer.clear();
+                let Ok(size) = reader.read_until(b'\n', &mut buffer) else {
+                    break;
+                };
+                if size == 0 {
+                    break;
+                }
                 let data = &buffer[..size];
                 if let Ok(data_str) = std::str::from_utf8(data) {
                     info!("{socket} sent: {data_str}");
@@ -251,26 +258,15 @@ pub mod tests {
             }
 
             if client_state.mail_transaction.is_receiving_data {
-                let captures = self.re_body.captures(data).unwrap();
-                let body = captures.get(1).unwrap().as_bytes();
-                let mut i = 0;
-                while i < body.len() {
-                    if i + 3 < body.len() && body[i..i + 4] == *b"\r\n.." {
-                        client_state.mail_transaction.body.extend(b"\r\n.");
-                        i += 4;
-                    } else {
-                        client_state.mail_transaction.body.push(body[i]);
-                        i += 1;
-                    }
-                }
-                if captures.get(2).unwrap().as_bytes() == b"\r\n.\r\n" {
+                if let Some(content) = client_state.mail_transaction.receive_data_line(data) {
                     self.mails.lock().unwrap().push(Mail {
-                        content: client_state.mail_transaction.body.to_owned(),
+                        content,
                         timestamp: OffsetDateTime::now_utc(),
                     });
                     client_state.mail_transaction.reset();
+                    // DATA has exactly one reply, after its complete terminator.
+                    stream.write_all(OK)?;
                 }
-                stream.write_all(OK)?;
                 return Ok(stream);
             }
 
@@ -451,6 +447,21 @@ pub mod tests {
     }
 
     impl MailTransaction {
+        /// Accumulates complete SMTP lines and removes dot-stuffing. The returned message excludes
+        /// the final CRLF belonging to the DATA terminator, as in the existing fixture contract.
+        fn receive_data_line(&mut self, line: &[u8]) -> Option<Vec<u8>> {
+            if line == b".\r\n" {
+                self.body.truncate(self.body.len().saturating_sub(2));
+                return Some(std::mem::take(&mut self.body));
+            }
+            self.body.extend_from_slice(if line.starts_with(b"..") {
+                &line[1..]
+            } else {
+                line
+            });
+            None
+        }
+
         fn new() -> Self {
             Self {
                 sender: None,
@@ -465,6 +476,24 @@ pub mod tests {
             self.body.clear();
             self.is_receiving_data = false;
         }
+    }
+
+    #[test]
+    fn mock_smtp_data_waits_for_terminator_and_unstuffs_dots() {
+        let mut transaction = MailTransaction::new();
+        for line in [
+            b"Subject: test\r\n".as_slice(),
+            b"\r\n",
+            b"..first\r\n",
+            b"last\r\n",
+        ] {
+            assert!(transaction.receive_data_line(line).is_none());
+        }
+        assert_eq!(
+            transaction.receive_data_line(b".\r\n"),
+            Some(b"Subject: test\r\n\r\n.first\r\nlast".to_vec())
+        );
+        assert!(transaction.body.is_empty());
     }
 
     #[derive(Clone)]

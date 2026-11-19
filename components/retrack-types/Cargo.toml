@@ -15,7 +15,7 @@ serde_with = "3.24"
 time = "0.3"
 url = "2.5"
 utoipa = "6.0"
-uuid = "1.28"
+uuid = "1.29"
 
 [dev-dependencies]
 anyhow = "1.0.104"

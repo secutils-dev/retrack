@@ -25,13 +25,15 @@ use uuid::Uuid;
 /// after the projection, optionally followed by `;` and the bind arguments. Everything is joined
 /// with `+` into a single string literal so `query_as!` keeps validating the query at compile time
 /// (`query_as!` matches columns to `RawTracker` fields by name, so the projection order is fixed in
-/// one place here).
+/// one place here). Explicit non-null aliases preserve the tracker table's `NOT NULL` contract
+/// when SQLx conservatively infers nullability from the scheduler outer join's query plan.
 macro_rules! select_trackers {
     ($($frag:literal),+ $(; $($arg:expr),* $(,)?)?) => {
         query_as!(
             RawTracker,
-            "SELECT t.id, t.name, t.enabled, t.config, t.tags, t.created_at, t.updated_at, \
-             t.job_id, t.job_needed, \
+            "SELECT t.id AS \"id!\", t.name AS \"name!\", t.enabled AS \"enabled!\", \
+             t.config AS \"config!\", t.tags AS \"tags!\", t.created_at AS \"created_at!\", \
+             t.updated_at AS \"updated_at!\", t.job_id, t.job_needed AS \"job_needed!\", \
              to_timestamp(sj.next_tick) AS scheduled_at, \
              to_timestamp(sj.last_tick) AS last_ran_at \
              FROM trackers t \
