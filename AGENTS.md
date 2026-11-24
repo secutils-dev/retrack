@@ -10,6 +10,7 @@ Read each applicable guide before changes to its surface.
 | Trigger                                                                         | Read                                                                               |
 |---------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
 | Rust/NPM dependencies, Node versions, or Docker base-image upgrades             | [dev/agent-guides/dependency-upgrades.md](dev/agent-guides/dependency-upgrades.md) |
+| GitHub Actions workflow additions, removals, or changes to action references   | [Dependency upgrades: GitHub Actions](dev/agent-guides/dependency-upgrades.md#github-actions) |
 | Camoufox versions, its image/launcher, or Firefox installation/runtime failures | [dev/agent-guides/camoufox.md](dev/agent-guides/camoufox.md)                       |
 | JS runtime benchmarks, scenario changes, or performance analysis/history        | [dev/agent-guides/performance.md](dev/agent-guides/performance.md)                 |
 

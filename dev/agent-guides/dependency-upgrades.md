@@ -82,6 +82,23 @@ The scraper entrypoint is `components/retrack-web-scraper/src/index.js`.
 Camoufox's entrypoint is `/app/camoufox_launcher.py` and also requires a usable browser cache.
 Complete the Camoufox integration gate when that image changes.
 
+## GitHub Actions
+
+When you add or remove a workflow or change an action reference (`uses:`), regenerate the lockfile.
+Use the extension install command in `.github/workflows/verify-lockfile.yml` for the pinned version.
+Run these commands from the repository root:
+
+```bash
+gh actions-lock
+gh actions-lock --verify
+```
+
+Include the generated `.github/workflows/actions.lock` with the workflow changes.
+Do not edit the lockfile by hand.
+
+Dependabot regenerates the lockfile for its action updates.
+Review the resolved commits in every lockfile diff, including Dependabot pull requests.
+
 ## Scraper workspace layout
 
 Preserve `/app` workspace structure in the scraper runtime image.
